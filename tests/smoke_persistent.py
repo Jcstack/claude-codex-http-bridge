@@ -15,9 +15,11 @@ import launcher  # noqa: E402
 
 bridge_models.verify_install()
 runtime, state, created = launcher.ensure_service(require_catalog=False)
-assert created and launcher.state_is_live(runtime, state)
-runtime_again, state_again, created_again = launcher.ensure_service(require_catalog=False)
-assert not created_again and runtime_again == runtime and state_again == state
-assert launcher.bridge_stop() == 0
+try:
+    assert created and launcher.state_is_live(runtime, state)
+    runtime_again, state_again, created_again = launcher.ensure_service(require_catalog=False)
+    assert not created_again and runtime_again == runtime and state_again == state
+finally:
+    assert launcher.bridge_stop() == 0
 assert not (runtime / "service.json").exists()
 print("Persistent bridge start, reuse, and stop: PASS")
