@@ -69,7 +69,8 @@ def verify(paths: list[Path], protected: bool = False) -> None:
         for entry in entries:
             fields = entry.split(";")
             if len(fields) != 6 or fields[0] != "A" or fields[-1] != sid:
-                raise RuntimeError("Windows runtime ACL grants another identity access")
+                detail = f" ({fields})" if os.environ.get("CLAUDE_CODEX_DEBUG_ACL") == "1" else ""
+                raise RuntimeError("Windows runtime ACL grants another identity access" + detail)
 
 
 def lock(paths: list[Path]) -> None:
