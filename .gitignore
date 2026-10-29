@@ -3,6 +3,8 @@
 !.gitignore
 !README.md
 !COMPATIBILITY.md
+!CAPABILITY_AUDIT.md
+!BROWSER.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -10,6 +12,7 @@
 !install.sh
 !launcher.py
 !statusline_adapter.py
+!codex_usage.py
 !run-claude-codex.sh
 !bridge_models.py
 !windows_acl.py

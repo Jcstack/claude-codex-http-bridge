@@ -16,6 +16,7 @@ import hashlib
 import subprocess
 
 import bridge_models
+import codex_usage
 import install
 import launcher
 import statusline_adapter
@@ -158,6 +159,7 @@ class BridgeTests(unittest.TestCase):
             ("claude", "gpt-6.1-sol", ["--effort", "max"]),
         )
         self.assertEqual(launcher.parse_args(["models"]), ("models", "", []))
+        self.assertEqual(launcher.parse_args(["usage"]), ("usage", "", []))
         self.assertEqual(launcher.parse_args(["--background"]), ("claude", "sol", ["--background"]))
         self.assertEqual(launcher.parse_args(["bridge", "stop"]), ("bridge-stop", "", []))
 
@@ -191,6 +193,41 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(switched["context_window"]["context_window_size"], 272_000)
         self.assertEqual(switched["context_window"]["used_percentage"], 42)
 
+    def test_codex_quota_maps_only_real_windows_and_requires_matching_account(self) -> None:
+        response = {"rateLimitsByLimitId": {"codex": {
+            "primary": {"windowDurationMins": 10080, "usedPercent": 55, "resetsAt": 1793774315},
+            "secondary": {"windowDurationMins": 300, "usedPercent": 18.5, "resetsAt": 1793200000},
+        }}}
+        windows = codex_usage.windows_from_response(response)
+        self.assertEqual(windows["seven_day"]["used_percentage"], 55)
+        self.assertEqual(windows["five_hour"]["used_percentage"], 18.5)
+        response["rateLimitsByLimitId"]["codex"]["secondary"]["windowDurationMins"] = 60
+        self.assertNotIn("five_hour", codex_usage.windows_from_response(response))
+        payload = {"model": {"id": "gpt-6.1-sol"}, "rate_limits": {"five_hour": {"used_percentage": 90}}}
+        corrected = statusline_adapter.corrected_payload(payload, {"gpt-6.1-sol": 500_000}, windows)
+        self.assertEqual(corrected["rate_limits"], windows)
+        unknown = statusline_adapter.corrected_payload({"model": {"id": "new-route"},
+            "context_window": {"context_window_size": 1_000_000},
+            "cost": {"total_cost_usd": 9}, "rate_limits": {"seven_day": {"used_percentage": 90}}}, {})
+        self.assertNotIn("context_window_size", unknown["context_window"])
+        self.assertNotIn("total_cost_usd", unknown["cost"])
+        self.assertNotIn("rate_limits", unknown)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "auth").mkdir(mode=0o700)
+            codex_home = root / "codex"
+            codex_home.mkdir(mode=0o700)
+            bridge_file = root / "auth" / "account.json"
+            native_file = codex_home / "auth.json"
+            bridge_file.write_text(json.dumps({"account_id": "account-a"}))
+            native_file.write_text(json.dumps({"tokens": {"account_id": "account-b"}}))
+            bridge_file.chmod(0o600)
+            native_file.chmod(0o600)
+            with patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
+                self.assertIsNone(codex_usage.matching_account_id(root))
+                bridge_file.write_text(json.dumps({"account_id": "account-b"}))
+                self.assertEqual(codex_usage.matching_account_id(root), "account-b")
+
     def test_session_settings_wraps_statusline_without_changing_user_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -211,6 +248,7 @@ class BridgeTests(unittest.TestCase):
             self.assertIn(" | echo HUD", result["statusLine"]["command"])
             self.assertEqual(result["statusLine"]["refreshInterval"], 30)
             self.assertEqual(json.loads(files[0].read_text())["context_windows"], {"gpt-6.1-sol": 500_000})
+            self.assertEqual(json.loads(files[0].read_text())["usage_cache"], str(root / "codex-usage.json"))
             self.assertEqual(json.loads(user_settings.read_text())["statusLine"]["command"], "echo HUD")
 
     def test_launcher_waits_for_async_model_registration(self) -> None:

@@ -27,10 +27,11 @@ HELPER = ROOT / "bridge_models.py"
 def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
     if arguments and arguments[0] == "--help":
         return "help", "", []
-    if arguments and arguments[0] in ("codex-login", "models", "--list-models"):
+    if arguments and arguments[0] in ("codex-login", "models", "--list-models", "usage"):
         if len(arguments) != 1:
             raise ValueError(f"{arguments[0]} does not take arguments")
-        return ("login" if arguments[0] == "codex-login" else "models"), "", []
+        return ("login" if arguments[0] == "codex-login" else
+                "usage" if arguments[0] == "usage" else "models"), "", []
     if arguments and arguments[0] == "bridge":
         if len(arguments) != 2 or arguments[1] not in ("start", "status", "stop"):
             raise ValueError("Usage: claude-codex bridge start | status | stop")
@@ -183,7 +184,8 @@ def session_settings(base: Path, windows: dict[str, int], directory: Path) -> tu
         return base, []
     profile_path = directory / "statusline-profile.json"
     settings_path = directory / "settings.json"
-    private_json(profile_path, {"context_windows": windows})
+    private_json(profile_path, {"context_windows": windows,
+                                "usage_cache": str(directory.parent / "codex-usage.json")})
     if platform.system() == "Windows":
         python_command = "py -3" if shutil.which("py") else "python"
         command = f'{python_command} "{(ROOT / "statusline_adapter.py").as_posix()}" "{profile_path.as_posix()}"'
@@ -417,6 +419,9 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str) -
         import windows_acl
         windows_acl.lock([directory])
     settings_path, _ = session_settings(Path(settings), json.loads(catalog_json), directory)
+    if settings_path != Path(settings):
+        import codex_usage
+        codex_usage.start_refresh(runtime / "codex-usage.json")
     _, _, key_path, _ = state_paths(runtime, state)
     claude_environment_values = claude_environment(state["port"], key_path.read_text().strip(), model)
     print(
@@ -449,10 +454,14 @@ def main() -> int:
     if mode == "help":
         print("Usage: claude-codex [--model MODEL_ID|sol|astra|terra|luna] [Claude Code options]")
         print("Run claude-codex codex-login once. Run claude-codex models for live model IDs.")
+        print("Run claude-codex usage for live Codex subscription quota if native Codex uses the same account.")
         print("Run claude-codex bridge start | status | stop to manage the private localhost service.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
         return 0
     helper_output("verify")
+    if mode == "usage":
+        import codex_usage
+        return codex_usage.main()
     if mode == "bridge-status":
         return bridge_status()
     if mode == "bridge-stop":

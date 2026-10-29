@@ -19,6 +19,7 @@ macOS、Linux、WSL：
 ./install.sh
 claude-codex codex-login
 claude-codex models
+claude-codex usage
 claude-codex --model gpt-6.1-sol
 ```
 
@@ -29,6 +30,7 @@ py -3 .\install.py
 # 关闭并重新打开终端后：
 claude-codex codex-login
 claude-codex models
+claude-codex usage
 claude-codex --model gpt-6.1-sol
 ```
 
@@ -41,6 +43,7 @@ claude-codex --model gpt-6.1-sol
 - Claude Code installed and on `PATH` (verified with Claude Code 2.1.312)
 - Python 3.10+; on macOS/Linux/WSL, `bash` and `lsof`
 - A ChatGPT account with Codex model access
+- Optional for accurate HUD subscription quota: native Codex CLI signed into the same single ChatGPT account as the bridge
 
 ## Install
 
@@ -49,6 +52,7 @@ macOS/Linux/WSL: run `./install.sh`. Native Windows: run `py -3 .\install.py` in
 ```text
 claude-codex codex-login
 claude-codex models
+claude-codex usage
 ```
 
 The installer downloads the pinned [CLIProxyAPI v8.0.46 release](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.46), verifies its published SHA-256 digest, and saves it under `~/.local/share/claude-codex-http-bridge/` on macOS/Linux or `%LOCALAPPDATA%\claude-codex-http-bridge\` on Windows. It generates a random local key and a private config on your own machine. `codex-login` opens the OAuth flow and stores the resulting credential only in the installation's private `auth/` directory. The Windows installer adds its private `bin` directory to the current user's PATH; open a new terminal to use the command.
@@ -80,7 +84,7 @@ An API model's published maximum can differ from the context advertised by this 
 
 ### Claude HUD and other status-line plugins
 
-The launcher reads the existing user `statusLine.command` and passes Claude Code a private per-launch settings file that runs that same command through `statusline_adapter.py`. The adapter corrects the context size and percentage for the **current** Codex model, including after `/model` switches. It removes Claude-list-price dollars, Anthropic prompt-cache timers, and Anthropic rate-limit fields from the plugin input because they do not describe this Codex route. Other status-line fields and the user's original command are preserved; the user's settings file is not changed. The per-launch file remains available to detached background sessions and is removed by `claude-codex bridge stop`. Set `CLAUDE_CODEX_STATUSLINE_ADAPTER=0` before launch to disable the adapter.
+The launcher reads the existing user `statusLine.command` and passes Claude Code a private per-launch settings file that runs that same command through `statusline_adapter.py`. The adapter corrects the context size and percentage for the **current** Codex model, including after `/model` switches. It removes Claude-list-price dollars, Anthropic prompt-cache timers, and Anthropic rate-limit fields because they do not describe this Codex route. When native Codex CLI is installed and signed into the **same single ChatGPT account** as the bridge, it uses the official `account/rateLimits/read` RPC to supply actual Codex 5-hour and/or weekly windows to HUD. It never invents a window that the account does not report. A private local cache holds only percentages, reset times, and an account fingerprint for five minutes. Other status-line fields and the user's original command are preserved; the user's settings file is not changed. The per-launch file remains available to detached background sessions and is removed by `claude-codex bridge stop`. Set `CLAUDE_CODEX_STATUSLINE_ADAPTER=0` before launch to disable the adapter. Run `claude-codex usage` to see exactly which windows your account reports.
 
 Plain `claude` remains separate and uses its ordinary provider settings. `claude-codex models` is a catalog listing, not an entitlement guarantee; a completed inference request confirms access to a selected model.
 
@@ -102,6 +106,8 @@ The localhost proxy starts on first use and is reused by later `claude-codex` se
 See [SECURITY.md](SECURITY.md) for credential-handling rules.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) for the Claude Code feature matrix, Claude HUD behavior, current route limits, and a source-backed model comparison.
+
+See [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md) for the broader local-harness, model-route, provider, plugin, Windows, and community-project audit. [BROWSER.md](BROWSER.md) gives an opt-in browser MCP setup, including an isolated mode that was exercised with a real Codex-backed Claude Code session.
 
 ## License
 

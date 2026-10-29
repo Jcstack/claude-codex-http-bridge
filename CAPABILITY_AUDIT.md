@@ -1,0 +1,74 @@
+# Local capability audit
+
+Checked 2026-10-30 with Claude Code 2.1.312, Codex CLI 0.162.1, and the pinned CLIProxyAPI 8.0.46 on macOS. Claude Code is always the harness. The HTTP service supplies the model; it does not run Codex CLI as an agent. This record distinguishes **verified here**, **available through the local Claude Code harness but not exhaustively exercised**, and **provider-gated or route-limited**. It is a snapshot, not a promise about future releases.
+
+## The three capability layers
+
+| Layer | Owner | What the bridge does |
+| --- | --- | --- |
+| Local harness | Claude Code | Keeps its terminal UI, permission system, local file/shell tools, plans, subagents, sessions, background agents, worktrees, hooks, skills, plugins, MCP, IDE integration, and status-line command. The launcher passes ordinary Claude Code flags through. [Anthropic's provider matrix](https://code.claude.com/docs/en/feature-availability) lists these local features across providers. |
+| Model route | OpenAI via the localhost proxy | Supplies text/reasoning, image understanding, streaming, and client tool calls through Anthropic Messages translation. The catalog and route metadata determine available model IDs, effort levels, and context. |
+| Provider service | Anthropic or OpenAI account | Gates account services and hosted tools. A local HTTP endpoint cannot turn an OpenAI subscription into a Claude subscription or make every OpenAI API tool available on the ChatGPT-plan route. [Claude Code provider matrix](https://code.claude.com/docs/en/feature-availability); [OpenAI route limits](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). |
+
+## Local Claude Code surface
+
+| Surface | Current result | Verification / remaining boundary |
+| --- | --- | --- |
+| Terminal UI, interactive prompts, permission modes, `CLAUDE.md`, rules, memory | Local harness remains in charge. | A real interactive bridge session ran with the user's project instructions and skills. Permissions are still Claude Code's; use the normal permission mode for browser or desktop tools. |
+| File, search, shell, edits | Verified. | Read, Edit, Bash, and related tool calls appeared in the live bridged conversation; local tools still run in Claude Code. |
+| Plan mode and subagents | Verified in a live session. | `EnterPlanMode`, `Agent`, ToolSearch, and skills appeared in the live transcript. The inspected main and subagent responses used the configured Codex model. This is a sample, not a proof of every agent path. |
+| MCP servers and plugins | Verified at the CLI and tool level. | `claude-codex mcp list`, `plugin list`, `agents --json` succeeded. A live isolated Playwright MCP browser visit used `ToolSearch` then `mcp__playwright__browser_navigate` and returned the page title. User-installed plugins and MCP settings remain loaded unless the user passes Claude Code's own restricted flags. |
+| Hooks, skills, custom commands/agents | Inherited from local Claude Code. | Hooks and a skill ran in a live bridged session. Individual third-party extensions may assume a Claude subscription or Anthropic telemetry, so compatibility is extension-specific. |
+| Sessions, resume, worktrees, checkpoints, background agents | Local Claude Code owns these. | A bridged `--bg` task completed after the launcher exited, with the localhost service still running. `agents --json` worked. The entire lifecycle, every resume path, and every worktree mode have not been live-tested. Use `claude-codex bridge stop` only after background work finishes. |
+| `/model`, `/effort`, `/autocompact` | Verified. | `/model` switched among current Codex routes; the proxy saw the new model. Model picker rows and compaction windows come from the current catalog. `/effort` exposes only routes with the required low–max metadata. |
+| `/context`, `/usage`, cost/budget UI | Partial. | Claude Code still internally treats a `behavesAs` model as its Claude counterpart, which can show the wrong context or list-price dollars. The status-line adapter corrects the selected route's context and removes false cost. `claude-codex usage` gives the actual subscription quota reported by Codex. Do not treat Claude Code's native `--max-budget-usd` or `/usage` list-price figure as a ChatGPT-plan bill. [Model mapping and context behavior](https://code.claude.com/docs/en/model-config#context-window-behind-an-llm-gateway). |
+| Claude HUD / other status-line commands | Verified with the user's installed HUD. | The per-launch adapter supplied the current route's `500k` window and real weekly quota, while suppressing an injected false 5-hour quota and Claude list-price cost. It does not modify the user's settings. Unknown future model IDs have unverified context figures removed rather than showing a false size. |
+| WebSearch, WebFetch | Exercised in bridge evaluation. | Claude Code's WebSearch tool is distinct from OpenAI-hosted `web_search`; route/account policy still matters. WebFetch remains a local CLI capability. [Claude provider matrix](https://code.claude.com/docs/en/feature-availability). |
+| Image input, streaming, JSON schema output | Exercised in bridge evaluation. | Audio and video are excluded from the current ChatGPT-plan route. Files may be supported by a selected model, but a file-input workflow has not been certified end to end. [OpenAI route limits](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). |
+| Native Windows | Offline CI green for installer, NTFS ACLs, model discovery logic, service lifecycle, and command startup. | Live Windows OAuth, inference, browser MCP, and HUD rendering still need an authenticated Windows run. WSL follows the Linux path. |
+
+The wrapper consumes `--model` to select a Codex catalog row; it passes other Claude Code arguments to the installed `claude` executable. Its local command families therefore follow the user's Claude Code version rather than a copied command list. [Anthropic's command reference](https://code.claude.com/docs/en/commands) separates local commands from account-dependent commands. The observed local sample includes model/effort/compaction, plan/subagents, MCP/plugin management, background sessions, and status line. Do not assume this sample certifies every built-in command, custom plugin, or future release. In particular:
+
+| Command family | Route consequence |
+| --- | --- |
+| `/model`, `/effort`, `/autocompact`, `/compact`, `/plan`, `/agents`, `/mcp`, `/plugin`, local review/rewind, `--worktree`, `--bg`, `--mcp-config`, `--plugin-dir` | Local Claude Code implementation remains available. Model-specific options still depend on the Codex route and proxy translation. |
+| `/context`, `/usage`, `--max-budget-usd` | Claude Code may calculate with its mapped Claude model and price. Use the bridge's dynamic context/HUD correction and `claude-codex usage` for true route/quota values. |
+| `/chrome`, built-in `computer-use`, `/voice`, `/remote-control`, cloud sessions, cloud scheduled tasks, ultrareview | Anthropic account/platform gates apply. Browser and desktop actions can use separately supplied local tools where supported, but that does not unlock Anthropic's named service commands. |
+| New Claude Code commands after an update | Local command routing is inherited automatically. Provider calls, special request fields, and UI metadata still need a release smoke test. |
+
+## Browser and desktop computer use
+
+Claude Code's own [Chrome extension](https://code.claude.com/docs/en/chrome#prerequisites) requires a direct Anthropic plan and `/login`; its [built-in computer use preview](https://code.claude.com/docs/en/computer-use) requires macOS and a Pro/Max subscription. The local Codex route does not unlock either feature. OpenAI's **native Responses computer-use tool** is also excluded from this [ChatGPT-plan inference route](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). These are service gates, not missing model intelligence.
+
+Codex CLI/app browser and computer controls belong to the **Codex harness**. Sending only Codex model inference to Claude Code does not carry those controls across the HTTP protocol. Claude Code can expose a separately reviewed local MCP tool to the same model, with Claude Code still owning approvals and the action loop. This also explains the difference between a public OpenAI API model's specification, the ChatGPT-plan Codex inference route's entitlement, and Codex CLI/app behavior.
+
+Claude Code can instead hand browser actions to an MCP tool while the Codex model plans and decides when to call it. A pinned, isolated [Microsoft Playwright MCP](https://github.com/microsoft/playwright-mcp) was live-tested through this bridge against `example.com` on macOS. It gives browser navigation, page snapshots, clicks, screenshots, and form interaction in a separate profile. It is not the same implementation or identity as `/chrome`. See [BROWSER.md](BROWSER.md) for setup and privacy choices.
+
+General desktop screenshot/click/type control would require an additional OS-level MCP tool and explicit screen/accessibility permissions. No cross-platform desktop tool has been adopted into this repository yet: the smaller community projects found have not passed the same Windows, privacy, and live-behavior checks as the core bridge. A browser tool must not be described as full desktop computer use.
+
+## OpenAI model and route strengths
+
+| Capability | What this bridge can use |
+| --- | --- |
+| Model selection | Current authenticated model IDs are discovered from the localhost `/v1/models` catalog at session start; no model ID or context size is fixed in source. Restart the session to refresh the picker after an upstream catalog change. A listed model still needs a successful inference to establish entitlement. |
+| Reasoning | Claude Code's effort control is passed to eligible Codex routes that advertise low, medium, high, xhigh, and max. The route's model decides how to reason; Claude Code remains responsible for tool selection and execution. Effort labels alone do not prove identical reasoning behavior across model families. |
+| Long context | Use the **route** `context_window`, not a separate public API model maximum. On this installation, Sol/Terra 6.1 advertised 500k and Astra 272k on 2026-10-30. The API model page for [Astra](https://developers.openai.com/api/docs/models/gpt-6-astra) lists 1.05M, but that is a different route. Compaction uses each live route's metadata with headroom. |
+| Web/search and tool use | Client function/custom tools and conditional web search are within the documented ChatGPT-plan subset. Claude Code tools or MCP tools expose actions through the harness. OpenAI-hosted image generation, file search, Code Interpreter, native computer use, hosted MCP/connectors, and Responses `tool_search` are not available through this route. [OpenAI preview limits](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). |
+| Subscription quota | The optional status-line bridge calls Codex's documented `account/rateLimits/read` through native Codex app-server, only when the native Codex account ID matches the single bridge OAuth account ID. It reads actual window durations and never invents 5-hour or weekly values. Current account returned a weekly window and no 5-hour window. [App-server RPC](https://learn.chatgpt.com/docs/app-server). API-key rate limits and spend are separate. |
+
+## Community project review
+
+Popularity was a discovery signal, not the decision rule. Checked upstream repositories, releases, documentation, and open issues on 2026-10-30:
+
+| Project | Finding | Decision |
+| --- | --- | --- |
+| [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | Active upstream with v8.0.47 published 2026-10-29. That release chiefly changes plugin-host behavior and Gemini tool-search IDs, not this Codex route. Translation issues remain open; every update needs a compatibility review. | Keep the verified v8.0.46 pin for now. The wrapper adds localhost authentication and strict private runtime files. |
+| [raine/claude-code-proxy](https://github.com/raine/claude-code-proxy) | Active alternative with focused Codex translation and monitor. Its README says localhost accepts requests without client authentication, and open issues include [ToolSearch/tool-reference handling](https://github.com/raine/claude-code-proxy/issues/182), [compaction state](https://github.com/raine/claude-code-proxy/issues/163), and [concurrent WebSocket 403s](https://github.com/raine/claude-code-proxy/issues/172). | Keep under review, do not switch based on stars. It needs security and live regression testing before it could replace the current proxy. |
+| [Microsoft Playwright MCP](https://github.com/microsoft/playwright-mcp) | Actively maintained, cross-platform browser MCP. `--isolated` uses an in-memory profile; the pinned 0.0.83 CLI and a real model-driven navigation were verified here. | Offer as the first browser option, explicitly opt-in. |
+| [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) | Maintained by Chrome DevTools. Its `--autoConnect` can attach to a real Chrome profile, but [Google's own guide](https://developer.chrome.com/docs/devtools/agents/use-cases/auto-connect) says the agent can access tabs, storage, and cookies; usage stats and CrUX lookups are on by default unless disabled. Auto-connect issues remain open. | Offer only as an explicit real-profile option with telemetry opt-outs and version pin; no default install. |
+| [browser-use/browser-harness](https://github.com/browser-use/browser-harness) | Active and promising for signed-in Chrome, but [a Windows issue](https://github.com/browser-use/browser-harness/issues/813) reports private directory ACL hardening is skipped for auth and executable workspace paths. | Do not recommend as the Windows default until the issue is fixed and verified. |
+| [zavora-ai/computer-use-mcp](https://github.com/zavora-ai/computer-use-mcp) and other desktop MCP candidates | Cross-platform desktop-control projects exist, but the reviewed candidate has a much smaller maintenance community and broad screen, keyboard, clipboard, and app authority. No authenticated Windows/macOS privacy and permission regression was run here. | Research candidate only; do not auto-install or claim full desktop parity. |
+
+## Maintenance rule
+
+The model catalog is refreshed on each launch. Proxy and browser-tool versions stay pinned until their release changes, permissions, issues, and a real Claude Code smoke test have been reviewed. CI checks source behavior and a native Windows installation without credentials. Live OAuth/model tests remain local and private. Upstream releases and new Claude Code features should update this record, not silently change security-sensitive defaults.

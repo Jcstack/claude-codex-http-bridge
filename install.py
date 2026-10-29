@@ -246,7 +246,8 @@ def main() -> None:
     private_dir(root / "bin")
     if windows:
         windows_acl.lock([root / "auth", root / "bin"])
-    for filename in ("bridge_models.py", "launcher.py", "statusline_adapter.py", "windows_acl.py", "run-claude-codex.sh"):
+    for filename in ("bridge_models.py", "launcher.py", "statusline_adapter.py", "codex_usage.py",
+                     "windows_acl.py", "run-claude-codex.sh"):
         write_file(root / filename, (SOURCE / filename).read_bytes(), 0o700)
     install_proxy(root, args.archive)
     install_config(root)
