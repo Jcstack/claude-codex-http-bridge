@@ -3,7 +3,7 @@
 Claude Code remains the **harness**: it owns the terminal UI, permissions, tools, MCP, skills, hooks, subagents, and conversation. A local authenticated HTTP proxy translates its Anthropic Messages requests to Codex model inference. This project does not run Codex CLI as a tool or agent inside Claude Code.
 
 ```text
-Claude Code ──Anthropic Messages──> 127.0.0.1 + session key
+Claude Code ──Anthropic Messages──> 127.0.0.1 + private local key
                                     CLIProxyAPI ──Codex Responses──> OpenAI
 ```
 
@@ -32,7 +32,7 @@ claude-codex models
 claude-codex --model gpt-6.1-sol
 ```
 
-在会话中用 `/model` 切换动态发现的模型，用 `/effort` 调整推理强度。原有 `claude` 命令仍按原来的账号与设置运行。若本机已有 `claude-codex` 命令，安装器会停止；确认要改用这个仓库的版本后运行 `./install.sh --replace-command`。OAuth 文件和运行日志只留在本机安装目录，不进入 Git。
+在会话中用 `/model` 切换动态发现的模型，用 `/effort` 调整推理强度。`/background` 需要的本机代理会继续运行；任务结束后可运行 `claude-codex bridge stop`。原有 `claude` 命令仍按原来的账号与设置运行。若本机已有 `claude-codex` 命令，安装器会停止；确认要改用这个仓库的版本后运行 `./install.sh --replace-command`。OAuth 文件和运行日志只留在本机安装目录，不进入 Git。
 
 ## Requirements
 
@@ -64,6 +64,8 @@ cd /path/to/your/project
 claude-codex                         # newest catalog-listed Sol
 claude-codex --model gpt-6-sol       # exact model ID
 claude-codex --model gpt-5.6-sol --effort max
+claude-codex bridge status            # localhost service state
+claude-codex bridge stop              # after background work has finished
 ```
 
 Inside Claude Code:
@@ -76,22 +78,22 @@ The model list, route context windows, compaction thresholds, and status-line co
 
 ### Claude HUD and other status-line plugins
 
-The launcher reads the existing user `statusLine.command` and passes Claude Code a temporary, private settings file that runs that same command through `statusline_adapter.py`. The adapter corrects the context size and percentage for the **current** Codex model, including after `/model` switches. It removes Claude-list-price dollars, Anthropic prompt-cache timers, and Anthropic rate-limit fields from the plugin input because they do not describe this Codex route. Other status-line fields and the user's original command are preserved; the user's settings file is not changed. Set `CLAUDE_CODEX_STATUSLINE_ADAPTER=0` before launch to disable this session-only adapter.
+The launcher reads the existing user `statusLine.command` and passes Claude Code a private per-launch settings file that runs that same command through `statusline_adapter.py`. The adapter corrects the context size and percentage for the **current** Codex model, including after `/model` switches. It removes Claude-list-price dollars, Anthropic prompt-cache timers, and Anthropic rate-limit fields from the plugin input because they do not describe this Codex route. Other status-line fields and the user's original command are preserved; the user's settings file is not changed. The per-launch file remains available to detached background sessions and is removed by `claude-codex bridge stop`. Set `CLAUDE_CODEX_STATUSLINE_ADAPTER=0` before launch to disable the adapter.
 
 Plain `claude` remains separate and uses its ordinary provider settings. `claude-codex models` is a catalog listing, not an entitlement guarantee; a completed inference request confirms access to a selected model.
 
 ## Tested behavior and boundaries
 
-On macOS Apple Silicon, the bridge was tested with GPT-6.1 Sol, GPT-6 Sol, and GPT-5.6 Sol inference. In one interactive session, `/model` switched GPT-6.1 Sol → GPT-6 Sol → GPT-6.1 Terra and the actual response model changed. `/autocompact` reported 400k for the 500k routes and 200k for the 272k routes. Claude Code WebSearch, WebFetch, Read, Edit, Bash, Agent, MCP/ToolSearch, image input, structured output, and streaming were exercised during bridge evaluation; this is a functional sample, not exhaustive certification of every Claude Code release and command. Native Windows CI checks installation, file ACLs, model catalog logic, and launcher startup without storing any OAuth credential; live Windows inference still requires an authenticated Windows session.
+On macOS Apple Silicon, the bridge was tested with GPT-6.1 Sol, GPT-6 Sol, and GPT-5.6 Sol inference. In one interactive session, `/model` switched GPT-6.1 Sol → GPT-6 Sol → GPT-6.1 Terra and the actual response model changed. `/autocompact` reported 400k for the 500k routes and 200k for the 272k routes. An authenticated `--bg` task completed with a `PONG` response after the launcher exited. Claude Code WebSearch, WebFetch, Read, Edit, Bash, Agent, MCP/ToolSearch, image input, structured output, and streaming were exercised during bridge evaluation; this is a functional sample, not exhaustive certification of every Claude Code release and command. Native Windows CI checks installation, file ACLs, model catalog logic, proxy service lifecycle, and launcher startup without storing any OAuth credential; live Windows inference still requires an authenticated Windows session.
 
 `modelPicker.behavesAs` lets Claude Code offer model capabilities and avoids its `unrecognized_model` diagnostic. Claude Code may therefore display the mapped Claude model's **1M context and list-price cost**. Those UI figures are not the Codex subscription route's limit or bill. The local catalog's `context_window` controls the generated auto-compaction thresholds. See [Claude Code model configuration](https://code.claude.com/docs/en/model-config) and [the per-model settings reference](https://code.claude.com/docs/en/settings-reference#modelsettings).
 
-The proxy is owned by the foreground launcher and stops when it exits. `--bg`/`--background` is intentionally rejected because the detached Claude Code session would lose its model endpoint. Claude-account features such as Remote Control have [separate provider requirements](https://code.claude.com/docs/en/remote-control#requirements). OpenAI's ChatGPT-plan third-party inference path has [native tool limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations); model capability is not identical to automatic exposure of every Responses tool through Claude Code.
+The localhost proxy starts on first use and is reused by later `claude-codex` sessions, including detached `/background` and `--bg` work. Run `claude-codex bridge status` to inspect it, and `claude-codex bridge stop` after background work has finished; stopping it disconnects any still-running sessions. Claude-account features such as Remote Control have [separate provider requirements](https://code.claude.com/docs/en/remote-control#requirements). OpenAI's ChatGPT-plan third-party inference path has [native tool limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations); model capability is not identical to automatic exposure of every Responses tool through Claude Code.
 
 ## Security and privacy
 
-- The proxy binds `127.0.0.1` and requires a random session key. The launcher verifies the listener belongs to its child proxy process before sending the key. On Windows it checks the listener PID with `netstat`; on POSIX it uses `lsof`.
-- On POSIX, OAuth and session directories are `0700`; credentials, config, and checksum files are `0600`. On Windows, NTFS ACLs restrict installation and session files to the current user and are verified before launch. The proxy binary is checked against the installation's verified release hash at each launch.
+- The proxy binds `127.0.0.1` and requires a random local key stored in the private runtime directory for the service lifetime. The launcher verifies the listener PID before sending the key or reusing the service. On Windows it checks with `netstat`; on POSIX it uses `lsof`.
+- On POSIX, OAuth and runtime directories are `0700`; credentials, config, key, and checksum files are `0600`. On Windows, NTFS ACLs restrict installation and runtime files to the current user and are verified before launch. The proxy binary is checked against the installation's verified release hash at each launch.
 - Proxy debug logging, request logging, usage statistics, the management panel, and the auto-update panel are disabled. Claude Code itself can still save local transcripts and communicate with services required by its own features.
 - The `.gitignore` is a source allowlist. Before pushing changes, inspect staged files and run `gitleaks git --redact .`.
 

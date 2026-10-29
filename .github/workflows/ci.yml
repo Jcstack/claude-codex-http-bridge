@@ -31,6 +31,7 @@ jobs:
         run: |
           python install.py --root "$RUNNER_TEMP/bridge" --bin-dir "$RUNNER_TEMP/bridge-bin"
           python "$RUNNER_TEMP/bridge/bridge_models.py" verify
+          python tests/smoke_persistent.py "$RUNNER_TEMP/bridge"
           "$RUNNER_TEMP/bridge-bin/claude-codex" --help
       - name: Verify native Windows installation and ACLs
         if: runner.os == 'Windows'
@@ -44,6 +45,8 @@ jobs:
           python (Join-Path $bridgeRoot 'bridge_models.py') verify
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/smoke_proxy.py $bridgeRoot
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/smoke_persistent.py $bridgeRoot
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $bridgeRoot 'bin/claude-codex.cmd') --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

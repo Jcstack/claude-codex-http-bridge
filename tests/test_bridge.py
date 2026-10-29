@@ -158,8 +158,8 @@ class BridgeTests(unittest.TestCase):
             ("claude", "gpt-6.1-sol", ["--effort", "max"]),
         )
         self.assertEqual(launcher.parse_args(["models"]), ("models", "", []))
-        with self.assertRaisesRegex(ValueError, "Background sessions"):
-            launcher.parse_args(["--background"])
+        self.assertEqual(launcher.parse_args(["--background"]), ("claude", "sol", ["--background"]))
+        self.assertEqual(launcher.parse_args(["bridge", "stop"]), ("bridge-stop", "", []))
 
     def test_statusline_uses_selected_route_and_hides_unrelated_billing(self) -> None:
         payload = {

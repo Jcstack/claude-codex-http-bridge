@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Claude Code against one private, session-owned local model endpoint."""
+"""Run Claude Code against a private localhost model service."""
 
 from __future__ import annotations
 
@@ -7,12 +7,16 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 
 
 ROOT = Path(os.environ.get("CLAUDE_CODEX_BRIDGE_HOME", Path(__file__).resolve().parent)).expanduser().absolute()
@@ -27,6 +31,10 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
         if len(arguments) != 1:
             raise ValueError(f"{arguments[0]} does not take arguments")
         return ("login" if arguments[0] == "codex-login" else "models"), "", []
+    if arguments and arguments[0] == "bridge":
+        if len(arguments) != 2 or arguments[1] not in ("start", "status", "stop"):
+            raise ValueError("Usage: claude-codex bridge start | status | stop")
+        return "bridge-" + arguments[1], "", []
     selected = "sol"
     claude_args: list[str] = []
     index = 0
@@ -46,8 +54,6 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
         else:
             claude_args.append(argument)
             index += 1
-    if any(argument in ("--bg", "--background") for argument in claude_args):
-        raise ValueError("Background sessions need a persistent model endpoint; this session-owned proxy exits with Claude Code")
     if not selected:
         raise ValueError("Model ID cannot be empty")
     return "claude", selected, claude_args
@@ -200,58 +206,240 @@ def stop_process(process: subprocess.Popen | None) -> None:
         process.wait()
 
 
-def run_session(mode: str, selected: str, claude_args: list[str], claude: str) -> int:
-    session = helper_output("session").split("\t")
-    if len(session) != 5:
-        raise RuntimeError("Session helper returned an invalid result")
-    port_text, directory_text, config_text, key_text, log_text = session
-    port = int(port_text)
-    directory, config, key_path, log = map(Path, (directory_text, config_text, key_text, log_text))
-    proxy_process = None
-    claude_process = None
-    extra_files: list[Path] = []
+def runtime_directory() -> Path:
+    directory = ROOT / "runtime"
+    if directory.is_symlink():
+        raise RuntimeError("Runtime directory must not be a symlink")
+    directory.mkdir(mode=0o700, exist_ok=True)
+    directory.chmod(0o700)
+    if platform.system() == "Windows":
+        import windows_acl
+        windows_acl.lock([directory])
+    return directory
+
+
+@contextmanager
+def service_lock():
+    directory = runtime_directory()
+    path = directory / "service.lock"
+    if path.is_symlink():
+        raise RuntimeError("Service lock must not be a symlink")
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(descriptor, "r+b", buffering=0) as handle:
+        if os.fstat(descriptor).st_size == 0:
+            handle.write(b"0")
+        handle.seek(0)
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                if platform.system() == "Windows":
+                    import msvcrt
+                    msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Timed out waiting for the local bridge lock") from None
+                time.sleep(0.1)
+        try:
+            yield directory
+        finally:
+            if platform.system() == "Windows":
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
+def state_paths(runtime: Path, state: dict) -> tuple[Path, Path, Path, Path]:
+    session_name = state.get("session")
+    if not isinstance(session_name, str) or not re.fullmatch(r"session-[A-Za-z0-9_-]+", session_name):
+        raise RuntimeError("Invalid local bridge state")
+    directory = runtime / session_name
+    return directory, directory / "config.yaml", directory / "key", directory / "proxy.log"
+
+
+def read_state(runtime: Path) -> dict | None:
+    path = runtime / "service.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file() or (
+        platform.system() != "Windows" and path.stat().st_mode & 0o777 != 0o600
+    ):
+        raise RuntimeError("Local bridge state has unsafe permissions")
+    if platform.system() == "Windows":
+        import windows_acl
+        windows_acl.verify([path], protected=True)
+    state = json.loads(path.read_text())
+    if (not isinstance(state, dict) or type(state.get("pid")) is not int or state["pid"] < 1 or
+        type(state.get("port")) is not int or not 1 <= state["port"] <= 65535):
+        raise RuntimeError("Invalid local bridge state")
+    state_paths(runtime, state)
+    return state
+
+
+def state_is_live(runtime: Path, state: dict) -> bool:
+    directory, config, key, log = state_paths(runtime, state)
+    if any(path.is_symlink() or not path.exists() for path in (directory, config, key, log)):
+        return False
+    if platform.system() == "Windows":
+        import windows_acl
+        windows_acl.verify([directory, config, key, log], protected=True)
+    elif (directory.stat().st_mode & 0o777 != 0o700 or
+          any(path.stat().st_mode & 0o777 != 0o600 for path in (config, key, log))):
+        raise RuntimeError("Local bridge service files have unsafe permissions")
+    if listener_pids(state["port"]) != {state["pid"]}:
+        return False
     try:
-        descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "wb") as log_handle:
-            proxy_process = subprocess.Popen([str(PROXY), "-config", str(config)], stdout=log_handle, stderr=subprocess.STDOUT)
-            wait_for_private_listener(proxy_process, port)
-            environment = os.environ.copy()
-            environment["CODEX_BRIDGE_PORT"] = str(port)
-            environment["CODEX_BRIDGE_KEY_FILE"] = str(key_path)
-            wait_for_catalog(proxy_process, environment, require_eligible=(mode != "models"))
-            if mode == "models":
-                return subprocess.call([sys.executable, str(HELPER), "list"], env=environment)
-            model_info = helper_output("prepare", selected, environment=environment).split("\t")
-            if len(model_info) != 5:
-                raise RuntimeError("Model helper returned an invalid result")
-            model, context, compact, settings, catalog_json = model_info
-            settings_path, extra_files = session_settings(Path(settings), json.loads(catalog_json), directory)
-            key = key_path.read_text().strip()
-            claude_environment_values = claude_environment(port, key, model)
-            print(
-                f"Codex bridge active on 127.0.0.1:{port}: {model}. "
-                f"Route context {context} tokens; auto-compaction {compact} tokens for this model.",
-                file=sys.stderr,
-            )
-            print("Use /model to switch among live Codex models; press s to keep the choice in this session.", file=sys.stderr)
-            print("Claude Code may show Claude alias context or list cost; those UI values are not Codex limits or billing.", file=sys.stderr)
-            claude_process = subprocess.Popen(
-                [claude, "--settings", str(settings_path), "--model", model, *claude_args],
-                env=claude_environment_values,
-            )
-            return claude_process.wait()
+        with socket.create_connection(("127.0.0.1", state["port"]), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def remove_state_files(runtime: Path, state: dict) -> None:
+    directory, config, key, log = state_paths(runtime, state)
+    (runtime / "service.json").unlink(missing_ok=True)
+    for path in (config, key, log):
+        path.unlink(missing_ok=True)
+    try:
+        directory.rmdir()
+    except OSError:
+        pass
+
+
+def service_environment(state: dict, runtime: Path) -> dict[str, str]:
+    _, _, key, _ = state_paths(runtime, state)
+    environment = os.environ.copy()
+    environment["CODEX_BRIDGE_PORT"] = str(state["port"])
+    environment["CODEX_BRIDGE_KEY_FILE"] = str(key)
+    return environment
+
+
+def ensure_service(require_catalog: bool = True) -> tuple[Path, dict, bool]:
+    with service_lock() as runtime:
+        state = read_state(runtime)
+        if state is not None:
+            if state_is_live(runtime, state):
+                return runtime, state, False
+            owners = listener_pids(state["port"])
+            if owners:
+                raise RuntimeError("Stale bridge state points at an occupied port; no key was sent")
+            remove_state_files(runtime, state)
+        session = helper_output("session").split("\t")
+        if len(session) != 5:
+            raise RuntimeError("Session helper returned an invalid result")
+        port_text, directory_text, config_text, key_text, log_text = session
+        port = int(port_text)
+        directory, config, key, log = map(Path, (directory_text, config_text, key_text, log_text))
+        if directory.parent.resolve() != runtime.resolve():
+            raise RuntimeError("Session helper used an unexpected runtime directory")
+        proxy = None
+        try:
+            descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as log_handle:
+                if platform.system() == "Windows":
+                    import windows_acl
+                    windows_acl.lock([log])
+                    detached = {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+                else:
+                    detached = {"start_new_session": True}
+                proxy = subprocess.Popen([str(PROXY), "-config", str(config)], stdin=subprocess.DEVNULL,
+                                         stdout=log_handle, stderr=subprocess.STDOUT, **detached)
+            wait_for_private_listener(proxy, port)
+            state = {"pid": proxy.pid, "port": port, "session": directory.name}
+            if require_catalog:
+                wait_for_catalog(proxy, service_environment(state, runtime), True)
+            private_json(runtime / "service.json", state)
+            return runtime, state, True
+        except BaseException:
+            stop_process(proxy)
+            for path in (config, key, log):
+                path.unlink(missing_ok=True)
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+            raise
+
+
+def bridge_status() -> int:
+    with service_lock() as runtime:
+        state = read_state(runtime)
+        if state is None or not state_is_live(runtime, state):
+            print("Codex bridge is stopped")
+            return 1
+        print(f"Codex bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
+        return 0
+
+
+def bridge_stop() -> int:
+    with service_lock() as runtime:
+        state = read_state(runtime)
+        if state is None:
+            print("Codex bridge is already stopped")
+            return 0
+        if state_is_live(runtime, state):
+            os.kill(state["pid"], signal.SIGTERM)
+            for _ in range(50):
+                if listener_pids(state["port"]) != {state["pid"]}:
+                    break
+                time.sleep(0.1)
+            else:
+                raise RuntimeError("Could not stop the local bridge process")
+        elif listener_pids(state["port"]):
+            raise RuntimeError("Stale bridge state points at an occupied port; no process was stopped")
+        remove_state_files(runtime, state)
+        for directory in runtime.glob("ui-*"):
+            if directory.is_dir() and not directory.is_symlink():
+                for name in ("statusline-profile.json", "settings.json"):
+                    (directory / name).unlink(missing_ok=True)
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+        print("Codex bridge stopped")
+        return 0
+
+
+def run_session(mode: str, selected: str, claude_args: list[str], claude: str) -> int:
+    runtime, state, created = ensure_service()
+    environment = service_environment(state, runtime)
+    if mode == "models":
+        return subprocess.call([sys.executable, str(HELPER), "list"], env=environment)
+    model_info = helper_output("prepare", selected, environment=environment).split("\t")
+    if len(model_info) != 5:
+        raise RuntimeError("Model helper returned an invalid result")
+    model, context, compact, settings, catalog_json = model_info
+    directory = Path(tempfile.mkdtemp(prefix="ui-", dir=runtime))
+    if platform.system() == "Windows":
+        import windows_acl
+        windows_acl.lock([directory])
+    settings_path, _ = session_settings(Path(settings), json.loads(catalog_json), directory)
+    _, _, key_path, _ = state_paths(runtime, state)
+    claude_environment_values = claude_environment(state["port"], key_path.read_text().strip(), model)
+    print(
+        f"Codex bridge active on 127.0.0.1:{state['port']}: {model}. "
+        f"Route context {context} tokens; auto-compaction {compact} tokens for this model.",
+        file=sys.stderr,
+    )
+    if created:
+        print("The localhost bridge stays available for /background and --bg; stop it with claude-codex bridge stop.", file=sys.stderr)
+    print("Use /model to switch among live Codex models; press s to keep the choice in this session.", file=sys.stderr)
+    print("Claude Code may show Claude alias context or list cost; those UI values are not Codex limits or billing.", file=sys.stderr)
+    claude_process = None
+    try:
+        claude_process = subprocess.Popen(
+            [claude, "--settings", str(settings_path), "--model", model, *claude_args],
+            env=claude_environment_values,
+        )
+        return claude_process.wait()
     except KeyboardInterrupt:
         stop_process(claude_process)
         return 130
     finally:
         stop_process(claude_process)
-        stop_process(proxy_process)
-        for path in (config, key_path, log, *extra_files):
-            path.unlink(missing_ok=True)
-        try:
-            directory.rmdir()
-        except OSError:
-            pass
 
 
 def main() -> int:
@@ -261,14 +449,23 @@ def main() -> int:
     if mode == "help":
         print("Usage: claude-codex [--model MODEL_ID|sol|astra|terra|luna] [Claude Code options]")
         print("Run claude-codex codex-login once. Run claude-codex models for live model IDs.")
+        print("Run claude-codex bridge start | status | stop to manage the private localhost service.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
         return 0
-    claude = os.environ.get("CLAUDE_CODEX_CLAUDE_BIN") or shutil.which("claude")
-    if not claude or not shutil.which(claude):
-        raise RuntimeError("Claude Code executable not found; set CLAUDE_CODEX_CLAUDE_BIN to its path")
     helper_output("verify")
+    if mode == "bridge-status":
+        return bridge_status()
+    if mode == "bridge-stop":
+        return bridge_stop()
+    if mode == "bridge-start":
+        _, state, _ = ensure_service()
+        print(f"Codex bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
+        return 0
     if mode == "login":
         return subprocess.call([str(PROXY), "-config", str(ROOT / "config.yaml"), "-codex-login"])
+    claude = os.environ.get("CLAUDE_CODEX_CLAUDE_BIN") or shutil.which("claude")
+    if mode != "models" and (not claude or not shutil.which(claude)):
+        raise RuntimeError("Claude Code executable not found; set CLAUDE_CODEX_CLAUDE_BIN to its path")
     return run_session(mode, selected, claude_args, claude)
 
 
