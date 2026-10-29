@@ -12,6 +12,11 @@ import tempfile
 SID_PATTERN = re.compile(r"S-1-\d+(?:-\d+)+")
 
 
+def same_identity(ace_sid: str, user_sid: str) -> bool:
+    # Windows SDDL shortens the built-in local Administrator account's -500 SID.
+    return ace_sid == user_sid or (ace_sid == "LA" and user_sid.endswith("-500"))
+
+
 def current_user_sid() -> str:
     try:
         result = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"],
@@ -68,7 +73,7 @@ def verify(paths: list[Path], protected: bool = False) -> None:
             raise RuntimeError("Windows runtime ACL has no access rules")
         for entry in entries:
             fields = entry.split(";")
-            if len(fields) != 6 or fields[0] != "A" or fields[-1] != sid:
+            if len(fields) != 6 or fields[0] != "A" or not same_identity(fields[-1], sid):
                 detail = f" ({fields})" if os.environ.get("CLAUDE_CODEX_DEBUG_ACL") == "1" else ""
                 raise RuntimeError("Windows runtime ACL grants another identity access" + detail)
 

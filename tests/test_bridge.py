@@ -19,6 +19,7 @@ import bridge_models
 import install
 import launcher
 import statusline_adapter
+import windows_acl
 
 
 def model(context: int, search: bool = True) -> dict:
@@ -135,6 +136,11 @@ class BridgeTests(unittest.TestCase):
   TCP    [::1]:18317        [::]:0          LISTENING       4444
 """
         self.assertEqual(launcher.windows_listener_pids(output, 18317), {1234})
+
+    def test_windows_sddl_local_admin_alias_is_exact(self) -> None:
+        self.assertTrue(windows_acl.same_identity("LA", "S-1-5-21-42-500"))
+        self.assertFalse(windows_acl.same_identity("LA", "S-1-5-21-42-1001"))
+        self.assertFalse(windows_acl.same_identity("BA", "S-1-5-21-42-500"))
 
     def test_launcher_model_and_background_arguments(self) -> None:
         self.assertEqual(
