@@ -7,7 +7,13 @@
 !config.example.yaml
 !install.py
 !install.sh
+!launcher.py
+!statusline_adapter.py
 !run-claude-codex.sh
 !bridge_models.py
+!windows_acl.py
 !tests/
 !tests/*.py
+!.github/
+!.github/workflows/
+!.github/workflows/ci.yml

@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import os
 from pathlib import Path
+import platform
 import re
 import secrets
 import socket
@@ -20,18 +21,26 @@ REQUIRED_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 
 def verify_install() -> None:
-    proxy = ROOT / "bin" / "cli-proxy-api"
+    windows = platform.system() == "Windows"
+    proxy = ROOT / "bin" / ("cli-proxy-api.exe" if windows else "cli-proxy-api")
     checksum_file = ROOT / "proxy.sha256"
     config = ROOT / "config.yaml"
     auth = ROOT / "auth"
     for path, expected_mode in ((ROOT, 0o700), (auth, 0o700), (config, 0o600), (checksum_file, 0o600)):
-        if path.is_symlink() or path.stat().st_mode & 0o777 != expected_mode:
+        if path.is_symlink() or (not windows and path.stat().st_mode & 0o777 != expected_mode):
             raise RuntimeError(f"Unsafe permissions or symlink: {path}")
-    for credential in auth.glob("*.json"):
-        if credential.is_symlink() or not credential.is_file() or credential.stat().st_mode & 0o777 != 0o600:
+    credentials = list(auth.glob("*.json"))
+    for credential in credentials:
+        if credential.is_symlink() or not credential.is_file() or (
+            not windows and credential.stat().st_mode & 0o777 != 0o600
+        ):
             raise RuntimeError("OAuth credential file must be a private regular file")
     if not proxy.is_file() or proxy.is_symlink() or not os.access(proxy, os.X_OK):
         raise RuntimeError("Reviewed proxy binary is missing or not executable")
+    if windows:
+        import windows_acl
+        windows_acl.verify([ROOT, auth, config, checksum_file, proxy], protected=True)
+        windows_acl.verify(credentials)
     expected = checksum_file.read_text().strip()
     if not re.fullmatch(r"[a-f0-9]{64}", expected):
         raise RuntimeError("Invalid proxy checksum file")
@@ -51,8 +60,13 @@ def make_session() -> None:
     runtime = ROOT / "runtime"
     runtime.mkdir(mode=0o700, exist_ok=True)
     runtime.chmod(0o700)
+    if platform.system() == "Windows":
+        import windows_acl
+        windows_acl.lock([runtime])
     directory = Path(tempfile.mkdtemp(prefix="session-", dir=runtime))
     try:
+        if platform.system() == "Windows":
+            windows_acl.lock([directory])
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
@@ -69,7 +83,7 @@ def make_session() -> None:
         )
         if any(setting not in source.splitlines() for setting in required_settings):
             raise RuntimeError("Bridge config template lost a privacy or security setting")
-        if (ROOT / "auth").stat().st_mode & 0o777 != 0o700:
+        if platform.system() != "Windows" and (ROOT / "auth").stat().st_mode & 0o777 != 0o700:
             raise RuntimeError("Bridge auth directory must have 0700 permissions")
         config, port_count = re.subn(
             r"(?m)^(  port: )\d+$",
@@ -89,6 +103,8 @@ def make_session() -> None:
             descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w") as handle:
                 handle.write(content)
+        if platform.system() == "Windows":
+            windows_acl.lock([config_path, key_path])
         print(port, directory, config_path, key_path, directory / "proxy.log", sep="\t")
     except BaseException:
         for path in directory.iterdir():
@@ -221,6 +237,9 @@ def runtime_settings(chat: dict[str, dict]) -> Path:
     directory = ROOT / "runtime-models"
     directory.mkdir(mode=0o700, exist_ok=True)
     directory.chmod(0o700)
+    if platform.system() == "Windows":
+        import windows_acl
+        windows_acl.lock([directory])
     path = directory / "all.json"
     options = []
     model_settings = {}
@@ -250,6 +269,8 @@ def runtime_settings(chat: dict[str, dict]) -> Path:
             handle.write(content)
         os.replace(temporary, path)
     path.chmod(0o600)
+    if platform.system() == "Windows":
+        windows_acl.lock([path])
     return path
 
 
@@ -294,7 +315,9 @@ def main() -> int:
         raise RuntimeError(f"Model {selected!r} is not in the live local catalog; run claude-codex models")
     if not eligible(row):
         raise RuntimeError(f"Model {selected!r} lacks verified context, low-max effort, or web search metadata")
-    print(selected, row["context_window"], compact_window(row), runtime_settings(chat), sep="\t")
+    windows = {slug: item["context_window"] for slug, item in chat.items() if eligible(item)}
+    print(selected, row["context_window"], compact_window(row), runtime_settings(chat),
+          json.dumps(windows, separators=(",", ":")), sep="\t")
     return 0
 
 

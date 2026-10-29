@@ -13,8 +13,20 @@ The repository contains source and an example config only. It does **not** conta
 
 Claude Code 是交互界面和工具执行者；Codex 模型由仅监听本机的 HTTP 代理提供。安装后运行：
 
+macOS、Linux、WSL：
+
 ```bash
 ./install.sh
+claude-codex codex-login
+claude-codex models
+claude-codex --model gpt-6.1-sol
+```
+
+原生 Windows PowerShell：
+
+```powershell
+py -3 .\install.py
+# 关闭并重新打开终端后：
 claude-codex codex-login
 claude-codex models
 claude-codex --model gpt-6.1-sol
@@ -24,24 +36,26 @@ claude-codex --model gpt-6.1-sol
 
 ## Requirements
 
-- macOS or Linux on arm64/aarch64 or x86_64
+- macOS, Linux, or native Windows on ARM64/aarch64 or x64
+- On Windows: Windows 10 1809+ or Windows Server 2019+, PowerShell 5.1+, and an NTFS installation directory. Windows Subsystem for Linux uses the Linux instructions.
 - Claude Code installed and on `PATH` (verified with Claude Code 2.1.312)
-- Python 3.10+, `bash`, `lsof`, and `nc`
+- Python 3.10+; on macOS/Linux/WSL, `bash` and `lsof`
 - A ChatGPT account with Codex model access
 
 ## Install
 
-```bash
-./install.sh
+macOS/Linux/WSL: run `./install.sh`. Native Windows: run `py -3 .\install.py` in PowerShell or `py -3 install.py` in CMD, then open a new terminal before using `claude-codex`. If `py` is unavailable but Python is installed, use `python`.
+
+```text
 claude-codex codex-login
 claude-codex models
 ```
 
-The installer downloads the pinned [CLIProxyAPI v8.0.46 release](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.46), verifies its published SHA-256 digest, and saves it under `~/.local/share/claude-codex-http-bridge/`. It generates a random local key and a private config on your own machine. `codex-login` opens the OAuth flow and stores the resulting credential only in the installation's private `auth/` directory.
+The installer downloads the pinned [CLIProxyAPI v8.0.46 release](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.46), verifies its published SHA-256 digest, and saves it under `~/.local/share/claude-codex-http-bridge/` on macOS/Linux or `%LOCALAPPDATA%\claude-codex-http-bridge\` on Windows. It generates a random local key and a private config on your own machine. `codex-login` opens the OAuth flow and stores the resulting credential only in the installation's private `auth/` directory. The Windows installer adds its private `bin` directory to the current user's PATH; open a new terminal to use the command.
 
-If `~/.local/bin/claude-codex` already exists, the installer stops without changing it. Use `./install.sh --replace-command` only when you want the newly installed wrapper to replace that command. It does not copy or remove any existing OAuth credential.
+If the `claude-codex` command already exists at the install location, the installer stops without changing it. Use `--replace-command` only when you want the new wrapper to replace that command. It does not copy or remove any existing OAuth credential.
 
-For an isolated installation, pass `--root /private/path --bin-dir /private/path` to `install.sh`.
+For an isolated installation, pass `--root /private/path --bin-dir /private/path` to `install.sh` on POSIX, or `--root C:\private\path` to `install.py` on Windows.
 
 ## Use
 
@@ -58,11 +72,17 @@ Inside Claude Code:
 - `/effort` selects `low`, `medium`, `high`, `xhigh`, or `max`. `/effort ultracode` enables Claude Code's own dynamic workflows; it is not Codex Ultra.
 - `/autocompact` shows the safe threshold for the selected model. The launcher supplies a per-model setting, so `/model` switches also switch the threshold.
 
+The model list, route context windows, compaction thresholds, and status-line context mapping are generated from the authenticated local model catalog at session start. No model IDs or context sizes are fixed in the launcher. Restart `claude-codex` to refresh the picker when the upstream catalog changes. The proxy release itself stays pinned until its checksum and compatibility have been reviewed.
+
+### Claude HUD and other status-line plugins
+
+The launcher reads the existing user `statusLine.command` and passes Claude Code a temporary, private settings file that runs that same command through `statusline_adapter.py`. The adapter corrects the context size and percentage for the **current** Codex model, including after `/model` switches. It removes Claude-list-price dollars, Anthropic prompt-cache timers, and Anthropic rate-limit fields from the plugin input because they do not describe this Codex route. Other status-line fields and the user's original command are preserved; the user's settings file is not changed. Set `CLAUDE_CODEX_STATUSLINE_ADAPTER=0` before launch to disable this session-only adapter.
+
 Plain `claude` remains separate and uses its ordinary provider settings. `claude-codex models` is a catalog listing, not an entitlement guarantee; a completed inference request confirms access to a selected model.
 
 ## Tested behavior and boundaries
 
-On macOS Apple Silicon, the wrapper was tested with GPT-6.1 Sol, GPT-6 Sol, and GPT-5.6 Sol inference. In one interactive session, `/model` switched GPT-6.1 Sol → GPT-6 Sol → GPT-6.1 Terra and the actual response model changed. `/autocompact` reported 400k for the 500k routes and 200k for the 272k routes. Claude Code WebSearch, WebFetch, Read, Edit, Bash, Agent, MCP/ToolSearch, image input, structured output, and streaming were exercised during bridge evaluation; this is a functional sample, not exhaustive certification of every Claude Code release and command.
+On macOS Apple Silicon, the bridge was tested with GPT-6.1 Sol, GPT-6 Sol, and GPT-5.6 Sol inference. In one interactive session, `/model` switched GPT-6.1 Sol → GPT-6 Sol → GPT-6.1 Terra and the actual response model changed. `/autocompact` reported 400k for the 500k routes and 200k for the 272k routes. Claude Code WebSearch, WebFetch, Read, Edit, Bash, Agent, MCP/ToolSearch, image input, structured output, and streaming were exercised during bridge evaluation; this is a functional sample, not exhaustive certification of every Claude Code release and command. Native Windows CI checks installation, file ACLs, model catalog logic, and launcher startup without storing any OAuth credential; live Windows inference still requires an authenticated Windows session.
 
 `modelPicker.behavesAs` lets Claude Code offer model capabilities and avoids its `unrecognized_model` diagnostic. Claude Code may therefore display the mapped Claude model's **1M context and list-price cost**. Those UI figures are not the Codex subscription route's limit or bill. The local catalog's `context_window` controls the generated auto-compaction thresholds. See [Claude Code model configuration](https://code.claude.com/docs/en/model-config) and [the per-model settings reference](https://code.claude.com/docs/en/settings-reference#modelsettings).
 
@@ -70,8 +90,8 @@ The proxy is owned by the foreground launcher and stops when it exits. `--bg`/`-
 
 ## Security and privacy
 
-- The proxy binds `127.0.0.1` and requires a random key that exists only in a `0700` session directory while Claude Code runs. The launcher verifies the listener belongs to the child proxy process before sending the key.
-- The installed OAuth directory is `0700`; credentials, config, and checksum files are `0600`. The proxy binary is checked against the installation's verified release hash at each launch.
+- The proxy binds `127.0.0.1` and requires a random session key. The launcher verifies the listener belongs to its child proxy process before sending the key. On Windows it checks the listener PID with `netstat`; on POSIX it uses `lsof`.
+- On POSIX, OAuth and session directories are `0700`; credentials, config, and checksum files are `0600`. On Windows, NTFS ACLs restrict installation and session files to the current user and are verified before launch. The proxy binary is checked against the installation's verified release hash at each launch.
 - Proxy debug logging, request logging, usage statistics, the management panel, and the auto-update panel are disabled. Claude Code itself can still save local transcripts and communicate with services required by its own features.
 - The `.gitignore` is a source allowlist. Before pushing changes, inspect staged files and run `gitleaks git --redact .`.
 
