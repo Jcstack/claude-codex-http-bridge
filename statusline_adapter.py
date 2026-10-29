@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import subprocess
 import sys
 
 
@@ -49,9 +48,8 @@ def main() -> int:
     if len(sys.argv) != 2:
         return 2
     profile = json.loads(Path(sys.argv[1]).read_text())
-    command = profile.get("command")
     windows = profile.get("context_windows")
-    if not isinstance(command, str) or not command or not isinstance(windows, dict):
+    if not isinstance(windows, dict):
         return 2
     raw = sys.stdin.buffer.read(MAX_STDIN_BYTES + 1)
     if len(raw) > MAX_STDIN_BYTES:
@@ -62,10 +60,8 @@ def main() -> int:
             raw = (json.dumps(corrected_payload(payload, windows), separators=(",", ":")) + "\n").encode()
     except (UnicodeDecodeError, ValueError):
         pass
-    try:
-        return subprocess.run(command, shell=True, input=raw, timeout=10).returncode
-    except (OSError, subprocess.TimeoutExpired):
-        return 1
+    sys.stdout.buffer.write(raw)
+    return 0
 
 
 if __name__ == "__main__":

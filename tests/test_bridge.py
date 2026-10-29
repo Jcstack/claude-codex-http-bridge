@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import platform
+import shlex
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -190,8 +192,9 @@ class BridgeTests(unittest.TestCase):
                 settings_path, files = launcher.session_settings(base, {"gpt-6.1-sol": 500_000}, session_dir)
             result = json.loads(settings_path.read_text())
             self.assertIn("statusline_adapter.py", result["statusLine"]["command"])
+            self.assertIn(" | echo HUD", result["statusLine"]["command"])
             self.assertEqual(result["statusLine"]["refreshInterval"], 30)
-            self.assertEqual(json.loads(files[0].read_text())["command"], "echo HUD")
+            self.assertEqual(json.loads(files[0].read_text())["context_windows"], {"gpt-6.1-sol": 500_000})
             self.assertEqual(json.loads(user_settings.read_text())["statusLine"]["command"], "echo HUD")
 
     def test_launcher_waits_for_async_model_registration(self) -> None:
@@ -208,6 +211,40 @@ class BridgeTests(unittest.TestCase):
         ):
             launcher.wait_for_catalog(Proxy(), {"CODEX_BRIDGE_PORT": "12345"}, True)
         self.assertEqual(query.call_count, 2)
+
+    def test_statusline_filter_runs_in_host_shell(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            claude_dir = root / "claude"
+            claude_dir.mkdir()
+            consumer = root / "consumer.py"
+            consumer.write_text("import json,sys; print(json.load(sys.stdin)['context_window']['context_window_size'])\n")
+            if platform.system() == "Windows":
+                original = f'python "{consumer.as_posix()}"'
+            else:
+                original = shlex.join([sys.executable, str(consumer)])
+            (claude_dir / "settings.json").write_text(json.dumps({"statusLine": {
+                "type": "command", "command": original
+            }}))
+            base = root / "base.json"
+            base.write_text("{}")
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude_dir)}):
+                settings, _ = launcher.session_settings(base, {"gpt-6.1-sol": 500_000}, root)
+            command = json.loads(settings.read_text())["statusLine"]["command"]
+            payload = json.dumps({"model": {"id": "gpt-6.1-sol"}, "context_window": {
+                "context_window_size": 1_000_000, "current_usage": {"input_tokens": 100}
+            }})
+            execution = (["pwsh", "-NoProfile", "-NonInteractive", "-Command", command]
+                         if platform.system() == "Windows" else command)
+            result = subprocess.run(execution, shell=False if platform.system() == "Windows" else True,
+                                    input=payload, text=True, capture_output=True, check=True)
+            self.assertEqual(result.stdout.strip(), "500000")
+            if platform.system() == "Windows":
+                git_bash = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git" / "bin" / "bash.exe"
+                if git_bash.is_file():
+                    result = subprocess.run([str(git_bash), "-lc", command], input=payload,
+                                            text=True, capture_output=True, check=True)
+                    self.assertEqual(result.stdout.strip(), "500000")
 
 
 if __name__ == "__main__":

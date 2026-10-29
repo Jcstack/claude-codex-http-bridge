@@ -177,11 +177,14 @@ def session_settings(base: Path, windows: dict[str, int], directory: Path) -> tu
         return base, []
     profile_path = directory / "statusline-profile.json"
     settings_path = directory / "settings.json"
-    private_json(profile_path, {"command": status_line["command"], "context_windows": windows})
-    command_parts = [sys.executable, str(ROOT / "statusline_adapter.py"), str(profile_path)]
-    command = subprocess.list2cmdline(command_parts) if platform.system() == "Windows" else shlex.join(command_parts)
+    private_json(profile_path, {"context_windows": windows})
+    if platform.system() == "Windows":
+        python_command = "py -3" if shutil.which("py") else "python"
+        command = f'{python_command} "{(ROOT / "statusline_adapter.py").as_posix()}" "{profile_path.as_posix()}"'
+    else:
+        command = shlex.join([sys.executable, str(ROOT / "statusline_adapter.py"), str(profile_path)])
     settings = json.loads(base.read_text())
-    settings["statusLine"] = {**status_line, "command": command}
+    settings["statusLine"] = {**status_line, "command": command + " | " + status_line["command"]}
     private_json(settings_path, settings)
     return settings_path, [profile_path, settings_path]
 
