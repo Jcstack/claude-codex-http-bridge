@@ -76,6 +76,8 @@ Inside Claude Code:
 
 The model list, route context windows, compaction thresholds, and status-line context mapping are generated from the authenticated local model catalog at session start. No model IDs or context sizes are fixed in the launcher. Restart `claude-codex` to refresh the picker when the upstream catalog changes. The proxy release itself stays pinned until its checksum and compatibility have been reviewed.
 
+An API model's published maximum can differ from the context advertised by this ChatGPT-plan route. For example, on 2026-10-30 the local catalog advertised `272000` for GPT-6 Astra, while its [API model page](https://developers.openai.com/api/docs/models/gpt-6-astra) listed `1,050,000`; the page's `272K` price threshold does not grant a larger context to this route. The bridge uses the live route value until that catalog changes or a larger entitlement is verified.
+
 ### Claude HUD and other status-line plugins
 
 The launcher reads the existing user `statusLine.command` and passes Claude Code a private per-launch settings file that runs that same command through `statusline_adapter.py`. The adapter corrects the context size and percentage for the **current** Codex model, including after `/model` switches. It removes Claude-list-price dollars, Anthropic prompt-cache timers, and Anthropic rate-limit fields from the plugin input because they do not describe this Codex route. Other status-line fields and the user's original command are preserved; the user's settings file is not changed. The per-launch file remains available to detached background sessions and is removed by `claude-codex bridge stop`. Set `CLAUDE_CODEX_STATUSLINE_ADAPTER=0` before launch to disable the adapter.
