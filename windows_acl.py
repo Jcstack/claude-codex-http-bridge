@@ -66,6 +66,9 @@ def _powershell(script: str, paths: list[Path], protected: bool = False) -> None
             timeout=45,
         )
     except (OSError, subprocess.SubprocessError) as error:
+        if os.environ.get("CLAUDE_CODEX_DEBUG_ACL") == "1" and isinstance(error, subprocess.CalledProcessError):
+            detail = (error.stderr or b"").decode(errors="replace")[-1500:]
+            raise RuntimeError(f"Windows ACL command failed: {detail}") from error
         raise RuntimeError("Could not apply or verify private Windows ACLs (NTFS required)") from error
 
 
