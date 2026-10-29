@@ -1,0 +1,13 @@
+# Source-only allowlist. Runtime data and credentials must never enter Git.
+*
+!.gitignore
+!README.md
+!SECURITY.md
+!LICENSE
+!config.example.yaml
+!install.py
+!install.sh
+!run-claude-codex.sh
+!bridge_models.py
+!tests/
+!tests/*.py

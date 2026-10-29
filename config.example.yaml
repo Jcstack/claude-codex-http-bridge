@@ -1,0 +1,22 @@
+config-version: 8
+server:
+  host: "127.0.0.1"
+  port: 18317
+  max-request-body-bytes: 67108864
+management:
+  allow-remote: false
+  secret-key: "__MANAGEMENT_KEY__"
+  disable-control-panel: true
+  disable-auto-update-panel: true
+access:
+  api-keys:
+    - "__LOCAL_KEY__"
+oauth:
+  auth-dir: __AUTH_DIR__
+observability:
+  logs:
+    debug: false
+    logging-to-file: false
+    request-log: false
+  usage:
+    usage-statistics-enabled: false
