@@ -37,7 +37,7 @@ claude-codex --model gpt-6.1-sol
 ## Requirements
 
 - macOS, Linux, or native Windows on ARM64/aarch64 or x64
-- On Windows: Windows 10 1809+ or Windows Server 2019+, PowerShell 5.1+, and an NTFS installation directory. Windows Subsystem for Linux uses the Linux instructions.
+- On Windows: Windows 10 1809+ or Windows Server 2019+ and an NTFS installation directory. Windows Subsystem for Linux uses the Linux instructions.
 - Claude Code installed and on `PATH` (verified with Claude Code 2.1.312)
 - Python 3.10+; on macOS/Linux/WSL, `bash` and `lsof`
 - A ChatGPT account with Codex model access

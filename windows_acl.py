@@ -2,85 +2,85 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
-import shutil
+import re
 import subprocess
+import tempfile
 
 
-_LOCK = r"""
-$ErrorActionPreference = 'Stop'
-$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-foreach ($path in @(ConvertFrom-Json $env:CLAUDE_CODEX_ACL_PATHS)) {
-    $item = Get-Item -LiteralPath $path -Force
-    $acl = Get-Acl -LiteralPath $path
-    if ($item.PSIsContainer) {
-        $sddl = "D:P(A;OICI;FA;;;$sid)"
-    } else {
-        $sddl = "D:P(A;;FA;;;$sid)"
-    }
-    $acl.SetSecurityDescriptorSddlForm(
-        $sddl, [Security.AccessControl.AccessControlSections]::Access
-    )
-    Set-Acl -LiteralPath $path -AclObject $acl
-}
-"""
-
-_VERIFY = r"""
-$ErrorActionPreference = 'Stop'
-$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$protected = $env:CLAUDE_CODEX_REQUIRE_PROTECTED -eq '1'
-foreach ($path in @(ConvertFrom-Json $env:CLAUDE_CODEX_ACL_PATHS)) {
-    $acl = Get-Acl -LiteralPath $path
-    if ($protected -and -not $acl.AreAccessRulesProtected) {
-        throw 'Windows runtime ACL still inherits permissions'
-    }
-    $rules = @($acl.GetAccessRules(
-        $true, $true, [Security.Principal.SecurityIdentifier]
-    ))
-    if ($rules.Count -eq 0) {
-        throw 'Windows runtime ACL has no user access rule'
-    }
-    foreach ($rule in $rules) {
-        if ($rule.IdentityReference.Value -ne $sid -or
-            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
-            throw 'Windows runtime ACL grants another identity access'
-        }
-    }
-}
-"""
+SID_PATTERN = re.compile(r"S-1-\d+(?:-\d+)+")
 
 
-def _powershell(script: str, paths: list[Path], protected: bool = False) -> None:
-    if not paths:
-        return
-    environment = os.environ.copy()
-    # A PowerShell 7 parent can pass module paths that break Windows PowerShell 5.1.
-    environment.pop("PSModulePath", None)
-    environment["CLAUDE_CODEX_ACL_PATHS"] = json.dumps([str(path) for path in paths])
-    environment["CLAUDE_CODEX_REQUIRE_PROTECTED"] = "1" if protected else "0"
-    powershell = (os.environ.get("CLAUDE_CODEX_ACL_SHELL") or
-                  shutil.which("pwsh.exe") or shutil.which("powershell.exe") or "powershell.exe")
+def current_user_sid() -> str:
     try:
-        subprocess.run(
-            [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
-            env=environment,
-            capture_output=True,
-            check=True,
-            timeout=45,
-        )
+        result = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"],
+                                capture_output=True, check=True)
     except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("Could not identify the current Windows user") from error
+    match = SID_PATTERN.search(result.stdout.decode("utf-8", errors="replace"))
+    if not match:
+        raise RuntimeError("Could not read the current Windows user SID")
+    return match.group()
+
+
+def run_icacls(*arguments: str) -> None:
+    try:
+        subprocess.run(["icacls", *arguments], capture_output=True, check=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        detail = ""
         if os.environ.get("CLAUDE_CODEX_DEBUG_ACL") == "1" and isinstance(error, subprocess.CalledProcessError):
-            detail = (error.stderr or b"").decode(errors="replace")[-1500:]
-            raise RuntimeError(f"Windows ACL command failed: {detail}") from error
-        raise RuntimeError("Could not apply or verify private Windows ACLs (NTFS required)") from error
+            detail = ": " + (error.stderr or b"").decode(errors="replace")[-500:]
+        raise RuntimeError("Could not apply or verify private Windows ACLs (NTFS required)" + detail) from error
 
 
-def lock(paths: list[Path]) -> None:
-    _powershell(_LOCK, paths)
-    verify(paths, protected=True)
+def read_sddl(path: Path) -> str:
+    with tempfile.TemporaryDirectory(prefix="claude-codex-acl-") as directory:
+        snapshot = Path(directory) / "acl.txt"
+        run_icacls(str(path), "/save", str(snapshot))
+        data = snapshot.read_bytes()
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        content = data.decode("utf-16")
+    elif b"\x00" in data[:20]:
+        content = data.decode("utf-16-le")
+    else:
+        content = data.decode("utf-8-sig", errors="replace")
+    for line in content.splitlines():
+        match = re.search(r"D:[A-Z]*\(", line)
+        if match:
+            return line[match.start():].split("S:", 1)[0]
+    raise RuntimeError("Windows ACL snapshot did not contain a DACL")
 
 
 def verify(paths: list[Path], protected: bool = False) -> None:
-    _powershell(_VERIFY, paths, protected)
+    if not paths:
+        return
+    sid = current_user_sid()
+    for path in paths:
+        if path.is_symlink() or not path.exists():
+            raise RuntimeError("Windows runtime path is missing or symlinked")
+        dacl = read_sddl(path)
+        flags = dacl.split("(", 1)[0]
+        if protected and "P" not in flags:
+            raise RuntimeError("Windows runtime ACL still inherits permissions")
+        entries = re.findall(r"\(([^()]*)\)", dacl)
+        if not entries:
+            raise RuntimeError("Windows runtime ACL has no access rules")
+        for entry in entries:
+            fields = entry.split(";")
+            if len(fields) != 6 or fields[0] != "A" or fields[-1] != sid:
+                raise RuntimeError("Windows runtime ACL grants another identity access")
+
+
+def lock(paths: list[Path]) -> None:
+    if not paths:
+        return
+    sid = current_user_sid()
+    for path in paths:
+        if path.is_symlink() or not path.exists():
+            raise RuntimeError("Refusing missing or symlinked Windows runtime path")
+        grant = f"*{sid}:(OI)(CI)F" if path.is_dir() else f"*{sid}:F"
+        run_icacls(str(path), "/reset")
+        run_icacls(str(path), "/grant:r", grant)
+        run_icacls(str(path), "/inheritance:r")
+    verify(paths, protected=True)

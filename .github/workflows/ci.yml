@@ -36,7 +36,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          CLAUDE_CODEX_ACL_SHELL: powershell.exe
+          CLAUDE_CODEX_DEBUG_ACL: '1'
         run: |
           $bridgeRoot = Join-Path $env:RUNNER_TEMP 'claude-codex-bridge'
           python install.py --root $bridgeRoot
