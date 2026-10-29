@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 import hashlib
+import subprocess
 
 import bridge_models
 import install
@@ -192,6 +193,21 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(result["statusLine"]["refreshInterval"], 30)
             self.assertEqual(json.loads(files[0].read_text())["command"], "echo HUD")
             self.assertEqual(json.loads(user_settings.read_text())["statusLine"]["command"], "echo HUD")
+
+    def test_launcher_waits_for_async_model_registration(self) -> None:
+        class Proxy:
+            def poll(self):
+                return None
+
+        replies = [
+            subprocess.CompletedProcess([], 0, '{"chat":0,"eligible":0}'),
+            subprocess.CompletedProcess([], 0, '{"chat":8,"eligible":8}'),
+        ]
+        with patch.object(launcher.subprocess, "run", side_effect=replies) as query, patch.object(
+            launcher.time, "sleep"
+        ):
+            launcher.wait_for_catalog(Proxy(), {"CODEX_BRIDGE_PORT": "12345"}, True)
+        self.assertEqual(query.call_count, 2)
 
 
 if __name__ == "__main__":

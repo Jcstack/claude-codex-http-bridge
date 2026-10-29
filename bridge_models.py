@@ -275,8 +275,8 @@ def runtime_settings(chat: dict[str, dict]) -> Path:
 
 
 def main() -> int:
-    if len(sys.argv) < 2 or sys.argv[1] not in ("verify", "session", "list", "prepare"):
-        print("Usage: bridge_models.py verify | session | list | prepare MODEL", file=sys.stderr)
+    if len(sys.argv) < 2 or sys.argv[1] not in ("verify", "session", "catalog", "list", "prepare"):
+        print("Usage: bridge_models.py verify | session | catalog | list | prepare MODEL", file=sys.stderr)
         return 2
     if sys.argv[1] == "verify":
         if len(sys.argv) != 2:
@@ -289,6 +289,11 @@ def main() -> int:
         make_session()
         return 0
     chat, images = discover()
+    if sys.argv[1] == "catalog":
+        if len(sys.argv) != 2:
+            return 2
+        print(json.dumps({"chat": len(chat), "eligible": sum(eligible(row) for row in chat.values())}))
+        return 0
     choices = aliases(chat)
     if sys.argv[1] == "list":
         print("Codex chat models listed by local HTTP /v1/models:")

@@ -60,7 +60,8 @@ def _powershell(script: str, paths: list[Path], protected: bool = False) -> None
     environment.pop("PSModulePath", None)
     environment["CLAUDE_CODEX_ACL_PATHS"] = json.dumps([str(path) for path in paths])
     environment["CLAUDE_CODEX_REQUIRE_PROTECTED"] = "1" if protected else "0"
-    powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe") or "powershell.exe"
+    powershell = (os.environ.get("CLAUDE_CODEX_ACL_SHELL") or
+                  shutil.which("pwsh.exe") or shutil.which("powershell.exe") or "powershell.exe")
     try:
         subprocess.run(
             [powershell, "-NoProfile", "-NonInteractive", "-Command", script],

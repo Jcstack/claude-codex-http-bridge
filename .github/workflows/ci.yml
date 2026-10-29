@@ -35,11 +35,15 @@ jobs:
       - name: Verify native Windows installation and ACLs
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          CLAUDE_CODEX_ACL_SHELL: powershell.exe
         run: |
           $bridgeRoot = Join-Path $env:RUNNER_TEMP 'claude-codex-bridge'
           python install.py --root $bridgeRoot
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python (Join-Path $bridgeRoot 'bridge_models.py') verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/smoke_proxy.py $bridgeRoot
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $bridgeRoot 'bin/claude-codex.cmd') --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

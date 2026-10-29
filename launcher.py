@@ -102,6 +102,23 @@ def wait_for_private_listener(proxy: subprocess.Popen, port: int) -> None:
         raise RuntimeError("Local model port is not owned exclusively by this session's proxy")
 
 
+def wait_for_catalog(proxy: subprocess.Popen, environment: dict[str, str], require_eligible: bool) -> None:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if proxy.poll() is not None:
+            raise RuntimeError("Local model proxy exited before its model catalog was ready")
+        result = subprocess.run(
+            [sys.executable, str(HELPER), "catalog"], env=environment,
+            capture_output=True, text=True, timeout=8,
+        )
+        if result.returncode == 0:
+            counts = json.loads(result.stdout)
+            if counts.get("eligible" if require_eligible else "chat", 0) > 0:
+                return
+        time.sleep(0.3)
+    raise RuntimeError("No Codex models appeared in the local catalog; run claude-codex codex-login")
+
+
 def claude_environment(port: int, key: str, model: str) -> dict[str, str]:
     environment = os.environ.copy()
     for name in (
@@ -198,6 +215,7 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str) -
             environment = os.environ.copy()
             environment["CODEX_BRIDGE_PORT"] = str(port)
             environment["CODEX_BRIDGE_KEY_FILE"] = str(key_path)
+            wait_for_catalog(proxy_process, environment, require_eligible=(mode != "models"))
             if mode == "models":
                 return subprocess.call([sys.executable, str(HELPER), "list"], env=environment)
             model_info = helper_output("prepare", selected, environment=environment).split("\t")
