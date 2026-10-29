@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 
@@ -55,11 +56,14 @@ def _powershell(script: str, paths: list[Path], protected: bool = False) -> None
     if not paths:
         return
     environment = os.environ.copy()
+    # A PowerShell 7 parent can pass module paths that break Windows PowerShell 5.1.
+    environment.pop("PSModulePath", None)
     environment["CLAUDE_CODEX_ACL_PATHS"] = json.dumps([str(path) for path in paths])
     environment["CLAUDE_CODEX_REQUIRE_PROTECTED"] = "1" if protected else "0"
+    powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe") or "powershell.exe"
     try:
         subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
             env=environment,
             capture_output=True,
             check=True,

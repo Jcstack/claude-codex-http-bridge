@@ -97,6 +97,8 @@ The proxy is owned by the foreground launcher and stops when it exits. `--bg`/`-
 
 See [SECURITY.md](SECURITY.md) for credential-handling rules.
 
+See [COMPATIBILITY.md](COMPATIBILITY.md) for the Claude Code feature matrix, Claude HUD behavior, current route limits, and a source-backed model comparison.
+
 ## License
 
 The wrapper and installer are MIT licensed. CLIProxyAPI is downloaded separately under its own MIT license; its license is retained in the local installation.
