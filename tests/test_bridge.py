@@ -142,6 +142,16 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(windows_acl.same_identity("LA", "S-1-5-21-42-1001"))
         self.assertFalse(windows_acl.same_identity("BA", "S-1-5-21-42-500"))
 
+    @unittest.skipUnless(platform.system() == "Windows", "NTFS ACL inheritance requires Windows")
+    def test_windows_oauth_file_inherits_private_acl(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            auth = Path(directory) / "auth"
+            auth.mkdir()
+            windows_acl.lock([auth])
+            credential = auth / "dummy.json"
+            credential.write_text("{}")
+            windows_acl.verify([credential])
+
     def test_launcher_model_and_background_arguments(self) -> None:
         self.assertEqual(
             launcher.parse_args(["--model", "gpt-6.1-sol", "--effort", "max"]),
