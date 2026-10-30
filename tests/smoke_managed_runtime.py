@@ -168,8 +168,14 @@ def background_claude(claude, env, settings, work):
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             current = [row for row in rows() if row["id"] != first_id and row["id"] not in baseline_ids]
-            if len(current) == 1 and current[0].get("state") == "done" and len(Upstream.requests) > before:
-                return
+            if len(current) == 1 and len(Upstream.requests) > before and (current[0].get("state") == "done" or current[0].get("status") == "idle"):
+                sid = current[0].get("sessionId")
+                if isinstance(sid, str):
+                    for transcript in (config / "projects").glob("*/" + sid + ".jsonl"):
+                        for line in transcript.read_text(encoding="utf-8").splitlines():
+                            record = json.loads(line)
+                            if record.get("type") == "assistant" and any(b.get("text") == "FIXTURE" for b in record.get("message", {}).get("content", []) if isinstance(b, dict)):
+                                return
             if current and current[0].get("state") in ("failed", "stopped"):
                 raise RuntimeError("Background TLS/profile continuation failed")
             time.sleep(.25)
@@ -208,6 +214,11 @@ def main():
                 try:
                     value = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC})
                     runtime = root / "runtime-managed"
+                    # Existing Windows manifests may use CRLF. Rollback must
+                    # restore their exact bytes without another translation.
+                    manifest_path = runtime / "backend.json"
+                    original_bytes = manifest_path.read_bytes()
+                    runtime_bundle.write_file(manifest_path, original_bytes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"), 0o600)
                     key = rolling_runtime.private_key(runtime / "front-key")
                     ca = runtime / "ca.pem"
                     request = {"model": MODEL, "max_tokens": 100, "messages": [{"role": "user", "content": "fixture"}]}

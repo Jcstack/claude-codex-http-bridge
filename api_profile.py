@@ -95,7 +95,7 @@ def write_private(path: Path, value: str) -> None:
     temporary = path.with_name(path.name + "." + secrets.token_hex(8) + ".tmp")
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        with os.fdopen(descriptor, "w") as handle:
+        with os.fdopen(descriptor, "w", newline="\n") as handle:
             handle.write(value)
             handle.flush()
             os.fsync(handle.fileno())
