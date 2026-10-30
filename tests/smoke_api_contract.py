@@ -120,7 +120,7 @@ class Upstream(BaseHTTPRequestHandler):
             self.wfile.write(encoded)
 
 
-def post(port: int, local_key: str, payload: dict) -> dict:
+def post(port: int, local_key: str, payload: dict, timeout: float = 10) -> dict:
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/v1/messages",
         data=json.dumps(payload).encode(),
@@ -132,7 +132,7 @@ def post(port: int, local_key: str, payload: dict) -> dict:
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with opener.open(request, timeout=10) as response:
+        with opener.open(request, timeout=timeout) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
         raise RuntimeError(f"Mock route returned HTTP {error.code}: {error.read().decode(errors='replace')}") from None
