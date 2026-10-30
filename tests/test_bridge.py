@@ -20,6 +20,7 @@ import codex_usage
 import install
 import launcher
 import statusline_adapter
+import webfetch_pdf_guard
 import windows_acl
 
 
@@ -50,7 +51,7 @@ class BridgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             key = Path(directory) / "key"
             key.write_text("test-key\n")
-            with patch.dict(os.environ, {"CODEX_BRIDGE_KEY_FILE": str(key)}), patch.object(
+            with patch.dict(os.environ, {"CODEX_BRIDGE_KEY_FILE": str(key), "CLAUDE_CODEX_PDF_GUARD": "1"}), patch.object(
                 bridge_models, "get_json", side_effect=[public, rich]
             ), patch.object(bridge_models, "ROOT", Path(directory)):
                 chat, images = bridge_models.discover()
@@ -58,7 +59,13 @@ class BridgeTests(unittest.TestCase):
                 self.assertEqual(images, ["gpt-image-1"])
                 self.assertEqual(bridge_models.aliases(chat)["sol"], "gpt-6.1-sol")
                 self.assertFalse(bridge_models.eligible(chat["gpt-6.1-luna"]))
-                settings = json.loads(bridge_models.runtime_settings(chat).read_text())
+                guarded_path = bridge_models.runtime_settings(chat)
+                settings = json.loads(guarded_path.read_text())
+                with patch.dict(os.environ, {"CLAUDE_CODEX_PDF_GUARD": "0"}):
+                    unguarded_path = bridge_models.runtime_settings(chat)
+                self.assertNotEqual(guarded_path, unguarded_path)
+                self.assertIn("hooks", json.loads(guarded_path.read_text()))
+                self.assertNotIn("hooks", json.loads(unguarded_path.read_text()))
             options = settings["modelPicker"]["options"]
             self.assertEqual({row["model"] for row in options}, {
                 "gpt-6.1-sol", "gpt-6-sol", "gpt-6.1-astra"
@@ -66,6 +73,29 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(settings["modelSettings"]["gpt-6.1-sol"]["autoCompactWindow"], 400_000)
             self.assertEqual(settings["modelSettings"]["gpt-6-sol"]["autoCompactWindow"], 200_000)
             self.assertTrue(settings["modelPicker"]["replaceBuiltInOptions"])
+            hook = settings["hooks"]["PostToolUse"][0]
+            self.assertEqual(hook["matcher"], "WebFetch")
+            self.assertEqual(hook["hooks"][0]["command"], sys.executable)
+            self.assertIn("webfetch_pdf_guard.py", hook["hooks"][0]["args"][0])
+
+    def test_webfetch_pdf_guard_replaces_unreadable_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            results = Path(directory) / "tool-results"
+            results.mkdir()
+            saved = results / "webfetch-example.pdf"
+            saved.write_bytes(b"%PDF-1.7\nfixture")
+            original = f"A plausible but unverified quote.\n[Binary content (application/pdf, 19B) also saved to {saved}]"
+            event = {"hook_event_name": "PostToolUse", "tool_name": "WebFetch",
+                     "tool_response": {"content": original, "meta": {"ok": True}}}
+            output = webfetch_pdf_guard.transform(event)
+            self.assertIsNotNone(output)
+            replacement = output["hookSpecificOutput"]["updatedToolOutput"]
+            self.assertEqual(replacement["meta"], {"ok": True})
+            self.assertNotIn("plausible", replacement["content"])
+            self.assertIn(str(saved), replacement["content"])
+            self.assertIn("unverified", replacement["content"])
+            self.assertIsNone(webfetch_pdf_guard.transform({**event, "tool_name": "WebSearch"}))
+            self.assertIsNone(webfetch_pdf_guard.transform({**event, "tool_response": "Ordinary HTML"}))
 
     def test_session_key_and_config_are_private(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

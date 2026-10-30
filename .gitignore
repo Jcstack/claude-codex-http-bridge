@@ -6,6 +6,7 @@
 !CAPABILITY_AUDIT.md
 !BROWSER.md
 !API_ROUTE_RESEARCH.md
+!STREAMING.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -14,6 +15,7 @@
 !launcher.py
 !statusline_adapter.py
 !codex_usage.py
+!webfetch_pdf_guard.py
 !run-claude-codex.sh
 !bridge_models.py
 !windows_acl.py

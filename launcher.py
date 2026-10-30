@@ -433,10 +433,15 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str) -
         print("The localhost bridge stays available for /background and --bg; stop it with claude-codex bridge stop.", file=sys.stderr)
     print("Use /model to switch among live Codex models; press s to keep the choice in this session.", file=sys.stderr)
     print("Claude Code may show Claude alias context or list cost; those UI values are not Codex limits or billing.", file=sys.stderr)
+    command = [claude, "--settings", str(settings_path), "--model", model, *claude_args]
+    if platform.system() != "Windows":
+        # Replace the Python launcher so tmux sees Claude Code as the foreground process.
+        # The localhost service is independent and must remain alive for background agents.
+        os.execvpe(claude, command, claude_environment_values)
     claude_process = None
     try:
         claude_process = subprocess.Popen(
-            [claude, "--settings", str(settings_path), "--model", model, *claude_args],
+            command,
             env=claude_environment_values,
         )
         return claude_process.wait()

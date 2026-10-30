@@ -240,7 +240,6 @@ def runtime_settings(chat: dict[str, dict]) -> Path:
     if platform.system() == "Windows":
         import windows_acl
         windows_acl.lock([directory])
-    path = directory / "all.json"
     options = []
     model_settings = {}
     for slug in sorted(ready, key=display_key):
@@ -261,9 +260,19 @@ def runtime_settings(chat: dict[str, dict]) -> Path:
         },
         "modelSettings": model_settings,
     }
+    if os.environ.get("CLAUDE_CODEX_PDF_GUARD") != "0":
+        guard = ROOT / "webfetch_pdf_guard.py"
+        value["hooks"] = {"PostToolUse": [{
+            "matcher": "WebFetch",
+            "hooks": [{"type": "command", "command": sys.executable,
+                       "args": [str(guard)], "timeout": 5}],
+        }]}
     content = json.dumps(value, indent=2) + "\n"
-    if not path.exists() or path.read_text() != content:
-        temporary = directory / (slug + f".{os.getpid()}.tmp")
+    path = directory / ("catalog-" + hashlib.sha256(content.encode()).hexdigest() + ".json")
+    if path.is_symlink() or (path.exists() and (not path.is_file() or path.read_text() != content)):
+        raise RuntimeError("Private model settings file changed unexpectedly")
+    if not path.exists():
+        temporary = directory / ("catalog-" + secrets.token_hex(8) + ".tmp")
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w") as handle:
             handle.write(content)

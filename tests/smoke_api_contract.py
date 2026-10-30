@@ -55,12 +55,37 @@ class Upstream(BaseHTTPRequestHandler):
                 "id": response["id"], "model": MODEL, "status": "in_progress"}},
             {"type": "response.completed", "response": response},
         ]
+        if len(self.requests) == 4:
+            events = [
+                events[0],
+                {"type": "response.output_item.added", "output_index": 0,
+                 "item": {"id": "msg_stream", "type": "message", "role": "assistant", "content": []}},
+                {"type": "response.content_part.added", "output_index": 0, "content_index": 0,
+                 "part": {"type": "output_text", "text": ""}},
+                {"type": "response.output_text.delta", "output_index": 0, "content_index": 0,
+                 "delta": "live "},
+                {"type": "response.output_text.delta", "output_index": 0, "content_index": 0,
+                 "delta": "stream"},
+                {"type": "response.output_item.done", "output_index": 0,
+                 "item": {"id": "msg_stream", "type": "message", "status": "completed",
+                          "role": "assistant", "content": [{"type": "output_text",
+                                                       "text": "live stream", "annotations": []}]}},
+                events[1],
+            ]
         encoded = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Content-Length", str(len(encoded)))
+        if len(self.requests) != 4:
+            self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
-        self.wfile.write(encoded)
+        if len(self.requests) == 4:
+            for index, event in enumerate(events):
+                self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
+                self.wfile.flush()
+                if index == 3:
+                    time.sleep(.25)
+        else:
+            self.wfile.write(encoded)
 
 
 def free_port() -> int:
@@ -95,6 +120,23 @@ def rich_catalog(port: int) -> dict:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(request, timeout=10) as response:
         return json.load(response)
+
+
+def post_stream(port: int, payload: dict) -> list[tuple[float, dict]]:
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/v1/messages",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": "Bearer mock-local",
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        },
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=10) as response:
+        assert response.headers.get_content_type() == "text/event-stream"
+        return [(time.monotonic(), json.loads(line[6:])) for line in response
+                if line.startswith(b"data: ") and line[6:].strip() != b"[DONE]"]
 
 
 def main() -> None:
@@ -208,7 +250,21 @@ multimedia:
                 "tools": [{"type": "web_search_20260209", "name": "web_search"}],
             })
             assert third.get("type") == "message", third
-            assert len(Upstream.requests) == 3, Upstream.requests
+            stream_events = post_stream(port, {
+                "model": MODEL, "max_tokens": 1024, "stream": True,
+                "messages": [{"role": "user", "content": "Stream a reply"}],
+            })
+            event_types = [event.get("type") for _, event in stream_events]
+            assert event_types[0] == "message_start" and event_types[-1] == "message_stop", event_types
+            deltas = [event.get("delta", {}).get("text", "") for _, event in stream_events
+                      if event.get("type") == "content_block_delta"]
+            assert "live " in deltas and "stream" in deltas, stream_events
+            first_delta_at = next(when for when, event in stream_events
+                                  if event.get("type") == "content_block_delta" and
+                                  event.get("delta", {}).get("text") == "live ")
+            stop_at = next(when for when, event in stream_events if event.get("type") == "message_stop")
+            assert stop_at - first_delta_at >= .10, stream_events
+            assert len(Upstream.requests) == 4, Upstream.requests
             for path, authorization, body in Upstream.requests:
                 assert path.endswith("/v1/responses"), path
                 assert authorization == "Bearer mock-upstream", authorization
