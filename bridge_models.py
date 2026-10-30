@@ -83,6 +83,11 @@ def make_session() -> None:
         )
         if any(setting not in source.splitlines() for setting in required_settings):
             raise RuntimeError("Bridge config template lost a privacy or security setting")
+        # Older private installations predate these settings. Apply them only
+        # when they have no routing section, so explicit local policy wins.
+        if not re.search(r"(?m)^routing:\s*$", source):
+            source += ("\nrouting:\n  retry:\n    request-retry: 1\n"
+                       "  cooldown:\n    transient-error-cooldown-seconds: -1\n")
         if platform.system() != "Windows" and (ROOT / "auth").stat().st_mode & 0o777 != 0o700:
             raise RuntimeError("Bridge auth directory must have 0700 permissions")
         config, port_count = re.subn(

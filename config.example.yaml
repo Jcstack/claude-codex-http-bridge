@@ -13,6 +13,11 @@ access:
     - "__LOCAL_KEY__"
 oauth:
   auth-dir: __AUTH_DIR__
+routing:
+  retry:
+    request-retry: 1
+  cooldown:
+    transient-error-cooldown-seconds: -1
 observability:
   logs:
     debug: false

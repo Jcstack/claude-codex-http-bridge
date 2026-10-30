@@ -177,6 +177,8 @@ Model ID: `gpt-6.1-sol`
             self.assertIn("max-context-length: 1050000", config)
             self.assertIn("max-context-length: 2000000", config)
             self.assertIn('disable-image-generation: "passthrough"', config)
+            self.assertIn('    request-retry: 1', config)
+            self.assertIn('    transient-error-cooldown-seconds: -1', config)
             for setting in ('host: "127.0.0.1"', 'allow-remote: false',
                             'disable-control-panel: true', 'request-log: false',
                             'usage-statistics-enabled: false'):
@@ -216,12 +218,16 @@ Model ID: `gpt-6.1-sol`
             config = template.replace("__LOCAL_KEY__", "sk-local-" + "a" * 64)
             config = config.replace("__MANAGEMENT_KEY__", "b" * 64)
             config = config.replace("__AUTH_DIR__", json.dumps(str(auth)))
+            config = config.replace("routing:\n  retry:\n    request-retry: 1\n"
+                                    "  cooldown:\n    transient-error-cooldown-seconds: -1\n", "")
             (root / "config.yaml").write_text(config)
             output = StringIO()
             with patch.object(bridge_models, "ROOT", root), redirect_stdout(output):
                 bridge_models.make_session()
             port, session_dir, config_path, key_path, _ = output.getvalue().strip().split("\t")
             self.assertTrue(port.isdigit())
+            self.assertIn('    request-retry: 1', Path(config_path).read_text())
+            self.assertIn('    transient-error-cooldown-seconds: -1', Path(config_path).read_text())
             if platform.system() == "Windows":
                 import windows_acl
                 windows_acl.verify([Path(session_dir), Path(config_path), Path(key_path)], protected=True)

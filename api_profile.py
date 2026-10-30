@@ -243,6 +243,11 @@ access:
     - {json.dumps(local_key)}
 oauth:
   auth-dir: {json.dumps(str(auth))}
+routing:
+  retry:
+    request-retry: 1
+  cooldown:
+    transient-error-cooldown-seconds: -1
 api-keys:
   codex:
     - name: direct-openai-api
