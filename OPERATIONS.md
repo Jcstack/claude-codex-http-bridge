@@ -38,6 +38,13 @@ New launches default `CLAUDE_CODE_ATTRIBUTION_HEADER=0` and `CLAUDE_CODE_GATEWAY
 
 OpenAI's current [API cache guide](https://developers.openai.com/api/docs/guides/prompt-caching) distinguishes GPT-5.6-and-later `prompt_cache_options.ttl` (`30m`/`12h`) from older `prompt_cache_retention` settings. Its API write prices must not be imported into Codex subscription accounting. The inspected [Codex 0.166 request schema](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/codex-api/src/common.rs#L263) includes a cache key and reasoning context but not those TTL controls. This bridge does not claim API TTL parity for the subscription backend or set an unverified retention policy. Compaction changes the prefix; model switches, expiry and upstream routing can also prevent reuse. Cache-read pricing and actual latency are separate measurements.
 
+An anonymous transport follow-up sent no credentials, prompts or model requests.
+Two trials each with standard environment-aware TLS, direct uTLS and uTLS with
+an explicitly supplied environment proxy all reached the fixed Codex catalog
+endpoint and returned the expected HTTP 401. Durations were 0.221–1.300 seconds.
+This small probe did not reproduce the authenticated stream's TLS/EOF failure,
+so it does not establish its cause or justify changing the live proxy settings.
+
 The installed discovery/launcher/diagnostic helpers were updated without stopping the service. Existing HUD profiles now reflect the discovered maximum. The status-line adapter suppresses Anthropic-specific cache-expiry and price fields; it retains actual cached-token usage. Arbitrary upper limits on future HUD context windows have been removed. Existing client compaction settings still require a later corrected launch/resume.
 
 ## Search state and isolated live handoff
