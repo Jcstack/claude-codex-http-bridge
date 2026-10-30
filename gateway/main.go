@@ -101,12 +101,16 @@ func checkPrivateRoot(root string) error {
 		return nil
 	}
 	// Paths are data in the child environment, never interpolated into code.
-	script := `$ErrorActionPreference='Stop'; $a=Get-Acl -LiteralPath $env:CLAUDE_CODEX_INGRESS_ROOT; $u=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; if (!$a.AreAccessRulesProtected) {exit 1}; foreach ($r in $a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {if ($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Value -ne $u) {exit 1}}`
+	script := `$ErrorActionPreference='Stop'; $a=Get-Acl -LiteralPath $env:CLAUDE_CODEX_INGRESS_ROOT; $u=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; if (!$a.AreAccessRulesProtected) {exit 21}; $n=0; foreach ($r in $a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {if ($r.AccessControlType -eq 'Allow') {$n++; if ($r.IdentityReference.Value -ne $u) {exit 22}}}; if ($n -eq 0) {exit 23}`
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	cmd.Env = append(os.Environ(), "CLAUDE_CODEX_INGRESS_ROOT="+root)
-	if cmd.Run() != nil {
+	if err := cmd.Run(); err != nil {
+		var failure *exec.ExitError
+		if errors.As(err, &failure) {
+			return fmt.Errorf("runtime NTFS ACL verification failed (check %d)", failure.ExitCode())
+		}
 		return errors.New("runtime NTFS ACL must grant access only to the current user")
 	}
 	return nil
