@@ -366,6 +366,10 @@ Model ID: `gpt-6.1-sol`
         switched = statusline_adapter.corrected_payload(payload, windows)
         self.assertEqual(switched["context_window"]["context_window_size"], 272_000)
         self.assertEqual(switched["context_window"]["used_percentage"], 42)
+        payload["model"]["id"] = "gpt-future-fixture"
+        future = statusline_adapter.corrected_payload(payload, {"gpt-future-fixture": 4_000_000})
+        self.assertEqual(future["context_window"]["context_window_size"], 4_000_000)
+        self.assertEqual(future["context_window"]["used_percentage"], 3)
 
     def test_codex_quota_maps_only_real_windows_and_requires_matching_account(self) -> None:
         response = {"rateLimitsByLimitId": {"codex": {

@@ -34,7 +34,7 @@ index 5c28be1..b4cbc14 100644
  		template = setClaudeStopSequence(template, "delta.stop_sequence", responseData)
  		inputTokens, outputTokens, cachedTokens, cacheWriteTokens := extractResponsesUsage(responseData.Get("usage"))
 diff --git a/internal/translator/codex/claude/codex_claude_response_web_search.go b/internal/translator/codex/claude/codex_claude_response_web_search.go
-index 333e021..6a97f23 100644
+index 333e021..02b9e7a 100644
 --- a/internal/translator/codex/claude/codex_claude_response_web_search.go
 +++ b/internal/translator/codex/claude/codex_claude_response_web_search.go
 @@ -1,6 +1,7 @@
@@ -45,7 +45,7 @@ index 333e021..6a97f23 100644
  	"encoding/json"
  	"fmt"
  	"strings"
-@@ -10,6 +11,49 @@ import (
+@@ -10,6 +11,52 @@ import (
  	"github.com/tidwall/sjson"
  )
  
@@ -58,6 +58,9 @@ index 333e021..6a97f23 100644
 +func validCodexWebReplay(item gjson.Result) bool {
 +	if item.Get("type").String() != "web_search_call" || item.Get("id").String() == "" || item.Get("status").String() != "completed" {
 +		return false
++	}
++	if item.Get("encrypted_content").String() != "" && !item.Get("action").Exists() {
++		return true
 +	}
 +	switch item.Get("action.type").String() {
 +	case "search":
@@ -95,7 +98,7 @@ index 333e021..6a97f23 100644
  func appendCodexWebSearchServerToolUse(output []byte, params *ConvertCodexResponseToClaudeParams, root, item gjson.Result) []byte {
  	toolUseID := codexWebSearchToolUseID(params, root, item)
  	if toolUseID == "" {
-@@ -21,10 +65,8 @@ func appendCodexWebSearchServerToolUse(output []byte, params *ConvertCodexRespon
+@@ -21,10 +68,8 @@ func appendCodexWebSearchServerToolUse(output []byte, params *ConvertCodexRespon
  	query := codexWebSearchQuery(root, item)
  	alreadyStarted := false
  	if _, ok := params.WebSearchToolUseIDs[toolUseID]; ok {
@@ -108,7 +111,16 @@ index 333e021..6a97f23 100644
  	}
  
  	if !alreadyStarted {
-@@ -83,6 +125,19 @@ func appendCodexWebSearchToolResult(output []byte, params *ConvertCodexResponseT
+@@ -66,7 +111,7 @@ func appendCodexWebSearchToolResult(output []byte, params *ConvertCodexResponseT
+ 	if _, ok := params.WebSearchToolResultIDs[toolUseID]; ok {
+ 		return output
+ 	}
+-	if codexWebSearchQuery(root, item) == "" && len(codexWebSearchResultContent(root, item)) == 0 && item.Get("action").Exists() == false {
++	if codexWebSearchQuery(root, item) == "" && len(codexWebSearchResultContent(root, item)) == 0 && !item.Get("action").Exists() && !validCodexWebReplay(item) {
+ 		return output
+ 	}
+ 
+@@ -83,6 +128,19 @@ func appendCodexWebSearchToolResult(output []byte, params *ConvertCodexResponseT
  	output = translatorcommon.AppendSSEEventBytes(output, "content_block_stop", stop, 2)
  	params.WebSearchToolResultIDs[toolUseID] = struct{}{}
  	params.BlockIndex++
@@ -128,7 +140,7 @@ index 333e021..6a97f23 100644
  	if toolUseID == params.LastWebSearchToolUseID {
  		params.LastWebSearchToolUseID = ""
  	}
-@@ -178,7 +233,7 @@ func appendCodexWebSearchNonStreamBlocks(contentBlocks [][]byte, item gjson.Resu
+@@ -178,7 +236,7 @@ func appendCodexWebSearchNonStreamBlocks(contentBlocks [][]byte, item gjson.Resu
  	emptyRoot := gjson.Result{}
  	query := codexWebSearchQuery(emptyRoot, item)
  	resultContent := codexWebSearchResultContent(emptyRoot, item)
@@ -137,7 +149,7 @@ index 333e021..6a97f23 100644
  		return contentBlocks
  	}
  
-@@ -196,6 +251,9 @@ func appendCodexWebSearchNonStreamBlocks(contentBlocks [][]byte, item gjson.Resu
+@@ -196,6 +254,9 @@ func appendCodexWebSearchNonStreamBlocks(contentBlocks [][]byte, item gjson.Resu
  		resultBlock, _ = sjson.SetRawBytes(resultBlock, "content", resultContent)
  	}
  	contentBlocks = append(contentBlocks, resultBlock)
@@ -149,10 +161,10 @@ index 333e021..6a97f23 100644
  }
 diff --git a/internal/translator/codex/claude/codex_web_replay_test.go b/internal/translator/codex/claude/codex_web_replay_test.go
 new file mode 100644
-index 0000000..46ac626
+index 0000000..7fd7658
 --- /dev/null
 +++ b/internal/translator/codex/claude/codex_web_replay_test.go
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,100 @@
 +package claude
 +
 +import (
@@ -187,6 +199,11 @@ index 0000000..46ac626
 +}
 +
 +func TestWebReplayRejectsOtherItemKindsAndOversizedState(t *testing.T) {
++	opaque := gjson.Parse(`{"type":"web_search_call","id":"ws_opaque","status":"completed","encrypted_content":"synthetic-private-action"}`)
++	block := codexWebReplayBlock(opaque)
++	if string(decodeCodexWebReplay(gjson.GetBytes(block, "signature").String())) != opaque.Raw {
++		t.Fatal("encrypted search state without a visible action was lost")
++	}
 +	for _, raw := range []string{`{"type":"function_call","name":"shell"}`, `{}`, "not-json"} {
 +		if decodeCodexWebReplay(codexWebReplayPrefix+base64.RawURLEncoding.EncodeToString([]byte(raw))) != nil {
 +			t.Fatal("accepted invalid replay envelope")

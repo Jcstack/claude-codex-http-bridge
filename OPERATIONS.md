@@ -36,6 +36,25 @@ The [cache fixture](tests/live_cache_context.py) used a stable Claude-style sess
 
 New launches default `CLAUDE_CODE_ATTRIBUTION_HEADER=0` and `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, respecting explicit overrides. The [official gateway guide](https://code.claude.com/docs/en/llm-gateway-protocol#system-prompt-attribution-block) recommends client-side attribution omission for third-party cache compatibility. Its [hint headers](https://code.claude.com/docs/en/llm-gateway-protocol#gateway-hint-headers) identify compaction without guessing from prompts. The client probe verified both flags and unchanged `max` effort. No compaction-effort override is installed.
 
+OpenAI's current [API cache guide](https://developers.openai.com/api/docs/guides/prompt-caching) distinguishes GPT-5.6-and-later `prompt_cache_options.ttl` (`30m`/`12h`) from older `prompt_cache_retention` settings. Its API write prices must not be imported into Codex subscription accounting. The inspected [Codex 0.166 request schema](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/codex-api/src/common.rs#L263) includes a cache key and reasoning context but not those TTL controls. This bridge does not claim API TTL parity for the subscription backend or set an unverified retention policy. Compaction changes the prefix; model switches, expiry and upstream routing can also prevent reuse. Cache-read pricing and actual latency are separate measurements.
+
+The installed discovery/launcher/diagnostic helpers were updated without stopping the service. Existing HUD profiles now reflect the discovered maximum. The status-line adapter suppresses Anthropic-specific cache-expiry and price fields; it retains actual cached-token usage. Arbitrary upper limits on future HUD context windows have been removed. Existing client compaction settings still require a later corrected launch/resume.
+
+## Search state and isolated live handoff
+
+A new regression found that v8.0.46 returned native search sources to Claude but dropped the search output item on the next request. The [candidate patch](upstream/patches/web-search-replay.patch) carries completed native `web_search_call` items through a bounded, typed internal transcript envelope, preserving source fields and encrypted search state without an in-memory lookup table. It does not encrypt public sources or create a credential. User-role content cannot inject an assistant replay item. Other native item types and oversized envelopes are rejected. Duplicate search events no longer emit deltas outside an open SSE block.
+
+[Synthetic HTTP and real-Claude resume tests](tests/smoke_web_state.py) verify exact native-item replay after replacing the disposable proxy process. A real subscription search returned two search calls and 16 source entries in 8.683 seconds; the next process accepted the preserved state and repeated a previously returned URL in 4.878 seconds. One earlier live trial failed a stricter exact-source-URL assertion; the later fixture distinguishes URLs returned in text from the native source list. These observations do not certify citation accuracy. Native output-text annotation conversion and full Claude citation UI fidelity remain gaps.
+
+The [live ingress probe](tests/live_gateway_handoff.py) used two disposable translators behind the stable listener, both calling the existing authenticated localhost service:
+
+| Trial | Old admitted request | Cached input during / after switch | Tool/reasoning continuation |
+| --- | --- | --- | --- |
+| 1 | Completed; old generation drained | 12,160 / 12,160 of 12,335 input tokens (98.58%) | Tool result retained; trivial call returned no reasoning signature |
+| 2 | Completed; old generation drained | 12,160 / 0 of 12,335 input tokens | Arithmetic tool fixture returned one reasoning signature; replay and result continuation succeeded on the other backend |
+
+Trial 1 requests took about 3.6–4.9 seconds; trial 2 took about 18–27 seconds. The second trial demonstrates that correct local handoff does not guarantee an upstream cache hit or low latency. It does not identify why that cache miss occurred. Neither trial switched the user's active service. The ingress is still an isolated candidate; it cannot inherit the legacy listener while that process owns its port.
+
 ## Regression gates
 
 | Probe | Result | Scope |
@@ -56,7 +75,7 @@ claude-codex diagnostics --hours 2
 claude-codex diagnostics --hours 24 --session SESSION_UUID
 ```
 
-This command makes no network/model call and never starts/stops a service. It reads local logs and recent main-session metadata, then emits an allowlisted JSON report. No prompts, credentials, project paths or raw session IDs are printed; tags are hashes. Error mentions are not retry counts, in-flight requests are absent, and the last main turn's effort does not establish compaction effort.
+This command makes no network/model call and never starts/stops a service. It reads local logs and recent main-session metadata, then emits an allowlisted JSON report. No prompts, credentials, project paths or raw session IDs are printed; tags are hashes. Cache counters deduplicate repeated assistant stream blocks by response ID and separate fresh input, reads and writes. The report includes recent failed requests without raw error bodies. Error mentions are not retry counts, in-flight requests are absent, and the last main turn's effort does not establish compaction effort. Commands, subagents and oversized skipped records may not appear in cache totals.
 
 ## Open sessions and service replacement
 
@@ -64,8 +83,8 @@ The current process owns the loopback listener directly. Its [shutdown code](htt
 
 Two isolated persistent-client experiments changed settings while a response remained open. The next request still used the old endpoint, and `/autocompact` retained the old window. Live file edits are not a demonstrated migration method. The host supports plugin reload, but [native translators take precedence](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/translator/registry.go#L124); a translator plugin cannot simply replace this native route.
 
-A safe upgrade needs a stable authenticated listener, a ready replacement backend, new-request routing and draining of old streams without replay. Local key, session identity, tool history and reasoning state must survive. The [isolated ingress implementation](gateway/README.md) now tests this routing primitive with no external dependencies, including in-flight stream preservation and cancellation. It is not installed; controller integration and initial migration from the existing direct listener remain unresolved. No active process was stopped on the assumption that a quick restart is harmless.
+A safe upgrade needs a stable authenticated listener, a ready replacement backend, new-request routing and draining of old streams without replay. Local key, session identity, tool history and reasoning state must survive. The [isolated ingress implementation](gateway/README.md) tests this routing primitive with no external dependencies, including in-flight stream preservation and cancellation; the live results above extend that to real model traffic. It is not installed; controller integration and initial migration from the existing direct listener remain unresolved. No active process was stopped on the assumption that a quick restart is harmless.
 
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
-Remaining work: safe handoff/promotion; live reasoning/cache continuity through handoff; diverse repeated repository evaluations; authenticated Windows inference/HUD/browser/resume; Codex-native context retrieval, desktop, steering and media integration. Native `/context`, `/usage` and budget UI still have Claude-alias limitations. API-key pilots stay disabled by user preference and Opus lacks an account. These checks do not certify every feature or Opus parity.
+Remaining work: initial migration and controller/promotion integration; stronger cache consistency evidence; native citation annotation mapping; transport failures and slow compaction; diverse repeated repository evaluations; authenticated Windows inference/HUD/browser/resume; Codex-native context retrieval, desktop, steering and media integration. Native `/context`, `/usage` and budget UI still have Claude-alias limitations. API-key pilots stay disabled by user preference and Opus lacks an account. These checks do not certify every feature or Opus parity.

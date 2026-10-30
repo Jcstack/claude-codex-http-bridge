@@ -9,7 +9,7 @@ Claude Code ──Anthropic Messages──> 127.0.0.1 + private local key
 
 The repository contains source and an example config only. It does **not** contain the upstream proxy binary, OAuth credentials, API keys, prompts, transcripts, or runtime logs.
 
-The installed proxy remains pinned to the reviewed upstream release. An isolated, credential-free candidate adds cache-preserving dynamic tool translation; it is not installed by the normal launcher. See the [community review and release gate](COMMUNITY_REVIEW.md), [model-versus-harness evidence](MODEL_HARNESS_EVIDENCE.md), and [local GPT harness pilot](HARNESS_PILOT.md).
+The installed proxy remains pinned to the reviewed upstream release. An isolated candidate adds cache-preserving dynamic tools and native search-state replay; it is not installed by the normal launcher. CI uses no model credentials, and local live probes use only the existing service's localhost key. See the [community review and release gate](COMMUNITY_REVIEW.md), [measured cache and rolling-backend results](OPERATIONS.md), [model-versus-harness evidence](MODEL_HARNESS_EVIDENCE.md), and [local GPT harness pilot](HARNESS_PILOT.md).
 
 ## 中文快速开始
 
@@ -84,7 +84,7 @@ claude-codex                         # newest catalog-listed Sol
 claude-codex --model gpt-6-sol       # exact model ID
 claude-codex --model gpt-5.6-sol --effort max
 claude-codex bridge status            # localhost service state
-claude-codex diagnostics --hours 2    # read-only latency/compaction metadata
+claude-codex diagnostics --hours 2    # read-only cache, latency, failures and compaction
 claude-codex bridge stop              # after background work has finished
 ```
 
@@ -92,7 +92,7 @@ Inside Claude Code:
 
 - `/model` lists every eligible text model returned by the local bridge's current `/v1/models` catalog. Use the arrow keys and press **s** to switch for this session only. Enter saves the model to Claude Code's user settings and may affect a later plain `claude` launch.
 - `/effort` selects `low`, `medium`, `high`, `xhigh`, or `max`. `/effort ultracode` enables Claude Code's own dynamic workflows; it is not Codex Ultra.
-- `/autocompact` shows the safe threshold for the selected model. The launcher supplies a per-model setting, so `/model` switches also switch the threshold.
+- `/autocompact` shows the configured window for the selected model. The launcher supplies a per-model setting, so `/model` switches also switch that setting. Claude reserves space internally and may compact earlier. Its higher-priority launch setting cannot currently be changed by `/autocompact` within that session.
 
 The model list, context windows, compaction settings and HUD mapping come from the authenticated catalog at session start. Discovery uses a valid `max_context_window`, preserves `context_window` as the default, and otherwise uses the declared default. Model IDs and context sizes remain dynamic. New sessions refresh these values; running sessions retain their startup settings. The proxy release itself stays pinned until its checksum and compatibility have been reviewed.
 
@@ -110,7 +110,7 @@ Plain `claude` remains separate and uses its ordinary provider settings. `claude
 
 ## Tested behavior and boundaries
 
-On macOS Apple Silicon, the bridge was tested with GPT-6.1 Sol, GPT-6 Sol, and GPT-5.6 Sol inference. In one interactive session, `/model` switched GPT-6.1 Sol → GPT-6 Sol → GPT-6.1 Terra and the actual response model changed. `/autocompact` reported 400k for the 500k routes and 200k for the 272k routes. An authenticated `--bg` task completed with a `PONG` response after the launcher exited. Claude Code WebSearch, WebFetch, Read, Edit, Bash, Agent, MCP/ToolSearch, image input, structured output, and streaming were exercised during bridge evaluation; this is a functional sample, not exhaustive certification of every Claude Code release and command. Native Windows CI checks installation, file ACLs, model catalog logic, proxy service lifecycle, and launcher startup without storing any OAuth credential; live Windows inference still requires an authenticated Windows session.
+On macOS Apple Silicon, the bridge was tested with GPT-6.1 Sol, GPT-6 Sol, GPT-5.6 Sol and Astra inference. In one interactive session, `/model` switched GPT-6.1 Sol → GPT-6 Sol → GPT-6.1 Terra and the actual response model changed. Earlier 400k/200k compaction settings used default context metadata and have been replaced for new launches by 90% of the discovered maximum (currently 784,800 for an 872,000 maximum). An authenticated `--bg` task completed with a `PONG` response after the launcher exited. Claude Code WebSearch, WebFetch, Read, Edit, Bash, Agent, MCP/ToolSearch, image input, structured output, and streaming were exercised during bridge evaluation; this is a functional sample, not exhaustive certification of every Claude Code release and command. Native Windows CI checks installation, file ACLs, model catalog logic, proxy service lifecycle, launcher startup and real-client offline fixtures without model credentials; live Windows inference still requires an authenticated Windows session.
 
 Claude Code 2.1.314 can feed downloaded PDF bytes to WebFetch's summarizer, which may produce an unsupported summary. Bridge launches now add a `PostToolUse:WebFetch` hook that replaces only results carrying Claude Code's binary-PDF marker with a clear warning and the verified saved-file path. The model can then use Claude Code `Read` or local PDF extraction to inspect the actual document. The hook makes no extra network request or file copy, works inside subagents, and does not change the user's settings file or other WebFetch results. Set `CLAUDE_CODEX_PDF_GUARD=0` before launching to opt out. [Upstream Claude Code issue](https://github.com/anthropics/claude-code/issues/90416).
 Claude Code itself still saves the downloaded binary; this hook does not change its [file retention behavior](https://github.com/anthropics/claude-code/issues/104178).

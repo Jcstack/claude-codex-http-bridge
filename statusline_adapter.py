@@ -18,7 +18,7 @@ def corrected_payload(payload: dict, context_windows: dict[str, int], codex_limi
     model = result.get("model")
     model_id = model.get("id") if isinstance(model, dict) else None
     window = context_windows.get(model_id) if isinstance(model_id, str) else None
-    if type(window) is int and 100_000 <= window <= 2_000_000:
+    if type(window) is int and window > 0:
         context = result.get("context_window")
         context = dict(context) if isinstance(context, dict) else {}
         usage = context.get("current_usage")

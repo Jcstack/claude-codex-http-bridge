@@ -64,7 +64,7 @@ def duration(value: str) -> float | None:
 
 def proxy_summary(path: Path, since: datetime) -> dict:
     counts, errors = Counter(), Counter()
-    latencies, slow = [], []
+    latencies, slow, failed = [], [], []
     for line in lines(path):
         date = re.match(r"^\[([^]]+)\]", line)
         at = timestamp(date[1]) if date else None
@@ -77,6 +77,9 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             status = int(match[2])
             counts[str(status)] += 1
             seconds = duration(match[3].strip())
+            if status >= 400:
+                failed.append({"at": at.isoformat(), "status": status, "endpoint": endpoint,
+                               "seconds": round(seconds, 3) if seconds is not None else None})
             if match[4] == "POST" and endpoint in ("/v1/messages", "/v1/responses") and seconds is not None:
                 latencies.append(seconds)
                 if seconds >= 120:
@@ -93,12 +96,15 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                                 "p95": round(ordered[math.ceil(len(ordered) * .95) - 1], 3) if ordered else None,
                                 "max": round(ordered[-1], 3) if ordered else None},
             "slow_requests": slow[-12:],
+            "failed_requests": failed[-12:],
             "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error mentions are not retry counts."}
 
 
 def session_summary(path: Path, since: datetime) -> dict:
     compactions, last_request, last_activity = [], None, None
     api_errors = 0
+    usage_by_message = {}
+    usage_fields = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
     for line in lines(path):
         try:
             record = json.loads(line)
@@ -132,14 +138,33 @@ def session_summary(path: Path, since: datetime) -> dict:
                                 "after_tokens": number(meta.get("postTokens"))})
         elif record.get("type") == "assistant" and record.get("isApiErrorMessage") is True:
             api_errors += 1
+        elif record.get("type") == "assistant":
+            message = record.get("message")
+            if not isinstance(message, dict):
+                continue
+            usage, message_id = message.get("usage"), message.get("id")
+            if not isinstance(usage, dict) or not isinstance(message_id, str) or not message_id:
+                continue
+            # Multiple transcript blocks can repeat cumulative usage for one
+            # response. Deduplicate before computing a session cache ratio.
+            counts = usage_by_message.setdefault(message_id, dict.fromkeys(usage_fields, 0))
+            for field in usage_fields:
+                value = usage.get(field)
+                if type(value) is int and value >= 0:
+                    counts[field] = max(counts[field], value)
     values = [item["seconds"] for item in compactions if item["seconds"] is not None]
+    totals = {field: sum(row[field] for row in usage_by_message.values()) for field in usage_fields}
+    total_input = sum(totals.values())
+    cache = {**totals, "total_input_tokens": total_input, "responses_with_usage": len(usage_by_message),
+             "cache_read_fraction": round(totals["cache_read_input_tokens"] / total_input, 6) if total_input else None}
     return {"session_tag": hashlib.sha256(path.stem.encode()).hexdigest()[:12],
             "last_activity": last_activity.isoformat() if last_activity else None,
             "last_main_request": last_request, "api_error_messages": api_errors,
             "compaction_count": len(compactions),
+            "cache_usage": cache,
             "compaction_seconds_median": round(statistics.median(values), 3) if values else None,
             "recent_compactions": compactions[-6:],
-            "limits": "Main-request effort is not proof of compaction effort. Missing compact_boundary does not prove a hang."}
+            "limits": "Main-request effort is not proof of compaction effort. Missing compact_boundary does not prove a hang. Cache totals include only readable assistant usage records; commands, child sessions and skipped blobs may be absent. Cache reads still occupy context."}
 
 
 def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,

@@ -38,6 +38,8 @@ To repeat the live probe after reviewing a candidate binary, run `python3 tests/
 
 ## Candidate acceptance sequence
 
+The [third patch](upstream/patches/web-search-replay.patch) fixes native hosted-search history loss and duplicate-event SSE framing. It preserves a bounded native search item in the Claude transcript and consumes that envelope on replay. A real Claude client can resume it through a new proxy process. The fixture uses no credentials; a separate local subscription probe also succeeded. Native citation annotations remain a distinct gap. The [operational record](OPERATIONS.md) documents the two real stable-ingress handoffs, including a cache miss, and the remaining initial-migration constraint.
+
 1. Freeze an upstream source commit and its dependency lock. Apply only reviewed translation changes in an isolated build; keep real OAuth files outside the build environment. This is implemented for the v8.0.46 candidate above.
 2. Run the synthetic probe on macOS/Linux and native Windows. Require the four tool gates plus tool-result pairing, parallel calls, long MCP names, unknown references, duplicates, streaming/non-streaming output and interrupted turns before promotion.
 3. Confirm `additional_tools` is placed after the relevant ToolSearch result or system tool addition, with the original top-level `tools` prefix unchanged. Reject a candidate that merely drops `defer_loading` or echoes schema text while changing the leading tool list.

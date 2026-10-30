@@ -61,7 +61,11 @@ not logged. `/bridge/status` is metadata-only and requires authentication.
 Tests verify an old stream completing on backend A while a new request reaches
 B, cancellation, key replacement, session-header preservation, unauthorized
 requests, wrong-PID rejection, invalid manifests and rollback. This proves the
-isolated routing primitive. Installer/controller integration, real-model load
-tests and initial migration from the existing direct listener remain required.
+isolated routing primitive. A [real subscription probe](../tests/live_gateway_handoff.py)
+also completed admitted requests across two handoffs and replayed a tool result
+and encrypted reasoning. Cache reuse succeeded in one handoff and missed in
+another; see [the measured results](../OPERATIONS.md). Installer/controller
+integration, sustained load tests and initial migration from the existing direct
+listener remain required.
 Restarting this ingress process itself is not a seamless operation; it must
 remain running while its dependent sessions execute.
