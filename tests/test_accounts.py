@@ -246,7 +246,6 @@ class AccountTests(unittest.TestCase):
     def test_selected_account_validation_reuses_existing_refresh_owner(self):
         import launcher
         from types import SimpleNamespace
-        from subprocess import CompletedProcess
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             accounts.private_directory(root / "auth")
@@ -255,10 +254,10 @@ class AccountTests(unittest.TestCase):
             session = root / "runtime/session-fixture"
             session.mkdir(parents=True)
             (session / "key").write_text("synthetic-loopback-key")
+            (root / "bridge_models.py").write_text("print('{}')\n", encoding="utf-8")
             state = {"pid": 1234, "port": 12345, "session": "session-fixture"}
             with patch.object(accounts, "Management", return_value=SimpleNamespace(state=state)), \
-                    patch.object(accounts, "isolated_account") as isolated, \
-                    patch.object(accounts.subprocess, "run", return_value=CompletedProcess([], 0, "{}")):
+                    patch.object(accounts, "isolated_account") as isolated:
                 with accounts.validation_route(root, record) as route:
                     self.assertEqual(route["url"], "http://127.0.0.1:12345")
                     self.assertEqual(route["key"], "synthetic-loopback-key")
