@@ -23,3 +23,17 @@ The bridge's WebFetch PDF hook processes the tool result locally and replaces on
 If a credential is accidentally committed, revoke or rotate it first, then remove it from the repository and its full Git history before any further push. Deleting only the latest file does not remove it from earlier commits.
 
 The optional [native capability pack](NATIVE_TOOLS.md) pins dependency hashes and immutable source snapshots. Native media calls use only the private TLS endpoint key, never OAuth. Workspace inputs reject symlink/reparse paths, absolute paths and traversal; artifacts stay private. No microphone recording or automatic playback is implemented. Desktop requires an explicit per-workspace window selection and existing OS permissions. The child receives no model credentials or global-input opt-in. Windows dispatches each action directly to one native worker, avoiding upstream uncertain-action retries, and disables screen-region GDI. These are application guardrails, not an OS sandbox against same-user programs or the selected app itself.
+
+New launches default `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, respecting an
+explicit operator override. This follows [Claude's documented telemetry control](https://code.claude.com/docs/en/data-usage#telemetry-services);
+it can disable Remote Control/feature-flag evaluation and is not a zero-egress
+promise. The built-in WebFetch domain safety check and plugin/tool networking
+have separate behavior and remain under Claude's own controls. The bridge does
+not silently remove those safety checks. Native MCP Python uses isolated mode;
+workspace Python startup files cannot execute before its reviewed source.
+
+Capability dependency updates are hash-locked and checked against OSV using only
+the public lockfile names/versions. Pillow 13.0.0 replaces the initially selected
+12.2 release after upstream advisory review. Codecs are restricted to the formats
+the tool accepts. A clean advisory query is not a guarantee against unknown
+vulnerabilities, nor do release hashes establish reproducible-build provenance.

@@ -61,3 +61,21 @@ Raine's [current compatibility record](https://claude-code-proxy.raine.dev/refer
 [Open Computer Use 1.3.0](https://github.com/opensymph/open-computer-use/releases/tag/v1.3.0) was reviewed at source `e551c13e7082ce4c097234137582fbf4a1bc647a`. The small star count did not drive adoption: source behavior, release hashes and open [shared-socket](https://github.com/opensymph/open-computer-use/issues/5) and [closed-window](https://github.com/opensymph/open-computer-use/issues/8) issues did. Our wrapper requires live native window/process identity, one-use observations and an exclusive bridge lease, bypasses the macOS shared app agent, and never exposes global/window-selection controls to the model. Windows source review found a three-attempt action-worker retry and an in-process fallback, so our adapter invokes the pinned native `op` worker directly exactly once. Window WGC/PrintWindow observation is allowed; screen-region GDI is not. An ordinary macOS fixture passed actual OS text/button changes, with no test-command bridge. Native Windows GUI CI is the next release gate. [Pack details](NATIVE_TOOLS.md).
 
 [Munim Computer Use](https://github.com/munimtechnologies/munim-computer-use) was also reviewed for its allow/ask/block policy and recent maintenance. Its own documentation distinguishes policy from an OS sandbox. It was not installed or adopted solely on that feature list. Browser MCP remains the default for browser tasks.
+
+The follow-up real-Claude macOS fixture exposed extra button effects from the
+heuristic click path. The adapter now requests one exact AXPress, with no
+descendant/hit-test fallback, and verifies actual one-button state. It also
+removes screenshot data URLs from JSON context and maps resized display pixels
+back to native pixels. The initial three-OS GUI gate passed at `788371c`;
+subsequent Unicode/selection checks add stronger coverage. Upstream is a useful
+backend, not an assertion of universally safe semantics.
+
+CLIProxyAPI v8.0.48 was released on 2026-10-30 and its 32-commit delta from the
+installed 8.0.46 pin was reviewed at release-note/file level. It includes the
+inline tool-addition fix already backported here, usage and compaction-capsule
+changes, but that alone does not establish a fix for the observed TLS/EOF.
+[Metadata-only incomplete-SSE diagnostics #6497](https://github.com/router-for-me/CLIProxyAPI/pull/6497)
+and [environment proxy handling #7103](https://github.com/router-for-me/CLIProxyAPI/pull/7103)
+remain open in the reviewed snapshot. No unaudited pin bump or live origin
+restart was performed. The next upstream migration needs the existing patch,
+privacy, Windows and live handoff gates.

@@ -244,7 +244,7 @@ class DesktopSession:
             if len(images) != 1: raise desktop_scope.ScopeError("A scoped screenshot is required; no coordinate or whole-display fallback is used")
             import base64
             raw = base64.b64decode(images[0].data, validate=True)
-            with Image.open(io.BytesIO(raw)) as image:
+            with Image.open(io.BytesIO(raw), formats=("PNG",)) as image:
                 if image.format != "PNG" or image.width*image.height > 32_000_000: raise desktop_scope.ScopeError("Desktop screenshot exceeds the format/pixel bound")
                 native_width, native_height = image.size
                 scale = min(1, 1280/max(image.size), math.sqrt(1_000_000/(image.width*image.height)))

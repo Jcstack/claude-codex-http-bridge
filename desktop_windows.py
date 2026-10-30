@@ -64,7 +64,7 @@ class WindowsWorker:
         if not isinstance(encoded, str) or len(encoded) > 24 << 20: raise ScopeError("Invalid scoped desktop image")
         try:
             raw = base64.b64decode(encoded, validate=True)
-            with Image.open(io.BytesIO(raw)) as image:
+            with Image.open(io.BytesIO(raw), formats=("PNG",)) as image:
                 if image.format != "PNG" or image.width*image.height > 32_000_000: raise ScopeError("Invalid scoped screenshot dimensions/format")
                 width, height = image.size
         except (ValueError, OSError): raise ScopeError("Scoped screenshot is unavailable; no whole-display fallback is used") from None

@@ -51,7 +51,7 @@ The installed discovery/launcher/diagnostic helpers were updated without stoppin
 
 A new regression found that v8.0.46 returned native search sources to Claude but dropped the search output item on the next request. The [candidate patch](upstream/patches/web-search-replay.patch) carries completed native `web_search_call` items through a bounded, typed internal transcript envelope, preserving source fields and encrypted search state without an in-memory lookup table. It does not encrypt public sources or create a credential. User-role content cannot inject an assistant replay item. Other native item types and oversized envelopes are rejected. Duplicate search events no longer emit deltas outside an open SSE block.
 
-[Synthetic HTTP and real-Claude resume tests](tests/smoke_web_state.py) verify exact native-item replay after replacing the disposable proxy process. A real subscription search returned two search calls and 16 source entries in 8.683 seconds; the next process accepted the preserved state and repeated a previously returned URL in 4.878 seconds. One earlier live trial failed a stricter exact-source-URL assertion; the later fixture distinguishes URLs returned in text from the native source list. These observations do not certify citation accuracy. Native output-text annotation conversion and full Claude citation UI fidelity remain gaps.
+[Synthetic HTTP and real-Claude resume tests](tests/smoke_web_state.py) verify exact native-item replay after replacing the disposable proxy process. A real subscription search returned two search calls and 16 source entries in 8.683 seconds; the next process accepted the preserved state and repeated a previously returned URL in 4.878 seconds. One earlier live trial failed a stricter exact-source-URL assertion; the later fixture distinguishes URLs returned in text from the native source list. These observations do not certify citation accuracy. At that stage native output-text annotation conversion remained a gap; the later URL annotation results below supersede it. Full Claude citation UI fidelity remains open.
 
 The [live ingress probe](tests/live_gateway_handoff.py) used two disposable translators behind the stable listener, both calling the existing authenticated localhost service:
 
@@ -101,7 +101,7 @@ The [candidate run at `22112c7`](https://github.com/Jcstack/claude-codex-http-br
 | [Managed cache plus reload](tests/live_cache_context.py) | 12,346 total input tokens each request. First cached 0; both requests after reload cached 12,160 and read 186 fresh (98.49%). Boundary markers stayed correct. Times 2.788s / 3.215s / 5.353s. |
 | Native subscription image generation | GPT Image 2.5 Flare returned a valid 969,237-byte PNG in 15.518s. Requested 1024x1024; actual PNG 1254x1254. Generation succeeded, but the size contract did not. No API project key was used and the result was not resized to disguise that difference. |
 
-The [official Image API](https://developers.openai.com/api/reference/resources/images/methods/generate) documents the requested standard size, so the native Codex route's observed image dimensions are a real compatibility boundary. The [repeatable image probe](tests/live_native_images.py) checks PNG dimensions and fails on a mismatch. This does not certify Claude-side image tools, editing, streaming images, desktop control or GPT-Live. It corrects the earlier blanket assumption that this subscription backend could not generate images.
+The [official Image API](https://developers.openai.com/api/reference/resources/images/methods/generate) documents the requested standard size, so the native Codex route's observed image dimensions are a real compatibility boundary. The [repeatable image probe](tests/live_native_images.py) checks PNG dimensions and fails on a mismatch. That direct probe alone did not certify Claude-side image tools, editing, streaming images, desktop control or GPT-Live. The later optional-pack evidence below adds explicit tool-level checks. It corrects the earlier blanket assumption that this subscription backend could not generate images.
 
 The URL-citation runtime was then activated on the same installed TLS listener,
 without changing the original authenticated service or its state. A live search
@@ -135,4 +135,37 @@ A safe upgrade needs a stable authenticated listener, a ready replacement backen
 
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
-Remaining work: replacement of the legacy origin and TLS ingress itself; stronger cache consistency evidence; source excerpts, file/container citations and complete citation UI fidelity; transport failures and slow compaction; diverse repeated repository evaluations; authenticated Windows inference/HUD/browser/resume; Codex-native context retrieval, desktop, steering, Claude-side media tools and image-size fidelity. Native `/context`, `/usage` and budget UI still have Claude-alias limitations. API-key pilots stay disabled by user preference and Opus lacks an account. These checks do not certify every feature or Opus parity.
+Remaining work: replacement of the legacy origin and TLS ingress itself; stronger cache consistency evidence; source excerpts, file/container citations and complete citation UI fidelity; transport failures and slow compaction; diverse repeated repository evaluations; authenticated Windows inference/HUD/browser/resume; Codex-native context retrieval, full-duplex Live/steering and broader app coverage; native-provider image-size fidelity (explicit local delivery resizing is now available). Native `/context`, `/usage` and budget UI still have Claude-alias limitations. API-key pilots stay disabled by user preference and Opus lacks an account. These checks do not certify every feature or Opus parity.
+
+## Optional native pack, 2026-10-31
+
+The [native MCP pack](NATIVE_TOOLS.md) is implemented and installed locally in a
+hash-locked private environment. It adds live-catalog image generation/editing,
+local PDF extraction, Realtime media exchange and explicitly selected-window
+desktop tools. Real Claude completed the media workflow and real Terra completed
+an ordinary desktop fixture. Native macOS and Windows GUI results verify actual
+state, not merely HTTP status or mocked tool calls. The detailed record retains
+failed trials, provider dimension mismatches and the subsequent fixes.
+
+Python isolated startup, same-workspace artifact reuse after resume, cross-project
+artifact denial, one-use desktop observations, uncertain-action non-replay,
+Unicode focus changes and screenshot/text size bounds have regression coverage.
+Generated screenshots no longer appear as both PNG content and base64 JSON text.
+The current launcher defaults nonessential Claude telemetry off with the
+documented host setting; user overrides remain possible. WebFetch safety checks
+and user-requested plugin/tool networking remain separate.
+
+Native Realtime speech worked with existing authorization and no project key.
+Native GPT-Live WebRTC returned 400, and native compact returned 404. Neither
+failed path is advertised as supported. Claude still owns its tool loop and
+compaction effort. No active user session, original origin, ingress or unrelated
+service was restarted for this pack. Read-only production diagnostics still
+contain upstream TLS/EOF and slow-compaction incidents; these new capability
+checks do not resolve their root cause or certify Opus parity.
+
+The [full Windows Unicode gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41099866806)
+subsequently passed: coordinate input, scoped select-all, emoji insertion and
+one actual button effect. OSV then identified the initial Pillow pin as affected
+by upstream advisories; the capability lock was upgraded to 13.0.0 and a public-
+lockfile advisory gate added. All 33 pins returned no matching advisories after
+the update. Old immutable environments are not rewritten under live processes.

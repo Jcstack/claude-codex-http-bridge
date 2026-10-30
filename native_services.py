@@ -108,7 +108,7 @@ class NativeServices:
     @staticmethod
     def image(raw: bytes):
         from PIL import Image, ImageOps
-        with Image.open(io.BytesIO(raw)) as source:
+        with Image.open(io.BytesIO(raw), formats=("PNG", "JPEG", "WEBP")) as source:
             if source.format not in ("PNG", "JPEG", "WEBP") or source.width * source.height > MAX_PIXELS:
                 raise CapabilityInputError("Image format or pixel count is outside the supported bounds")
             source.load()

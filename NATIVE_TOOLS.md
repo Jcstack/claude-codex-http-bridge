@@ -20,7 +20,9 @@ Installation uses an isolated private venv, hash-locked PyPI wheels and an
 immutable snapshot of the MCP source/imports. Updating launcher files cannot
 silently change that selected snapshot. Run `tools install` after a reviewed
 update to select new code; running MCP processes retain their old code. Global
-Python packages and Claude user settings are unchanged.
+Python packages and Claude user settings are unchanged. The server runs Python
+with `-I` and imports only its reviewed snapshot and locked environment; a
+workspace `PYTHONPATH`/`sitecustomize.py` cannot enter its startup path.
 
 New launches include `codex_native` alongside the user's MCP servers/plugins.
 `--no-native-tools` omits it once; `tools disable` changes future defaults.
@@ -31,17 +33,19 @@ credentials. Use normal Claude permissions for remote or desktop tools.
 | Tool | Behavior | Verification |
 | --- | --- | --- |
 | `image_models` | Live authenticated image-model IDs | Protocol fixture and local catalog |
-| `image_generate` | One native image, selectable model/quality/background; PNG and metadata | Native generation succeeded; real Claude MCP fixture carries text and PNG |
-| `image_edit` | 1–8 workspace images, optional mask, strips input metadata | Workspace/metadata/protocol tests; live evidence is recorded separately |
+| `image_generate` | One native image, selectable model/quality/background; PNG and metadata | Real subscribed Claude generated an image through ToolSearch; text and PNG delivered |
+| `image_edit` | 1–8 workspace images, optional mask, strips input metadata | Real subscribed Claude edited its generated image; workspace/metadata/ownership regressions passed |
 | `document_extract` | Local PDF layout text, page numbers, explicit empty/scanned/truncated results | Actual synthetic PDF extracted and delivered to real Claude |
 | `realtime_voice` | Realtime streamed speech into a private WAV and transcript; optional workspace WAV input | Existing subscription produced real `gpt-realtime-2.1` audio without a project key |
-| `desktop_observe` / `desktop_action` | Explicitly selected macOS/Windows window | Ordinary macOS app screenshot, AX text change and one button invocation passed; native Windows GUI fixture is in CI |
+| `desktop_observe` / `desktop_action` | Explicitly selected macOS/Windows window | Real Terra + Claude drove an owned macOS window; native Windows screenshot, text, button and Unicode fixture passed |
 
 Artifacts stay under private `runtime-tools/session-*` directories. Inputs must
-be workspace-relative or an exact artifact path returned by this MCP process;
-other absolute paths, parent traversal, symlinks and reparse points are rejected.
-This lets generation feed editing without granting reads of another session's
-artifacts. Each input is at most 32 MiB. This scope is an
+be workspace-relative or a verified generated artifact owned by this workspace.
+Private sidecars bind artifact name, SHA-256 and a hashed workspace identity, so
+a resumed process can reuse media from the same project. Another workspace is
+denied. Other absolute paths, traversal, symlinks/reparse points and modified
+artifacts are rejected. Older artifacts without ownership sidecars must be
+copied into the workspace explicitly. Each input is at most 32 MiB. This scope is an
 application guardrail, not an OS sandbox against other same-user programs.
 Returned document/screen/transcript contents enter the model conversation.
 
@@ -82,13 +86,32 @@ Windows uses the pinned native **`op` worker directly**, bypassing its MCP
 parent's three-attempt action retry and in-process fallback. Only observation
 may fall back from window WGC to window PrintWindow. Screen-region GDI is
 disabled because it can expose an overlapping unrelated window. Each action
-gets one worker dispatch. Coordinates require unchanged window bounds. A crash
+gets one worker dispatch; select-all on a focused native Edit/RichEdit control
+uses one scoped Win32 message instead of unreliable Ctrl+A simulation.
+Windows literal input targets the confirmed focused Edit/RichEdit control and
+preserves its selection; it does not move to the end or choose another editable
+field. Password/read-only controls are denied.
+Coordinates require unchanged window bounds. A crash
 after input is an uncertain outcome requiring observation, not automatic replay.
+
+macOS single-element clicks use one exact AXPress action, bypassing heuristic
+descendant/hit-test attempts after an uncertain result. Literal Unicode input
+uses one PID-targeted event path with focused-window/element checks between
+chunks; it does not append via AX and then repeat via keyboard on uncertainty.
+Text select-all uses the focused element's AX selection range.
+
+Screenshots are returned once as image content. Native base64 data URLs are
+removed from JSON text. The displayed image is bounded to 1280 pixels per edge
+and 1M pixels total; coordinates are mapped back to the original native
+screenshot before dispatch. Accessibility text is bounded with explicit
+truncation. Action replies request a fresh observation instead of duplicating
+a second full image/tree.
 
 Click/set-value prefer observed accessibility elements. Coordinate clicks use
 app-targeted input. Keyboard text requires the selected window's keyboard focus;
 Windows additionally requires it already be foreground. The bridge does not
 activate it. Navigation and select-all/address-bar shortcuts are supported.
+Text select-all requires an editable text element (native Edit/RichEdit on Windows).
 Application/global shortcuts, real-pointer fallback, terminals, password managers
 and security settings are outside this window policy. A chosen app can still
 perform real network/file actions after a click; window scoping is not isolation
@@ -126,7 +149,7 @@ Install the hash lock in a disposable environment, then run:
 ```text
 python -m unittest discover -s tests -v
 python tests/probe_native_mcp_client.py
-python tests/live_desktop.py
+python tests/live_desktop.py --keyboard
 ```
 
 The first two use synthetic providers; the second uses real Claude without a
@@ -135,3 +158,45 @@ verifies OS state changes and uses no test command bridge. It never captures
 another user window. macOS needs existing OS permission. CI runs account-free
 tests on all three OSes and the GUI fixture on native Windows. Live subscription
 media checks consume quota and keep raw files private.
+
+## Local end-to-end evidence
+
+`tests/live_native_mcp.py` ran through the installed launcher and frozen MCP
+server using the existing subscription: real Claude ToolSearch, PDF extraction,
+one image generation, editing that returned artifact, and Realtime voice all
+passed in 129.250 seconds. Requested image model: `gpt-image-2.5`. Requested and
+delivered sizes were 1024×1024; provider originals were 1536×1024 and 1254×1254.
+The voice session reported `gpt-realtime` and returned a 2.45-second WAV. Existing
+origin/ingress state was unchanged. This tests the workflow, not semantic image
+quality or billing equivalence.
+
+`tests/live_desktop_claude.py` used the current Terra alias in real Claude: three
+observations and two actions changed an ordinary AppKit field and invoked its
+button exactly once in 33.704 seconds. Earlier trials failed: ambiguous numeric
+element types were rejected, and the heuristic click path produced extra
+button invocations despite a requested count of one. Those failures motivated
+the explicit schema, numeric-index normalization and exact AXPress path; they
+are not counted as passes. A separate native fixture passed coordinate click,
+text select-all and Unicode/emoji input on macOS without global pointer input.
+
+The [three-OS run at 788371c](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41094133443)
+passed all jobs, including the owned native Windows screenshot/text/button
+fixture. The subsequent keyboard extension exposed ineffective Windows Ctrl+A;
+the focused text-control selection/insertion fixes then passed the full
+[Windows Unicode GUI gate at ecf5b1b](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41099866806). No model
+credential is sent to CI. Installed frozen MCP startup was also checked with a
+malicious synthetic workspace `sitecustomize.py`; isolated Python ignored it
+and read the real authenticated image catalog successfully.
+
+## Dependency security gate
+
+The initial Pillow 12.2 pin was superseded after OSV and
+[Pillow's own advisory](https://github.com/python-pillow/Pillow/security/advisories/GHSA-22hg-r758-rrw9)
+identified affected versions through 12.3. The lock now requires Pillow 13.0.0,
+with new wheel hashes and regression checks. Image inputs open only the allowed
+PNG/JPEG/WebP decoders; desktop screenshots open only PNG. The post-update OSV
+query completed for all 33 public dependency pins with no matching advisories.
+This is a dated database result, not proof of absence of unknown vulnerabilities
+or of binary provenance. `python tests/audit_capability_lock.py` repeats the
+check and fails on findings/incomplete responses; CI runs it without accounts.
+Only already-public package names/versions are sent to OSV.
