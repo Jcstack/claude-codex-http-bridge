@@ -128,7 +128,8 @@ def wait_for_catalog(proxy: subprocess.Popen, environment: dict[str, str], requi
     raise RuntimeError(f"No {route} models appeared in the local catalog; run {remedy}")
 
 
-def claude_environment(port: int, key: str, model: str) -> dict[str, str]:
+def claude_environment(port: int, key: str, model: str,
+                       route: str = "subscription") -> dict[str, str]:
     environment = os.environ.copy()
     for name in (
         "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
@@ -146,10 +147,19 @@ def claude_environment(port: int, key: str, model: str) -> dict[str, str]:
         "ANTHROPIC_DEFAULT_FABLE_MODEL": model,
         "ENABLE_TOOL_SEARCH": "true",
     })
-    # Custom gateways disable eager tool inputs by default in Claude Code.
-    # The reviewed proxy translates incremental Responses function arguments
-    # to Anthropic input_json_delta events. Respect an explicit user opt-out.
-    environment.setdefault("CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING", "1")
+    # The subscription endpoint accepted the tool flag in a live call. On the
+    # direct API route, this proxy forwards eager_input_streaming as an extra
+    # Responses function-tool field, so do not enable it without an upstream
+    # translation fix and live API verification.
+    streaming_flag = "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"
+    if route == "subscription":
+        environment.setdefault(streaming_flag, "1")
+    elif route == "api":
+        if environment.get(streaming_flag) == "1":
+            raise RuntimeError("Fine-grained tool streaming is not verified on the API route; "
+                               "unset CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING")
+    else:
+        raise RuntimeError("Unknown bridge route")
     return environment
 
 
@@ -447,7 +457,8 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         import codex_usage
         codex_usage.start_refresh(runtime / "codex-usage.json")
     _, _, key_path, _ = state_paths(runtime, state)
-    claude_environment_values = claude_environment(state["port"], key_path.read_text().strip(), model)
+    claude_environment_values = claude_environment(state["port"], key_path.read_text().strip(),
+                                                  model, route)
     label = "OpenAI API" if route == "api" else "Codex"
     print(
         f"{label} bridge active on 127.0.0.1:{state['port']}: {model}. "

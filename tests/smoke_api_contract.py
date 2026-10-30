@@ -37,6 +37,14 @@ class Upstream(BaseHTTPRequestHandler):
         length = int(self.headers["Content-Length"])
         body = json.loads(self.rfile.read(length))
         self.requests.append((self.path, self.headers.get("Authorization", ""), body))
+        allowed_function_fields = {"type", "name", "description", "parameters", "strict"}
+        if any(set(tool) - allowed_function_fields for tool in body.get("tools", [])
+               if tool.get("type") == "function"):
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":{"message":"Unexpected function tool field"}}')
+            return
         if len(self.requests) == 1:
             output = [{
                 "id": "fc_mock", "type": "function_call", "status": "completed",
@@ -273,7 +281,7 @@ def main() -> None:
             streamed_call = post_stream(port, local_key, {
                 "model": MODEL, "max_tokens": 1024, "stream": True,
                 "messages": [{"role": "user", "content": "Read /fixture"}],
-                "tools": [{**tools[0], "eager_input_streaming": True}],
+                "tools": tools,
             })
             call_deltas = [(when, event["delta"].get("partial_json", ""))
                            for when, event in streamed_call

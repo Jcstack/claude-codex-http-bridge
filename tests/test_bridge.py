@@ -42,9 +42,18 @@ class BridgeTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")
             self.assertEqual(environment["CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"], "1")
+            api_environment = launcher.claude_environment(12345, "mock-local-key",
+                                                         "gpt-6.1-sol", "api")
+            self.assertNotIn("CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING", api_environment)
         with patch.dict(os.environ, {"CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "0"}):
             environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")
             self.assertEqual(environment["CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"], "0")
+            api_environment = launcher.claude_environment(12345, "mock-local-key",
+                                                         "gpt-6.1-sol", "api")
+            self.assertEqual(api_environment["CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"], "0")
+        with patch.dict(os.environ, {"CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "1"}):
+            with self.assertRaisesRegex(RuntimeError, "API route"):
+                launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol", "api")
 
     def test_catalog_intersection_and_model_picker(self) -> None:
         rows = {
