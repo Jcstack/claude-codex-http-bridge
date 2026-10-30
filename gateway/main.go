@@ -105,11 +105,20 @@ func checkPrivateRoot(root string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	script = "try { " + script + " } catch { [Console]::Error.WriteLine($_.Exception.GetType().FullName); [Console]::Error.WriteLine($_.FullyQualifiedErrorId); exit 24 }"
+	cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	cmd.Env = append(os.Environ(), "CLAUDE_CODEX_INGRESS_ROOT="+root)
-	if err := cmd.Run(); err != nil {
+	if output, err := cmd.CombinedOutput(); err != nil {
 		var failure *exec.ExitError
 		if errors.As(err, &failure) {
-			return fmt.Errorf("runtime NTFS ACL verification failed (check %d)", failure.ExitCode())
+			// Only type identifiers may be reported; never paths, SIDs or raw errors.
+			detail := ""
+			for _, field := range strings.Fields(string(output)) {
+				if regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.]{0,160}$`).MatchString(field) {
+					detail += " " + field
+				}
+			}
+			return fmt.Errorf("runtime NTFS ACL verification failed (check %d)%s", failure.ExitCode(), detail)
 		}
 		return errors.New("runtime NTFS ACL must grant access only to the current user")
 	}
