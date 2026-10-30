@@ -156,8 +156,8 @@ Model ID: `gpt-6.1-sol`
                             'usage-statistics-enabled: false'):
                 self.assertIn(setting, config)
             self.assertIn("mock-project-key-123456789", config)
-            self.assertIn(str(root / "api-auth"), config)
-            self.assertNotIn(str(root / "auth") + '"', config)
+            self.assertIn(json.dumps(str(root / "api-auth")), config)
+            self.assertNotIn(json.dumps(str(root / "auth")), config)
             self.assertNotIn("mock-project-key-123456789", local_key_path.read_text())
             self.assertEqual(json.loads((runtime / "catalog.json").read_text()), models)
             if platform.system() == "Windows":
