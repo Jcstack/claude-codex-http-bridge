@@ -1,0 +1,198 @@
+diff --git a/internal/translator/codex/claude/codex_claude_deferred_tools_test.go b/internal/translator/codex/claude/codex_claude_deferred_tools_test.go
+new file mode 100644
+index 0000000..2e7125d
+--- /dev/null
++++ b/internal/translator/codex/claude/codex_claude_deferred_tools_test.go
+@@ -0,0 +1,97 @@
++package claude
++
++import (
++	"testing"
++
++	"github.com/tidwall/gjson"
++)
++
++func TestConvertClaudeRequestToCodex_DeferredToolsUseAppendOnlyReveal(t *testing.T) {
++	tools := `[
++		{"name":"ToolSearch","description":"Search tools","input_schema":{"type":"object"}},
++		{"name":"Read","description":"Read a file","input_schema":{"type":"object"}},
++		{"name":"mcp__demo__first","description":"First deferred tool","defer_loading":true,
++		 "input_schema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}},
++		{"name":"mcp__demo__second","description":"Second deferred tool","defer_loading":true,
++		 "input_schema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},
++		{"name":"DeferredToolPlaceholder","description":"Never call","defer_loading":true,
++		 "input_schema":{"type":"object"}}
++	]`
++	before := `{"tools":` + tools + `,"messages":[{"role":"user","content":"find a tool"}]}`
++	after := `{"tools":` + tools + `,"messages":[
++		{"role":"user","content":"find a tool"},
++		{"role":"assistant","content":[{"type":"tool_use","id":"call_search","name":"ToolSearch","input":{"query":"demo"}}]},
++		{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_search","content":[
++			{"type":"tool_reference","tool_name":"mcp__demo__first"},
++			{"type":"tool_reference","tool_name":"unknown"},
++			{"type":"tool_reference","tool_name":"mcp__demo__first"},
++			{"type":"tool_reference","tool_name":"mcp__demo__second"}
++		]}]}
++	]}`
++	firstJSON, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(before), false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	secondJSON, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(after), false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	first := gjson.ParseBytes(firstJSON)
++	second := gjson.ParseBytes(secondJSON)
++	if first.Get("tools").Raw != second.Get("tools").Raw {
++		t.Fatalf("top-level tool prefix changed: before=%s after=%s", first.Get("tools").Raw, second.Get("tools").Raw)
++	}
++	gotTools := first.Get("tools").Array()
++	if len(gotTools) != 2 || gotTools[0].Get("name").String() != "ToolSearch" || gotTools[1].Get("name").String() != "Read" {
++		t.Fatalf("deferred schemas must be absent initially: %s", first.Get("tools").Raw)
++	}
++	inputs := second.Get("input").Array()
++	if len(inputs) != 4 || inputs[2].Get("type").String() != "function_call_output" || inputs[3].Get("type").String() != "additional_tools" {
++		t.Fatalf("reveal must follow tool output: %s", second.Get("input").Raw)
++	}
++	loaded := inputs[3].Get("tools").Array()
++	if len(loaded) != 2 || loaded[0].Get("name").String() != "mcp__demo__first" || loaded[1].Get("name").String() != "mcp__demo__second" {
++		t.Fatalf("unexpected loaded tools or reference order: %s", inputs[3].Raw)
++	}
++	if loaded[0].Get("parameters.required.0").String() != "id" || loaded[0].Get("defer_loading").Exists() {
++		t.Fatalf("loaded schema was not preserved or sanitized: %s", loaded[0].Raw)
++	}
++}
++
++func TestConvertClaudeRequestToCodex_DeferredRevealFollowsParallelResults(t *testing.T) {
++	request := `{"tools":[
++		{"name":"ToolSearch","input_schema":{"type":"object"}},
++		{"name":"Read","input_schema":{"type":"object"}},
++		{"name":"mcp__demo__lookup","defer_loading":true,"input_schema":{"type":"object"}}
++	],"messages":[
++		{"role":"assistant","content":[
++			{"type":"tool_use","id":"call_a","name":"ToolSearch","input":{}},
++			{"type":"tool_use","id":"call_b","name":"Read","input":{}}
++		]},
++		{"role":"user","content":[
++			{"type":"tool_result","tool_use_id":"call_a","content":[{"type":"tool_reference","tool_name":"mcp__demo__lookup"}]},
++			{"type":"tool_result","tool_use_id":"call_b","content":"ok"}
++		]}
++	]}`
++	converted, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(request), false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	inputs := gjson.GetBytes(converted, "input").Array()
++	if len(inputs) != 5 || inputs[2].Get("type").String() != "function_call_output" ||
++		inputs[3].Get("type").String() != "function_call_output" || inputs[4].Get("type").String() != "additional_tools" {
++		t.Fatalf("parallel results must precede additional tools: %s", gjson.GetBytes(converted, "input").Raw)
++	}
++}
++
++func TestConvertClaudeRequestToCodex_DropsAnthropicOnlyEagerFlag(t *testing.T) {
++	request := `{"tools":[{"name":"Read","eager_input_streaming":true,"input_schema":{"type":"object"}}],
++	"messages":[{"role":"user","content":"read"}]}`
++	converted, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(request), false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if gjson.GetBytes(converted, "tools.0.eager_input_streaming").Exists() {
++		t.Fatalf("Anthropic-only tool field reached Responses: %s", gjson.GetBytes(converted, "tools").Raw)
++	}
++}
+diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
+index 5842e50..d13e2f9 100644
+--- a/internal/translator/codex/claude/codex_claude_request.go
++++ b/internal/translator/codex/claude/codex_claude_request.go
+@@ -141,6 +141,8 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 			}
+ 			pendingToolUseIDs = nil
+ 			contentItems := make([][]byte, 0, 4)
++			var deferredToolReveals [][]byte
++			var revealedToolNames map[string]struct{}
+ 			// Counts only what this turn itself sends, not system reminders flushed beside it.
+ 			// Empty text is forwarded but does not count: it can hide an emptied attachment.
+ 			turnSendable := 0
+@@ -324,6 +326,27 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 									toolResultContent := []byte(`{"type":"input_text","text":""}`)
+ 									toolResultContent, _ = sjson.SetBytes(toolResultContent, "text", contentResults[k].Get("text").String())
+ 									toolResultContentItems = append(toolResultContentItems, toolResultContent)
++								} else if toolResultContentType == "tool_reference" {
++									name := contentResults[k].Get("tool_name").String()
++									if name == "" {
++										name = contentResults[k].Get("name").String()
++									}
++									if name == "" {
++										continue
++									}
++									ensureClaudeDeclaredToolsIndexed(toolsResult, &declaredToolsByName, &declaredToolsIndexed)
++									def := declaredToolsByName[name]
++									if !def.IsObject() || def.Get("defer_loading").Type != gjson.True || isClaudeWebSearchToolType(def.Get("type").String()) {
++										continue
++									}
++									if _, seen := revealedToolNames[name]; seen {
++										continue
++									}
++									if revealedToolNames == nil {
++										revealedToolNames = make(map[string]struct{})
++									}
++									revealedToolNames[name] = struct{}{}
++									deferredToolReveals = append(deferredToolReveals, convertClaudeFunctionToolToCodex(def, toolNameMap))
+ 								}
+ 							}
+ 							if len(toolResultContentItems) > 0 {
+@@ -340,6 +363,11 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 					}
+ 				}
+ 				flushMessage()
++				if len(deferredToolReveals) > 0 {
++					item := []byte(`{"type":"additional_tools","role":"developer","tools":[]}`)
++					item, _ = sjson.SetRawBytes(item, "tools", translatorcommon.JoinRawArray(deferredToolReveals))
++					inputItems = append(inputItems, item)
++				}
+ 				if len(pendingSystemReminders) > 0 {
+ 					inputItems = append(inputItems, pendingSystemReminders...)
+ 					pendingSystemReminders = nil
+@@ -374,6 +402,9 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 		toolItems = make([][]byte, 0, len(toolResults))
+ 		for i := 0; i < len(toolResults); i++ {
+ 			toolResult := toolResults[i]
++			if toolResult.Get("defer_loading").Type == gjson.True && toolResult.Get("name").String() != "ToolSearch" {
++				continue
++			}
+ 			// Special handling: map Claude web search tool to Codex web_search
+ 			if isClaudeWebSearchToolType(toolResult.Get("type").String()) {
+ 				hasWebSearchTool = true
+@@ -674,7 +705,7 @@ func convertClaudeFunctionToolToCodex(toolResult gjson.Result, toolNameMap map[s
+ 		}
+ 	}
+ 	tool, _ = sjson.SetRawBytes(tool, "parameters", []byte(normalizeToolParameters(toolResult.Get("input_schema").Raw)))
+-	for _, path := range []string{"input_schema", "parameters.$schema", "cache_control", "defer_loading"} {
++	for _, path := range []string{"input_schema", "parameters.$schema", "cache_control", "defer_loading", "eager_input_streaming"} {
+ 		if gjson.GetBytes(tool, path).Exists() {
+ 			tool, _ = sjson.DeleteBytes(tool, path)
+ 		}
+diff --git a/internal/translator/codex/claude/codex_claude_request_test.go b/internal/translator/codex/claude/codex_claude_request_test.go
+index b23b5e3..312bb29 100644
+--- a/internal/translator/codex/claude/codex_claude_request_test.go
++++ b/internal/translator/codex/claude/codex_claude_request_test.go
+@@ -1493,13 +1493,13 @@ func TestConvertClaudeRequestToCodex_MidConversationToolAdditions(t *testing.T)
+ 		t.Fatalf("ConvertClaudeRequestToCodex returned error: %v", err)
+ 	}
+ 
+-	// Top-level tools[] must remain untouched (2 tools: Read and deferred_lookup) to preserve the prompt cache prefix.
++	// Deferred tools stay out of the stable top-level prefix until revealed inline.
+ 	topTools := gjson.GetBytes(translated, "tools").Array()
+-	if len(topTools) != 2 {
+-		t.Fatalf("expected 2 top-level tools, got %d: %s", len(topTools), gjson.GetBytes(translated, "tools").Raw)
++	if len(topTools) != 1 {
++		t.Fatalf("expected 1 top-level tool, got %d: %s", len(topTools), gjson.GetBytes(translated, "tools").Raw)
+ 	}
+-	if topTools[0].Get("name").String() != "Read" || topTools[1].Get("name").String() != "deferred_lookup" {
+-		t.Fatalf("unexpected top-level tool names: %q, %q", topTools[0].Get("name").String(), topTools[1].Get("name").String())
++	if topTools[0].Get("name").String() != "Read" {
++		t.Fatalf("unexpected top-level tool name: %q", topTools[0].Get("name").String())
+ 	}
+ 
+ 	// Expected input items:

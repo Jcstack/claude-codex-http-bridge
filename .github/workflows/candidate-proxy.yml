@@ -1,0 +1,56 @@
+name: isolated-proxy-candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            binary: cli-proxy-api
+          - os: ubuntu-latest
+            binary: cli-proxy-api
+          - os: windows-latest
+            binary: cli-proxy-api.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Build a credential-free candidate from pinned source and reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          git -C upstream-source apply ../upstream/patches/12d97cf-inline-tools-backport.patch
+          git -C upstream-source apply ../upstream/patches/12d97cf-deferred-tools.patch
+          cd upstream-source
+          go mod verify
+          go test ./internal/translator/codex/claude
+          go build -o "../${{ matrix.binary }}" ./cmd/server
+      - name: Check Anthropic-to-Responses contracts without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/smoke_api_contract.py "${{ matrix.binary }}"
+          python tests/probe_proxy_features.py "${{ matrix.binary }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proxy-candidate-${{ matrix.os }}
+          path: ${{ matrix.binary }}
+          retention-days: 1

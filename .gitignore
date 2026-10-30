@@ -7,6 +7,8 @@
 !BROWSER.md
 !API_ROUTE_RESEARCH.md
 !STREAMING.md
+!COMMUNITY_REVIEW.md
+!MODEL_HARNESS_EVIDENCE.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -22,6 +24,11 @@
 !windows_acl.py
 !tests/
 !tests/*.py
+!upstream/
+!upstream/patches/
+!upstream/patches/12d97cf-inline-tools-backport.patch
+!upstream/patches/12d97cf-deferred-tools.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml
+!.github/workflows/candidate-proxy.yml
