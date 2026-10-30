@@ -83,6 +83,8 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(environment["CLAUDE_CODE_ATTRIBUTION_HEADER"], "1")
             self.assertEqual(environment["CLAUDE_CODE_GATEWAY_HINT_HEADERS"], "0")
             self.assertEqual(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "0")
+        with patch.dict(os.environ, {"CLAUDE_CODE_USE_ANTHROPIC_AWS": "1"}):
+            self.assertNotIn("CLAUDE_CODE_USE_ANTHROPIC_AWS", launcher.claude_environment(12345,"mock-local-key","gpt-6.1-sol"))
 
     def test_catalog_intersection_and_model_picker(self) -> None:
         rows = {

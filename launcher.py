@@ -141,7 +141,7 @@ def claude_environment(port: int, key: str, model: str,
     environment = os.environ.copy()
     for name in (
         "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
-        "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_SUBAGENT_MODEL",
+        "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS", "CLAUDE_CODE_SUBAGENT_MODEL",
         "CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
         "DISABLE_COMPACT", "CLAUDE_CODE_EXTRA_BODY",
     ):
