@@ -11,6 +11,7 @@
 !MODEL_HARNESS_EVIDENCE.md
 !HARNESS_PILOT.md
 !OPERATIONS.md
+!RUNTIME.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -24,6 +25,8 @@
 !run-claude-codex.sh
 !bridge_models.py
 !api_profile.py
+!rolling_runtime.py
+!runtime_bundle.py
 !windows_acl.py
 !tests/
 !tests/*.py
@@ -39,6 +42,7 @@
 !upstream/patches/12d97cf-inline-tools-backport.patch
 !upstream/patches/12d97cf-deferred-tools.patch
 !upstream/patches/web-search-replay.patch
+!upstream/patches/loopback-tls.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml

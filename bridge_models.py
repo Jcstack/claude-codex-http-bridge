@@ -339,7 +339,7 @@ def runtime_settings(chat: dict[str, dict]) -> Path:
 
 
 def main() -> int:
-    if len(sys.argv) < 2 or sys.argv[1] not in ("verify", "session", "catalog", "list", "prepare"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("verify", "session", "catalog", "snapshot", "list", "prepare"):
         print("Usage: bridge_models.py verify | session | catalog | list | prepare MODEL", file=sys.stderr)
         return 2
     if sys.argv[1] == "verify":
@@ -353,6 +353,11 @@ def main() -> int:
         make_session()
         return 0
     chat, images = discover()
+    if sys.argv[1] == "snapshot":
+        if len(sys.argv) != 2: return 2
+        fields = ("context_window", "supported_reasoning_levels", "supports_search_tool", "input_modalities")
+        print(json.dumps({slug: {k: row[k] for k in fields} for slug, row in chat.items() if eligible(row)}, separators=(",", ":")))
+        return 0
     if sys.argv[1] == "catalog":
         if len(sys.argv) != 2:
             return 2

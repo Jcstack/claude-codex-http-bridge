@@ -49,10 +49,17 @@ jobs:
           git -C upstream-source apply ../upstream/patches/12d97cf-inline-tools-backport.patch
           git -C upstream-source apply ../upstream/patches/12d97cf-deferred-tools.patch
           git -C upstream-source apply ../upstream/patches/web-search-replay.patch
+          git -C upstream-source apply ../upstream/patches/loopback-tls.patch
           cd upstream-source
           go mod verify
           go test ./internal/translator/codex/claude
+          go test ./internal/runtime/executor/helps
           go build -o "../${{ matrix.binary }}" ./cmd/server
+          cd ../gateway
+          go test -timeout 60s ./...
+          go build -o ../bridge-ingress .
+          cd ..
+          python runtime_bundle.py --proxy "${{ matrix.binary }}" --ingress bridge-ingress --output runtime-bundle
       - name: Check Anthropic-to-Responses contracts without credentials
         shell: bash
         run: |
@@ -62,8 +69,9 @@ jobs:
           python tests/smoke_transport.py "${{ matrix.binary }}"
           python tests/smoke_model_state.py "${{ matrix.binary }}"
           python tests/smoke_web_state.py "${{ matrix.binary }}" --claude-client
+          python tests/smoke_managed_runtime.py runtime-bundle --claude-client
       - uses: actions/upload-artifact@v4
         with:
           name: proxy-candidate-${{ matrix.os }}
-          path: ${{ matrix.binary }}
+          path: runtime-bundle/
           retention-days: 1

@@ -247,10 +247,12 @@ def main() -> None:
     if windows:
         windows_acl.lock([root / "auth", root / "bin"])
     for filename in ("bridge_models.py", "launcher.py", "diagnostics.py", "statusline_adapter.py", "codex_usage.py",
-                     "api_profile.py",
+                     "api_profile.py", "rolling_runtime.py", "runtime_bundle.py",
                      "webfetch_pdf_guard.py",
                      "windows_acl.py", "run-claude-codex.sh"):
         write_file(root / filename, (SOURCE / filename).read_bytes(), 0o700)
+    import runtime_bundle
+    write_file(root / "runtime-source-lock.json", runtime_bundle.canonical(runtime_bundle.source_lock()), 0o600)
     install_proxy(root, args.archive)
     install_config(root)
     install_command(root, bin_dir, args.replace_command)

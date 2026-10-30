@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -280,12 +281,42 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	b.proxy.ServeHTTP(w, r)
 }
 
+// The compatibility backend can call the legacy service only through this
+// separately authenticated route. Both hops verify the listener owner before
+// sending a key; an abandoned legacy port must never receive credentials.
+func withOrigin(front, origin http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/bridge/origin/") {
+			if origin == nil || !strings.HasPrefix(r.URL.Path, "/bridge/origin/v1/") {
+				gatewayError(w, 404)
+				return
+			}
+			cloned := r.Clone(r.Context())
+			cloned.URL.Path = strings.TrimPrefix(r.URL.Path, "/bridge/origin")
+			cloned.URL.RawPath = ""
+			origin.ServeHTTP(w, cloned)
+			return
+		}
+		front.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	root := flag.String("root", "", "Private runtime directory")
 	listen := flag.String("listen", "", "127.0.0.1:PORT only")
 	manifest := flag.String("backend-file", "", "Private backend manifest")
 	key := flag.String("key-file", "", "Private stable frontend key")
+	originManifest := flag.String("origin-backend-file", "", "Optional private legacy origin manifest")
+	originKey := flag.String("origin-key-file", "", "Separate private origin route key")
+	initTLS := flag.Bool("init-tls", false, "Create/renew private local TLS identity, then exit")
+	useTLS := flag.Bool("tls", false, "Serve TLS using the private local identity")
 	flag.Parse()
+	if *initTLS {
+		if err := initializeTLS(*root); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	host, port, err := net.SplitHostPort(*listen)
 	n, portErr := strconv.Atoi(port)
 	if err != nil || portErr != nil || host != "127.0.0.1" || n < 1 || n > 65535 {
@@ -295,7 +326,25 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	server := &http.Server{Addr: *listen, Handler: g, ReadHeaderTimeout: 5 * time.Second,
+	var origin http.Handler
+	if *originManifest != "" || *originKey != "" {
+		if *originManifest == "" || *originKey == "" {
+			log.Fatal("both private origin options are required")
+		}
+		origin, err = newGateway(*root, *originManifest, *originKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	server := &http.Server{Addr: *listen, Handler: withOrigin(g, origin), ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20, ErrorLog: log.New(io.Discard, "", 0)}
+	if *useTLS {
+		provider, certErr := runtimeCertificateProvider(*root)
+		if certErr != nil {
+			log.Fatal(certErr)
+		}
+		server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: provider}
+		log.Fatal(server.ListenAndServeTLS("", ""))
+	}
 	log.Fatal(server.ListenAndServe())
 }

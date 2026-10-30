@@ -35,8 +35,10 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
         return ("login" if arguments[0] == "codex-login" else
                 "usage" if arguments[0] == "usage" else "models"), "", []
     if arguments and arguments[0] == "bridge":
-        if len(arguments) != 2 or arguments[1] not in ("start", "status", "stop"):
-            raise ValueError("Usage: claude-codex bridge start | status | stop")
+        if len(arguments) == 3 and arguments[1] == "upgrade":
+            return "bridge-upgrade", arguments[2], []
+        if len(arguments) != 2 or arguments[1] not in ("start", "status", "stop", "reload"):
+            raise ValueError("Usage: claude-codex bridge start | status | stop | reload | upgrade BUNDLE")
         return "bridge-" + arguments[1], "", []
     selected = "sol"
     claude_args: list[str] = []
@@ -387,7 +389,7 @@ def ensure_service(require_catalog: bool = True, route: str = "subscription") ->
                 else:
                     detached = {"start_new_session": True}
                 proxy = subprocess.Popen([str(PROXY), "-config", str(config)], stdin=subprocess.DEVNULL,
-                                         stdout=log_handle, stderr=subprocess.STDOUT, **detached)
+                                         stdout=log_handle, stderr=subprocess.STDOUT, cwd=directory, **detached)
             wait_for_private_listener(proxy, port)
             state = {"pid": proxy.pid, "port": port, "session": directory.name}
             if require_catalog:
@@ -413,11 +415,20 @@ def bridge_status(route: str = "subscription") -> int:
             print(f"{label} bridge is stopped")
             return 1
         print(f"{label} bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
+        if route == "subscription":
+            import rolling_runtime
+            managed = rolling_runtime.state(ROOT)
+            if managed:
+                snapshot = rolling_runtime.endpoint_status(ROOT, managed)
+                print(f"Managed TLS endpoint: https://127.0.0.1:{managed['port']}; active requests {sum(snapshot.get('active', {}).values())}")
         return 0
 
 
 def bridge_stop(route: str = "subscription") -> int:
     label = "OpenAI API" if route == "api" else "Codex"
+    if route == "subscription":
+        import rolling_runtime
+        rolling_runtime.stop(ROOT)
     with service_lock(route) as runtime:
         state = read_state(runtime)
         if state is None:
@@ -436,7 +447,7 @@ def bridge_stop(route: str = "subscription") -> int:
         remove_state_files(runtime, state)
         for directory in runtime.glob("ui-*"):
             if directory.is_dir() and not directory.is_symlink():
-                for name in ("statusline-profile.json", "settings.json"):
+                for name in ("statusline-profile.json", "settings.json", "managed-settings.json", "trusted-ca.pem"):
                     (directory / name).unlink(missing_ok=True)
                 try:
                     directory.rmdir()
@@ -456,6 +467,11 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
     if len(model_info) != 5:
         raise RuntimeError("Model helper returned an invalid result")
     model, context, compact, settings, catalog_json = model_info
+    managed = None
+    if route == "subscription" and (ROOT / "runtime-selected.json").exists():
+        import rolling_runtime
+        models = json.loads(helper_output("snapshot", environment=environment))
+        managed = rolling_runtime.ensure(ROOT, runtime, state, models)
     directory = Path(tempfile.mkdtemp(prefix="ui-", dir=runtime))
     if platform.system() == "Windows":
         import windows_acl
@@ -467,9 +483,12 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
     _, _, key_path, _ = state_paths(runtime, state)
     claude_environment_values = claude_environment(state["port"], key_path.read_text().strip(),
                                                   model, route)
+    if managed:
+        claude_environment_values = rolling_runtime.client_environment(ROOT, managed, claude_environment_values, directory)
+        settings_path = rolling_runtime.client_settings(settings_path, claude_environment_values, directory)
     label = "OpenAI API" if route == "api" else "Codex"
     print(
-        f"{label} bridge active on 127.0.0.1:{state['port']}: {model}. "
+        f"{label} bridge active on {claude_environment_values['ANTHROPIC_BASE_URL']}: {model}. "
         f"Route context {context} tokens; auto-compaction {compact} tokens for this model.",
         file=sys.stderr,
     )
@@ -515,6 +534,7 @@ def main() -> int:
         print("Subscription: claude-codex codex-login; claude-codex models; claude-codex usage.")
         print("Direct OpenAI API: claude-codex api key set; claude-codex api models; claude-codex api --model sol.")
         print("Run claude-codex [api] bridge start | status | stop to manage each private localhost service.")
+        print("Reviewed runtime: claude-codex bridge upgrade BUNDLE; bridge reload drains replaced backends.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
         print("Read-only metadata: claude-codex diagnostics [--hours 2] [--session UUID].")
         return 0
@@ -531,13 +551,32 @@ def main() -> int:
         return bridge_status(route)
     if mode == "bridge-stop":
         return bridge_stop(route)
+    if mode in ("bridge-upgrade", "bridge-reload"):
+        if route != "subscription": raise ValueError("Managed runtime currently wraps the Codex subscription route")
+        import rolling_runtime
+        import runtime_bundle
+        if mode == "bridge-upgrade":
+            with service_lock():
+                runtime_bundle.activate(ROOT, Path(selected).expanduser().absolute())
+        runtime, state, _ = ensure_service(route=route)
+        environment = service_environment(state, runtime, route)
+        models = json.loads(helper_output("snapshot", environment=environment))
+        managed = rolling_runtime.ensure(ROOT, runtime, state, models, force=mode == "bridge-reload")
+        print(f"Managed TLS endpoint ready: https://127.0.0.1:{managed['port']}; legacy sessions retain their original service")
+        return 0
     if mode == "bridge-start":
-        _, state, _ = ensure_service(route=route)
+        runtime, state, _ = ensure_service(route=route)
+        if route == "subscription" and (ROOT / "runtime-selected.json").exists():
+            import rolling_runtime
+            environment = service_environment(state, runtime, route)
+            managed = rolling_runtime.ensure(ROOT, runtime, state, json.loads(helper_output("snapshot", environment=environment)))
+            print(f"Managed TLS endpoint is running on https://127.0.0.1:{managed['port']}")
+            return 0
         label = "OpenAI API" if route == "api" else "Codex"
         print(f"{label} bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
         return 0
     if mode == "login":
-        return subprocess.call([str(PROXY), "-config", str(ROOT / "config.yaml"), "-codex-login"])
+        return subprocess.call([str(PROXY), "-config", str(ROOT / "config.yaml"), "-codex-login"], cwd=ROOT)
     claude = os.environ.get("CLAUDE_CODEX_CLAUDE_BIN") or shutil.which("claude")
     if mode != "models" and (not claude or not shutil.which(claude)):
         raise RuntimeError("Claude Code executable not found; set CLAUDE_CODEX_CLAUDE_BIN to its path")

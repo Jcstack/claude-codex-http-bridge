@@ -218,3 +218,82 @@ func TestUnsafeManifestFailsClosed(t *testing.T) {
 		t.Fatal("safe rollback failed")
 	}
 }
+
+func TestOriginRequiresSeparateKeyAndCannotReachManagement(t *testing.T) {
+	front, frontKey, _ := fixture(t)
+	origin, originKey, write := fixture(t)
+	// fixture() uses the same synthetic key by default; distinct realms matter.
+	originKey = strings.Repeat("o", 32)
+	origin.key = originKey
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("a", 32) {
+			t.Error("origin path or key was not rewritten")
+		}
+		_, _ = io.WriteString(w, "origin-fixture")
+	}))
+	defer upstream.Close()
+	write("origin", upstream, strings.Repeat("a", 32))
+	server := httptest.NewServer(withOrigin(front, origin))
+	defer server.Close()
+	for _, key := range []string{frontKey, "invalid"} {
+		res := call(t, server.URL, key, "/bridge/origin/v1/responses")
+		res.Body.Close()
+		if res.StatusCode != 401 {
+			t.Fatal("frontend key reached origin")
+		}
+	}
+	res := call(t, server.URL, originKey, "/bridge/origin/v1/responses")
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || string(body) != "origin-fixture" {
+		t.Fatal("origin forwarding failed")
+	}
+	for _, path := range []string{"/bridge/origin/bridge/status", "/bridge/origin/v0/management/api-call"} {
+		res := call(t, server.URL, originKey, path)
+		res.Body.Close()
+		if res.StatusCode != 404 {
+			t.Fatal("origin exposed management")
+		}
+	}
+}
+
+func TestLocalIdentitySurvivesRenewalAndHalfWrittenKeyPair(t *testing.T) {
+	g, _, _ := fixture(t)
+	if err := initializeTLS(g.root); err != nil {
+		t.Fatal(err)
+	}
+	ca, err := os.ReadFile(filepath.Join(g.root, "ca.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := runtimeCertificateProvider(g.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := provider(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(g.root, "server-key.pem")
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("half-written-fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	during, err := provider(nil)
+	if err != nil || string(during.Certificate[0]) != string(before.Certificate[0]) {
+		t.Fatal("valid identity was lost during rotation")
+	}
+	if err := os.WriteFile(keyPath, key, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := initializeTLS(g.root); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(g.root, "ca.pem"))
+	if err != nil || string(after) != string(ca) {
+		t.Fatal("routine renewal replaced the trusted CA")
+	}
+}

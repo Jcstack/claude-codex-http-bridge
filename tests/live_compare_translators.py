@@ -10,6 +10,7 @@ from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -18,15 +19,19 @@ from live_support import existing_subscription, temporary_translator
 import bridge_models
 
 
-def stream(port, key, payload):
-    request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/messages",
+def stream(port, key, payload, *, ca_file=None):
+    scheme = "https" if ca_file is not None else "http"
+    request = urllib.request.Request(f"{scheme}://127.0.0.1:{port}/v1/messages",
                                      data=json.dumps({**payload, "stream": True}).encode(),
                                      headers={"Authorization": "Bearer " + key,
                                               "Content-Type": "application/json",
                                               "anthropic-version": "2023-06-01"})
     start = time.monotonic()
     events = []
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    handlers = [urllib.request.ProxyHandler({})]
+    if ca_file is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=str(ca_file))))
+    opener = urllib.request.build_opener(*handlers)
     try:
         with opener.open(request, timeout=120) as response:
             for line in response:

@@ -1,0 +1,154 @@
+diff --git a/internal/runtime/executor/helps/loopback_tls.go b/internal/runtime/executor/helps/loopback_tls.go
+new file mode 100644
+index 0000000..05dc4de
+--- /dev/null
++++ b/internal/runtime/executor/helps/loopback_tls.go
+@@ -0,0 +1,75 @@
++package helps
++
++import (
++	"crypto/tls"
++	"crypto/x509"
++	"errors"
++	"net"
++	"net/http"
++	"os"
++	"strconv"
++)
++
++// A bridge backend may opt into a private CA for one exact loopback authority.
++// Do not modify public-provider roots, use a proxy, or disable TLS verification.
++type loopbackTLSRoundTripper struct {
++	base      http.RoundTripper
++	authority string
++	local     *http.Transport
++	err       error
++}
++
++func (t *loopbackTLSRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
++	if t.err != nil {
++		return nil, t.err
++	}
++	if r.URL.Scheme == "https" && r.URL.Host == t.authority {
++		return t.local.RoundTrip(r)
++	}
++	return t.base.RoundTrip(r)
++}
++
++func withLoopbackTLS(client *http.Client) *http.Client {
++	path, authority := os.Getenv("CLAUDE_CODEX_LOOPBACK_CA"), os.Getenv("CLAUDE_CODEX_LOOPBACK_AUTHORITY")
++	if client == nil || (path == "" && authority == "") {
++		return client
++	}
++	base := client.Transport
++	if base == nil {
++		base = http.DefaultTransport
++	}
++	wrapped := &loopbackTLSRoundTripper{base: base, authority: authority}
++	host, port, err := net.SplitHostPort(authority)
++	n, portErr := strconv.Atoi(port)
++	if err != nil || portErr != nil || host != "127.0.0.1" || n < 1 || n > 65535 {
++		wrapped.err = errors.New("invalid private loopback TLS authority")
++	} else if info, statErr := os.Lstat(path); statErr != nil || !info.Mode().IsRegular() || info.Size() > 65536 {
++		wrapped.err = errors.New("private loopback CA unavailable")
++	} else if data, readErr := os.ReadFile(path); readErr != nil {
++		wrapped.err = errors.New("private loopback CA unreadable")
++	} else {
++		roots := x509.NewCertPool()
++		if !roots.AppendCertsFromPEM(data) {
++			wrapped.err = errors.New("invalid private loopback CA")
++		} else {
++			wrapped.local = &http.Transport{Proxy: nil, DisableKeepAlives: true, ForceAttemptHTTP2: true,
++				TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
++		}
++	}
++	copy := *client
++	copy.Transport = wrapped
++	previous := copy.CheckRedirect
++	copy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
++		if len(via) > 0 && via[0].URL.Scheme == "https" && via[0].URL.Host == authority {
++			return http.ErrUseLastResponse
++		}
++		if previous != nil {
++			return previous(req, via)
++		}
++		if len(via) >= 10 {
++			return errors.New("stopped after 10 redirects")
++		}
++		return nil
++	}
++	return &copy
++}
+diff --git a/internal/runtime/executor/helps/loopback_tls_test.go b/internal/runtime/executor/helps/loopback_tls_test.go
+new file mode 100644
+index 0000000..147aef6
+--- /dev/null
++++ b/internal/runtime/executor/helps/loopback_tls_test.go
+@@ -0,0 +1,55 @@
++package helps
++
++import (
++	"context"
++	"encoding/pem"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestLoopbackTLSVerifiesPrivateCAAndBlocksRedirects(t *testing.T) {
++	redirected := false
++	trap := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { redirected = true }))
++	defer trap.Close()
++	trusted := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.URL.Path == "/redirect" {
++			http.Redirect(w, r, trap.URL, 302)
++			return
++		}
++		_, _ = io.WriteString(w, "verified")
++	}))
++	defer trusted.Close()
++	path := filepath.Join(t.TempDir(), "ca.pem")
++	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: trusted.Certificate().Raw}), 0600); err != nil {
++		t.Fatal(err)
++	}
++	t.Setenv("CLAUDE_CODEX_LOOPBACK_CA", path)
++	t.Setenv("CLAUDE_CODEX_LOOPBACK_AUTHORITY", strings.TrimPrefix(trusted.URL, "https://"))
++	client := NewUtlsHTTPClient(context.Background(), nil, nil, 0)
++	response, err := client.Get(trusted.URL)
++	if err != nil {
++		t.Fatal("trusted local identity failed:", err)
++	}
++	body, _ := io.ReadAll(response.Body)
++	response.Body.Close()
++	if string(body) != "verified" {
++		t.Fatal("unexpected local response")
++	}
++	response, err = client.Get(trusted.URL + "/redirect")
++	if err != nil {
++		t.Fatal(err)
++	}
++	response.Body.Close()
++	if response.StatusCode != 302 || redirected {
++		t.Fatal("local credentials may follow a redirect")
++	}
++	t.Setenv("CLAUDE_CODEX_LOOPBACK_CA", filepath.Join(t.TempDir(), "missing.pem"))
++	if _, err := NewUtlsHTTPClient(context.Background(), nil, nil, 0).Get(trusted.URL); err == nil {
++		t.Fatal("missing trust must fail closed")
++	}
++}
+diff --git a/internal/runtime/executor/helps/utls_client.go b/internal/runtime/executor/helps/utls_client.go
+index 1b49786..e816269 100644
+--- a/internal/runtime/executor/helps/utls_client.go
++++ b/internal/runtime/executor/helps/utls_client.go
+@@ -433,6 +433,7 @@ func NewUtlsHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyau
+ 	}
+ 	defer func() {
+ 		clientOut = httptransport.Decorate(ctx, clientOut)
++		clientOut = withLoopbackTLS(clientOut)
+ 		if clientOut != nil && handshakeTimeout > 0 {
+ 			clientOut.Transport = &tlsHandshakeTimeoutRoundTripper{base: clientOut.Transport, timeout: handshakeTimeout}
+ 		}
