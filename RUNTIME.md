@@ -51,6 +51,12 @@ rejected before changing the chosen runtime. Installed bundles are immutable
 directories identified by the manifest hash. They never overwrite a running
 executable, which also supports Windows file locking.
 
+A previously selected bundle remains usable when launcher source is updated:
+its private selection must still match the entire immutable manifest and both
+binary hashes. This does not admit an old or unknown bundle as a new upgrade.
+New activation always requires the current reviewed source lock. Changing a
+selected manifest, even to the new source hash, fails its recorded identity.
+
 Once installed, ordinary new `claude-codex` launches use the managed endpoint.
 The model catalog and HUD still come from the authenticated subscription route.
 No OpenAI API project route is enabled. `claude-codex bridge reload` starts and
@@ -62,6 +68,28 @@ manifest and state. Pending drain work can be completed by another reload.
 `bridge stop` refuses while managed requests are active. As with the original
 service, wait for background tasks before stopping; a task can be between model
 requests even when the instantaneous request count is zero.
+
+## Native URL citations
+
+The [URL annotation patch](upstream/patches/url-citations.patch) maps OpenAI
+`url_citation` annotations into Claude text citations, including incremental
+`citations_delta` events. It preserves the answer text, URL, title and native
+offsets. Repeated annotation/part/item/terminal events are deduplicated; a
+non-streaming response and a real Claude resume are also covered by the fixture.
+
+`encrypted_index` carries a namespaced bridge continuation envelope, not an
+Anthropic encrypted index. It includes the native annotation and an already
+emitted text-prefix hash. The request translator restores annotations only in
+assistant text with matching prefix, URL and title; edited or merged text does
+not receive stale offsets. This hash checks consistency, not authenticity.
+Envelopes are bounded to 64 KiB per annotation and 1,024 citations per response.
+
+OpenAI's [URL annotation](https://developers.openai.com/api/docs/guides/tools-web-search#output-and-citations)
+locates a citation in generated output; it does not supply a quoted source
+excerpt. The [Claude citation format](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool#citations)
+also has `cited_text`, which this bridge leaves empty. Link display and replay
+must not be described as verified quotation accuracy. File/container citations,
+commentary annotations and complete native citation UI equivalence remain open.
 
 ## Local identity and credentials
 

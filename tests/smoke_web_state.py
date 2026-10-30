@@ -13,12 +13,16 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import urllib.request
 import uuid
 
 from live_support import temporary_translator
 from live_compare_translators import stream
 
 MODEL = "gpt-6.1-sol"
+TEXT = "Fixture source retained."
+CITATION = {"type": "url_citation", "url": "https://fixture.invalid/docs", "title": "Fixture source",
+            "start_index": 0, "end_index": 7}
 ITEM = {"type": "web_search_call", "id": "ws_fixture", "status": "completed",
         "encrypted_content": "synthetic-search-state",
         "action": {"type": "search", "query": "fixture", "sources": [
@@ -35,16 +39,29 @@ class Upstream(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.requests.append(body)
         output = [{"type": "message", "id": "msg_fixture", "role": "assistant", "phase": "final_answer",
-                   "content": [{"type": "output_text", "text": "Fixture source retained.", "annotations": []}]}]
+                   "content": [{"type": "output_text", "text": TEXT, "annotations": [CITATION]}]}]
         if len(self.requests) == 1:
             output.insert(0, ITEM)
         response = {"id": "resp_fixture", "model": MODEL, "status": "completed", "output": output,
                     "usage": {"input_tokens": 1000, "output_tokens": 20}}
         events = [{"type": "response.created", "response": {"id": "resp_fixture", "model": MODEL}}]
-        events.extend({"type": "response.output_item.done", "output_index": n, "item": item}
-                      for n, item in enumerate(output))
+        for index, item in enumerate(output):
+            if item["type"] == "message":
+                events.extend([
+                    {"type": "response.content_part.added", "output_index": index, "content_index": 0,
+                     "part": {"type": "output_text", "text": "", "annotations": []}},
+                    {"type": "response.output_text.delta", "output_index": index, "content_index": 0, "delta": TEXT},
+                    {"type": "response.output_text.annotation.added", "output_index": index, "content_index": 0,
+                     "annotation_index": 0, "annotation": CITATION},
+                    {"type": "response.content_part.done", "output_index": index, "content_index": 0, "part": item["content"][0]}])
+            events.append({"type": "response.output_item.done", "output_index": index, "item": item})
         events.append({"type": "response.completed", "response": response})
-        self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream" if body.get("stream") else "application/json")
+        self.end_headers()
+        if not body.get("stream"):
+            self.wfile.write(json.dumps(response).encode())
+            return
         for event in events:
             self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode()); self.wfile.flush()
 
@@ -53,6 +70,17 @@ def assert_replayed():
     assert len(Upstream.requests) == 2
     items = [i for i in Upstream.requests[-1]["input"] if i.get("type") == "web_search_call"]
     assert items == [ITEM], "Native search state was lost, changed, or duplicated on replay"
+    parts = [part for item in Upstream.requests[-1]["input"] if item.get("role") == "assistant"
+             for part in item.get("content", []) if isinstance(part, dict) and part.get("type") == "output_text"]
+    assert any(part.get("text") == TEXT and part.get("annotations") == [CITATION] for part in parts), "Native URL annotation was lost or changed on replay"
+
+
+def assert_citation(content):
+    parts = [block for block in content if block.get("type") == "text"]
+    assert "".join(part.get("text", "") for part in parts) == TEXT, "Answer text was rewritten"
+    citations = [citation for part in parts for citation in part.get("citations", [])]
+    assert len(citations) == 1 and citations[0]["url"] == CITATION["url"] and citations[0]["title"] == CITATION["title"], "Citation missing, duplicated or mismatched"
+    assert citations[0]["cited_text"] == "", "Generated answer must not masquerade as a source quotation"
 
 
 def main():
@@ -72,11 +100,25 @@ def main():
             content, _ = stream(port, key, {"model": MODEL, "max_tokens": 100, "messages": messages})
         assert any(b.get("type") == "web_search_tool_result" for b in content)
         assert sum(b.get("signature", "").startswith("codex_web_search:v1:") for b in content) == 1
+        assert_citation(content)
         with temporary_translator(binary, upstream, MODEL) as (port, key):
             stream(port, key, {"model": MODEL, "max_tokens": 100, "messages": [*messages,
                 {"role": "assistant", "content": content}, {"role": "user", "content": "Recall its source."}]})
         assert_replayed()
-        result = {"mock_only": True, "streamed_search_replay_after_proxy_replacement": "pass"}
+        result = {"mock_only": True, "streamed_search_replay_after_proxy_replacement": "pass", "streamed_url_citation_replay": "pass"}
+        Upstream.requests = []
+        with temporary_translator(binary, upstream, MODEL) as (port, key):
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            for turn in range(2):
+                payload = {"model": MODEL, "max_tokens": 100, "stream": False, "messages": messages if turn == 0 else [*messages,
+                           {"role": "assistant", "content": content}, {"role": "user", "content": "Recall its source."}]}
+                request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/messages", data=json.dumps(payload).encode(),
+                    headers={"Authorization": "Bearer " + key, "Content-Type": "application/json", "anthropic-version": "2023-06-01"})
+                with opener.open(request, timeout=30) as response:
+                    content = json.load(response)["content"]
+                assert_citation(content)
+        assert_replayed()
+        result["nonstream_url_citation_replay"] = "pass"
         if args.claude_client:
             claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
             if not claude: raise RuntimeError("Pinned Claude fixture binary is required")
@@ -100,6 +142,7 @@ def main():
                             raise RuntimeError("Isolated Claude search fixture failed; raw output withheld")
                 assert_replayed()
             result["real_claude_resume_preserves_native_search_state"] = "pass"
+            result["real_claude_resume_preserves_url_annotations"] = "pass"
         print(json.dumps(result))
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=2)

@@ -13,7 +13,7 @@ import secrets
 
 SOURCE = Path(__file__).resolve().parent
 UPSTREAM = "9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5"
-PATCHES = ("12d97cf-inline-tools-backport.patch", "12d97cf-deferred-tools.patch", "web-search-replay.patch", "loopback-tls.patch")
+PATCHES = ("12d97cf-inline-tools-backport.patch", "12d97cf-deferred-tools.patch", "web-search-replay.patch", "loopback-tls.patch", "url-citations.patch")
 
 
 def canonical(value: dict) -> bytes:
@@ -78,14 +78,23 @@ def safe_file(path: Path, *, private: bool = True, limit: int = 128 * 1024 * 102
         windows_acl.verify([path])
 
 
-def verify(bundle: Path) -> tuple[dict, str]:
+def verify(bundle: Path, *, installed_identity: str | None = None) -> tuple[dict, str]:
     if bundle.is_symlink() or not bundle.is_dir():
         raise RuntimeError("Runtime bundle must be a regular directory")
     manifest = bundle / "bundle.json"
     safe_file(manifest, private=False, limit=65536)
     value = json.loads(manifest.read_text())
     if (not isinstance(value, dict) or set(value) != {"format", "target", "source", "binaries"}
-            or value["format"] != 1 or value["target"] != target() or value["source"] != source_lock()):
+            or value["format"] != 1 or value["target"] != target()):
+        raise RuntimeError("Runtime platform or source lock does not match this launcher")
+    identity = hashlib.sha256(canonical(value)).hexdigest()
+    if installed_identity is not None:
+        # A private selection records a previously authorized immutable bundle.
+        # Updating launcher source must not invalidate that running generation.
+        # New activation still requires the current reviewed source lock below.
+        if identity != installed_identity:
+            raise RuntimeError("Selected runtime identity mismatch")
+    elif value["source"] != source_lock():
         raise RuntimeError("Runtime platform or source lock does not match this launcher")
     suffix = ".exe" if os.name == "nt" else ""
     expected = {"proxy": "cli-proxy-api" + suffix, "ingress": "bridge-ingress" + suffix}
@@ -99,7 +108,6 @@ def verify(bundle: Path) -> tuple[dict, str]:
         safe_file(bundle / filename, private=False)
         if file_hash(bundle / filename) != row["sha256"]:
             raise RuntimeError("Runtime binary checksum mismatch")
-    identity = hashlib.sha256(canonical(value)).hexdigest()
     return value, identity
 
 
@@ -158,7 +166,7 @@ def selected(root: Path) -> tuple[Path, dict, str] | None:
         raise RuntimeError("Invalid selected runtime identity")
     if (root / "runtimes").is_symlink(): raise RuntimeError("Runtime directory must not be symlinked")
     directory = root / "runtimes" / identity
-    manifest, actual = verify(directory)
+    manifest, actual = verify(directory, installed_identity=identity)
     if actual != identity: raise RuntimeError("Selected runtime identity mismatch")
     return directory, manifest, identity
 

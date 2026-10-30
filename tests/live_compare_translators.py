@@ -64,6 +64,8 @@ def stream(port, key, payload, *, ca_file=None):
                 block["thinking"] = block.get("thinking", "") + delta["thinking"]
             elif delta.get("type") == "signature_delta":
                 block["signature"] = block.get("signature", "") + delta["signature"]
+            elif delta.get("type") == "citations_delta":
+                block.setdefault("citations", []).append(delta["citation"])
             if delta.get("type") in ("text_delta", "input_json_delta", "thinking_delta"):
                 deltas.append(at)
     for block in blocks.values():

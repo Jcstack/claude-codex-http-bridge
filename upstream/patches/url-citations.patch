@@ -1,0 +1,505 @@
+diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
+index 6200554..c546ba9 100644
+--- a/internal/translator/codex/claude/codex_claude_request.go
++++ b/internal/translator/codex/claude/codex_claude_request.go
+@@ -257,6 +257,12 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 							pendingSystemReminders = nil
+ 						}
+ 						appendTextContent(messageContentResult.Get("text").String())
++						if messageRole == "assistant" {
++							if annotations := replayCodexURLCitations(messageContentResult); annotations != nil {
++								last := len(contentItems) - 1
++								contentItems[last], _ = sjson.SetRawBytes(contentItems[last], "annotations", annotations)
++							}
++						}
+ 					case "thinking":
+ 						appendReasoningContent(messageContentResult)
+ 					case "image":
+diff --git a/internal/translator/codex/claude/codex_claude_response.go b/internal/translator/codex/claude/codex_claude_response.go
+index b4cbc14..94e0b08 100644
+--- a/internal/translator/codex/claude/codex_claude_response.go
++++ b/internal/translator/codex/claude/codex_claude_response.go
+@@ -9,6 +9,8 @@ package claude
+ import (
+ 	"bytes"
+ 	"context"
++	"crypto/sha256"
++	"hash"
+ 	"math"
+ 	"strings"
+ 
+@@ -45,6 +47,11 @@ type ConvertCodexResponseToClaudeParams struct {
+ 	BlockIndex               int
+ 	HasTextDelta             bool
+ 	TextBlockOpen            bool
++	URLCitationIDs           map[string]struct{}
++	URLCitationTextHash      hash.Hash
++	URLCitationTextBytes     int
++	TextOutputIndex          int64
++	TextContentIndex         int64
+ 	// CommentaryMessageOpen is set while the current `message` output item carries
+ 	// phase "commentary": a preamble GPT-5.x emits before its final_answer item.
+ 	// Its text goes into a thinking block, so clients that render or speak text
+@@ -152,6 +159,8 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 		// output_item.done delivers the reasoning item's final encrypted_content.
+ 	case "response.content_part.added":
+ 		if rootResult.Get("part.type").String() == "output_text" {
++			params.TextOutputIndex = rootResult.Get("output_index").Int()
++			params.TextContentIndex = rootResult.Get("content_index").Int()
+ 			if params.CommentaryMessageOpen {
+ 				output = append(output, startCodexThinkingBlock(params)...)
+ 			} else {
+@@ -169,17 +178,26 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 			break
+ 		}
+ 		output = append(output, finalizeCodexThinkingBlock(params)...)
++		params.TextOutputIndex = rootResult.Get("output_index").Int()
++		params.TextContentIndex = rootResult.Get("content_index").Int()
+ 		output = append(output, startCodexTextBlock(params)...)
++		text := rootResult.Get("delta").String()
++		_, _ = params.URLCitationTextHash.Write([]byte(text))
++		params.URLCitationTextBytes += len(text)
+ 		template = []byte(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":""}}`)
+ 		template, _ = sjson.SetBytes(template, "index", params.BlockIndex)
+ 		template, _ = sjson.SetBytes(template, "delta.text", rootResult.Get("delta").String())
+ 
+ 		output = translatorcommon.AppendSSEEventBytes(output, "content_block_delta", template, 2)
++	case "response.output_text.annotation.added":
++		output = appendCodexURLCitations(output, params, rootResult.Get("output_index").Int(), rootResult.Get("content_index").Int(),
++			gjson.Parse("["+rootResult.Get("annotation").Raw+"]"))
+ 	case "response.content_part.done":
+ 		if rootResult.Get("part.type").String() == "output_text" {
+ 			if params.CommentaryMessageOpen {
+ 				output = append(output, finalizeCodexCommentaryBlock(params)...)
+ 			} else {
++				output = appendCodexURLCitations(output, params, rootResult.Get("output_index").Int(), rootResult.Get("content_index").Int(), rootResult.Get("part.annotations"))
+ 				output = append(output, stopCodexTextBlock(params)...)
+ 			}
+ 		}
+@@ -188,6 +206,10 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 	case "response.completed", "response.incomplete":
+ 		template = []byte(`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":0,"output_tokens":0}}`)
+ 		responseData := rootResult.Get("response")
++		responseData.Get("output").ForEach(func(index, item gjson.Result) bool {
++			output = appendCodexMessageURLCitations(output, params, index.Int(), item)
++			return true
++		})
+ 		output = append(output, finalizeCodexThinkingBlock(params)...)
+ 		output = append(output, stopCodexTextBlock(params)...)
+ 		output = appendCodexFunctionCallsFromTerminal(output, params, originalRequestRawJSON, responseData)
+@@ -263,6 +285,8 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 			if params.HasTextDelta {
+ 				if commentary {
+ 					output = append(output, finalizeCodexCommentaryBlock(params)...)
++				} else {
++					output = appendCodexMessageURLCitations(output, params, rootResult.Get("output_index").Int(), itemResult)
+ 				}
+ 				return [][]byte{output}
+ 			}
+@@ -296,14 +320,24 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 			}
+ 
+ 			output = append(output, finalizeCodexThinkingBlock(params)...)
+-			output = append(output, startCodexTextBlock(params)...)
+-
+-			template = []byte(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":""}}`)
+-			template, _ = sjson.SetBytes(template, "index", params.BlockIndex)
+-			template, _ = sjson.SetBytes(template, "delta.text", text)
+-			output = translatorcommon.AppendSSEEventBytes(output, "content_block_delta", template, 2)
+-
+-			output = append(output, stopCodexTextBlock(params)...)
++			contentResult.ForEach(func(index, part gjson.Result) bool {
++				text := part.Get("text").String()
++				if part.Get("type").String() != "output_text" || text == "" {
++					return true
++				}
++				params.TextOutputIndex = rootResult.Get("output_index").Int()
++				params.TextContentIndex = index.Int()
++				output = append(output, startCodexTextBlock(params)...)
++				_, _ = params.URLCitationTextHash.Write([]byte(text))
++				params.URLCitationTextBytes += len(text)
++				template = []byte(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":""}}`)
++				template, _ = sjson.SetBytes(template, "index", params.BlockIndex)
++				template, _ = sjson.SetBytes(template, "delta.text", text)
++				output = translatorcommon.AppendSSEEventBytes(output, "content_block_delta", template, 2)
++				output = appendCodexURLCitations(output, params, params.TextOutputIndex, index.Int(), part.Get("annotations"))
++				output = append(output, stopCodexTextBlock(params)...)
++				return true
++			})
+ 		case "function_call":
+ 			output = append(output, finalizeCodexThinkingBlock(params)...)
+ 			output = append(output, stopCodexTextBlock(params)...)
+@@ -487,7 +521,7 @@ func ConvertCodexResponseToClaudeNonStream(_ context.Context, _ string, original
+ 							if part.Get("type").String() == "output_text" {
+ 								text := part.Get("text").String()
+ 								if text != "" {
+-									contentBlocks = append(contentBlocks, codexMessageTextBlock(blockType, text))
++									contentBlocks = append(contentBlocks, codexCitedTextBlock(blockType, text, part.Get("annotations")))
+ 								}
+ 							}
+ 							return true
+@@ -953,6 +987,8 @@ func startCodexTextBlock(params *ConvertCodexResponseToClaudeParams) []byte {
+ 	template := []byte(`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+ 	template, _ = sjson.SetBytes(template, "index", params.BlockIndex)
+ 	params.TextBlockOpen = true
++	params.URLCitationTextHash = sha256.New()
++	params.URLCitationTextBytes = 0
+ 
+ 	return translatorcommon.AppendSSEEventBytes(nil, "content_block_start", template, 2)
+ }
+diff --git a/internal/translator/codex/claude/codex_url_citations.go b/internal/translator/codex/claude/codex_url_citations.go
+new file mode 100644
+index 0000000..f602efe
+--- /dev/null
++++ b/internal/translator/codex/claude/codex_url_citations.go
+@@ -0,0 +1,183 @@
++package claude
++
++import (
++	"crypto/sha256"
++	"encoding/base64"
++	"encoding/hex"
++	"encoding/json"
++	"fmt"
++	"net/url"
++	"strings"
++
++	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
++	"github.com/tidwall/gjson"
++	"github.com/tidwall/sjson"
++)
++
++// The index is a bridge-owned, bounded continuation envelope, not an Anthropic
++// encrypted index or a credential. The hash detects edited/merged transcript
++// text before replaying offsets; it is not an authentication signature.
++const codexURLCitationPrefix = "codex_url_citation:v1:"
++const maxCodexURLCitationBytes = 64 << 10
++const maxCodexURLCitations = 1024
++
++type codexURLCitationEnvelope struct {
++	Annotation   json.RawMessage `json:"annotation"`
++	PrefixBytes  int             `json:"prefix_bytes"`
++	PrefixSHA256 string          `json:"prefix_sha256"`
++}
++
++func canonicalCodexURLCitation(annotation gjson.Result) []byte {
++	if len(annotation.Raw) > maxCodexURLCitationBytes || !annotation.IsObject() {
++		return nil
++	}
++	var fields struct {
++		Type       string `json:"type"`
++		URL        string `json:"url"`
++		Title      string `json:"title"`
++		StartIndex *int64 `json:"start_index"`
++		EndIndex   *int64 `json:"end_index"`
++	}
++	if json.Unmarshal([]byte(annotation.Raw), &fields) != nil || fields.Type != "url_citation" ||
++		fields.StartIndex == nil || fields.EndIndex == nil ||
++		*fields.StartIndex < 0 || *fields.EndIndex < *fields.StartIndex {
++		return nil
++	}
++	parsed, err := url.Parse(fields.URL)
++	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil {
++		return nil
++	}
++	var value map[string]any
++	decoder := json.NewDecoder(strings.NewReader(annotation.Raw))
++	decoder.UseNumber()
++	if decoder.Decode(&value) != nil {
++		return nil
++	}
++	raw, err := json.Marshal(value)
++	if err != nil || len(raw) > maxCodexURLCitationBytes {
++		return nil
++	}
++	return raw
++}
++
++func codexURLCitation(raw []byte, prefixBytes int, digest []byte) []byte {
++	encoded, err := json.Marshal(codexURLCitationEnvelope{raw, prefixBytes, hex.EncodeToString(digest)})
++	if err != nil {
++		return nil
++	}
++	// A URL annotation locates the model's answer, not an exact source excerpt.
++	// Never label a generated claim as quoted source text.
++	block := []byte(`{"type":"web_search_result_location","url":"","title":"","cited_text":"","encrypted_index":""}`)
++	block, _ = sjson.SetBytes(block, "url", gjson.GetBytes(raw, "url").String())
++	block, _ = sjson.SetBytes(block, "title", gjson.GetBytes(raw, "title").String())
++	block, _ = sjson.SetBytes(block, "encrypted_index", codexURLCitationPrefix+base64.RawURLEncoding.EncodeToString(encoded))
++	return block
++}
++
++func appendCodexURLCitations(output []byte, params *ConvertCodexResponseToClaudeParams, outputIndex, contentIndex int64, annotations gjson.Result) []byte {
++	if !params.TextBlockOpen || params.CommentaryMessageOpen || !annotations.IsArray() ||
++		params.TextOutputIndex != outputIndex || params.TextContentIndex != contentIndex {
++		return output
++	}
++	if params.URLCitationIDs == nil {
++		params.URLCitationIDs = make(map[string]struct{})
++	}
++	annotations.ForEach(func(_, annotation gjson.Result) bool {
++		raw := canonicalCodexURLCitation(annotation)
++		if raw == nil || len(params.URLCitationIDs) >= maxCodexURLCitations {
++			return true
++		}
++		identity := fmt.Sprintf("%d:%d:%x", outputIndex, contentIndex, sha256.Sum256(raw))
++		if _, exists := params.URLCitationIDs[identity]; exists {
++			return true
++		}
++		citation := codexURLCitation(raw, params.URLCitationTextBytes, params.URLCitationTextHash.Sum(nil))
++		if citation == nil {
++			return true
++		}
++		delta := []byte(`{"type":"content_block_delta","index":0,"delta":{"type":"citations_delta","citation":{}}}`)
++		delta, _ = sjson.SetBytes(delta, "index", params.BlockIndex)
++		delta, _ = sjson.SetRawBytes(delta, "delta.citation", citation)
++		output = translatorcommon.AppendSSEEventBytes(output, "content_block_delta", delta, 2)
++		params.URLCitationIDs[identity] = struct{}{}
++		return true
++	})
++	return output
++}
++
++func appendCodexMessageURLCitations(output []byte, params *ConvertCodexResponseToClaudeParams, outputIndex int64, item gjson.Result) []byte {
++	if item.Get("type").String() != "message" || item.Get("phase").String() == "commentary" {
++		return output
++	}
++	item.Get("content").ForEach(func(index, part gjson.Result) bool {
++		if part.Get("type").String() == "output_text" {
++			output = appendCodexURLCitations(output, params, outputIndex, index.Int(), part.Get("annotations"))
++		}
++		return true
++	})
++	return output
++}
++
++func codexCitedTextBlock(blockType, text string, annotations gjson.Result) []byte {
++	block := codexMessageTextBlock(blockType, text)
++	if blockType != "text" || !annotations.IsArray() {
++		return block
++	}
++	var citations [][]byte
++	seen := make(map[string]struct{})
++	digest := sha256.Sum256([]byte(text))
++	annotations.ForEach(func(_, annotation gjson.Result) bool {
++		raw := canonicalCodexURLCitation(annotation)
++		if raw == nil || len(citations) >= maxCodexURLCitations {
++			return true
++		}
++		if _, exists := seen[string(raw)]; !exists {
++			citations = append(citations, codexURLCitation(raw, len(text), digest[:]))
++			seen[string(raw)] = struct{}{}
++		}
++		return true
++	})
++	if len(citations) > 0 {
++		block, _ = sjson.SetRawBytes(block, "citations", translatorcommon.JoinRawArray(citations))
++	}
++	return block
++}
++
++func replayCodexURLCitations(part gjson.Result) []byte {
++	var annotations [][]byte
++	seen := make(map[string]struct{})
++	text := part.Get("text").String()
++	part.Get("citations").ForEach(func(_, citation gjson.Result) bool {
++		index := citation.Get("encrypted_index").String()
++		if citation.Get("type").String() != "web_search_result_location" || !strings.HasPrefix(index, codexURLCitationPrefix) ||
++			len(index) > len(codexURLCitationPrefix)+base64.RawURLEncoding.EncodedLen(maxCodexURLCitationBytes+256) ||
++			len(annotations) >= maxCodexURLCitations {
++			return true
++		}
++		raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(index, codexURLCitationPrefix))
++		var envelope codexURLCitationEnvelope
++		if err != nil || json.Unmarshal(raw, &envelope) != nil || envelope.PrefixBytes < 0 || envelope.PrefixBytes > len(text) {
++			return true
++		}
++		digest := sha256.Sum256([]byte(text[:envelope.PrefixBytes]))
++		if envelope.PrefixSHA256 != hex.EncodeToString(digest[:]) {
++			return true
++		}
++		annotation := gjson.ParseBytes(envelope.Annotation)
++		if annotation.Get("url").String() != citation.Get("url").String() || annotation.Get("title").String() != citation.Get("title").String() {
++			return true
++		}
++		canonical := canonicalCodexURLCitation(annotation)
++		if canonical != nil {
++			if _, exists := seen[string(canonical)]; !exists {
++				annotations = append(annotations, canonical)
++				seen[string(canonical)] = struct{}{}
++			}
++		}
++		return true
++	})
++	if len(annotations) == 0 {
++		return nil
++	}
++	return translatorcommon.JoinRawArray(annotations)
++}
+diff --git a/internal/translator/codex/claude/codex_url_citations_test.go b/internal/translator/codex/claude/codex_url_citations_test.go
+new file mode 100644
+index 0000000..2286dc9
+--- /dev/null
++++ b/internal/translator/codex/claude/codex_url_citations_test.go
+@@ -0,0 +1,161 @@
++package claude
++
++import (
++	"context"
++	"encoding/json"
++	"strings"
++	"testing"
++
++	"github.com/tidwall/gjson"
++	"github.com/tidwall/sjson"
++)
++
++const urlCitationFixture = `{"type":"url_citation","url":"https://fixture.invalid/docs?q=a&b=c","title":"Fixture source","start_index":0,"end_index":2}`
++
++func collectCitationStream(t *testing.T, events []string) []byte {
++	t.Helper()
++	var param any
++	blocks := map[int64][]byte{}
++	var indices []int64
++	open := map[int64]bool{}
++	for _, event := range events {
++		for _, chunk := range ConvertCodexResponseToClaude(context.Background(), "gpt-6.1-sol", nil, nil, []byte("data: "+event), &param) {
++			for _, line := range strings.Split(string(chunk), "\n") {
++				if !strings.HasPrefix(line, "data: ") {
++					continue
++				}
++				data := gjson.Parse(strings.TrimPrefix(line, "data: "))
++				idx := data.Get("index").Int()
++				switch data.Get("type").String() {
++				case "content_block_start":
++					if _, exists := blocks[idx]; exists {
++						t.Fatal("reused content index")
++					}
++					indices = append(indices, idx)
++					blocks[idx] = []byte(data.Get("content_block").Raw)
++					open[idx] = true
++				case "content_block_delta":
++					if !open[idx] {
++						t.Fatal("delta outside an open block")
++					}
++					switch data.Get("delta.type").String() {
++					case "text_delta":
++						blocks[idx], _ = sjson.SetBytes(blocks[idx], "text", gjson.GetBytes(blocks[idx], "text").String()+data.Get("delta.text").String())
++					case "citations_delta":
++						blocks[idx], _ = sjson.SetRawBytes(blocks[idx], "citations.-1", []byte(data.Get("delta.citation").Raw))
++					}
++				case "content_block_stop":
++					if !open[idx] {
++						t.Fatal("stop outside an open block")
++					}
++					delete(open, idx)
++				}
++			}
++		}
++	}
++	if len(open) != 0 {
++		t.Fatal("unclosed content blocks")
++	}
++	var content []json.RawMessage
++	for _, idx := range indices {
++		content = append(content, blocks[idx])
++	}
++	raw, _ := json.Marshal(content)
++	return raw
++}
++
++func assertURLCitationReplay(t *testing.T, content []byte, expectedText string) {
++	t.Helper()
++	part := gjson.GetBytes(content, "0")
++	if part.Get("text").String() != expectedText || part.Get("citations.#").Int() != 1 {
++		t.Fatalf("text/citation changed: %s", content)
++	}
++	if part.Get("citations.0.cited_text").String() != "" {
++		t.Fatal("model output must not be presented as a verbatim source quote")
++	}
++	request := []byte(`{"messages":[{"role":"assistant","content":[]}]}`)
++	request, _ = sjson.SetRawBytes(request, "messages.0.content", content)
++	replayed, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", request, false)
++	if err != nil || gjson.GetBytes(replayed, "input.0.content.0.annotations.#").Int() != 1 ||
++		string(canonicalCodexURLCitation(gjson.GetBytes(replayed, "input.0.content.0.annotations.0"))) != string(canonicalCodexURLCitation(gjson.Parse(urlCitationFixture))) {
++		t.Fatalf("native annotation lost/changed: %s (%v)", replayed, err)
++	}
++	request, _ = sjson.SetBytes(request, "messages.0.role", "user")
++	replayed, _ = ConvertClaudeRequestToCodex("gpt-6.1-sol", request, false)
++	if gjson.GetBytes(replayed, "input.0.content.0.annotations").Exists() {
++		t.Fatal("user content injected native assistant annotations")
++	}
++	edited, _ := sjson.SetBytes(content, "0.text", "Edited unrelated text")
++	if replayCodexURLCitations(gjson.GetBytes(edited, "0")) != nil {
++		t.Fatal("replayed offsets against changed transcript text")
++	}
++}
++
++func TestURLCitationsProgressiveDedupAndReplay(t *testing.T) {
++	part := `{"type":"output_text","text":"你好🌍. Final.","annotations":[` + urlCitationFixture + `]}`
++	item := `{"type":"message","role":"assistant","content":[` + part + `]}`
++	annotation := `{"type":"response.output_text.annotation.added","output_index":1,"content_index":0,"annotation":` + urlCitationFixture + `}`
++	content := collectCitationStream(t, []string{
++		`{"type":"response.content_part.added","output_index":1,"content_index":0,"part":{"type":"output_text"}}`,
++		`{"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":"你好🌍."}`,
++		annotation, annotation,
++		`{"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":" Final."}`,
++		`{"type":"response.content_part.done","output_index":1,"content_index":0,"part":` + part + `}`,
++		`{"type":"response.output_item.done","output_index":1,"item":` + item + `}`,
++		`{"type":"response.completed","response":{"output":[{},` + item + `]}}`,
++	})
++	assertURLCitationReplay(t, content, "你好🌍. Final.")
++}
++
++func TestURLCitationsDoneFallbackAndNonStream(t *testing.T) {
++	part := `{"type":"output_text","text":"Fixture answer.","annotations":[` + urlCitationFixture + `]}`
++	item := `{"type":"message","role":"assistant","content":[` + part + `]}`
++	for _, stage := range []string{"part", "item", "terminal", "whole-item", "non-stream"} {
++		t.Run(stage, func(t *testing.T) {
++			var content []byte
++			if stage == "non-stream" {
++				response := []byte(`{"type":"response.completed","response":{"output":[` + item + `]}}`)
++				content = []byte(gjson.GetBytes(ConvertCodexResponseToClaudeNonStream(context.Background(), "", nil, nil, response, nil), "content").Raw)
++			} else {
++				events := []string{}
++				if stage != "whole-item" {
++					events = append(events, `{"type":"response.output_text.delta","delta":"Fixture answer."}`)
++				}
++				if stage == "part" {
++					events = append(events, `{"type":"response.content_part.done","part":`+part+`}`)
++				}
++				if stage != "terminal" {
++					events = append(events, `{"type":"response.output_item.done","item":`+item+`}`)
++				}
++				events = append(events, `{"type":"response.completed","response":{"output":[`+item+`]}}`)
++				content = collectCitationStream(t, events)
++			}
++			assertURLCitationReplay(t, content, "Fixture answer.")
++		})
++	}
++}
++
++func TestURLCitationsRejectMalformedAndForeignMetadata(t *testing.T) {
++	annotation := gjson.Parse(urlCitationFixture)
++	block := codexCitedTextBlock("text", "Fixture answer.", gjson.Parse("["+urlCitationFixture+"]"))
++	for path, value := range map[string]any{"citations.0.url": "https://different.invalid", "citations.0.title": "Changed title",
++		"citations.0.encrypted_index": codexURLCitationPrefix + "malformed"} {
++		changed, _ := sjson.SetBytes(block, path, value)
++		if replayCodexURLCitations(gjson.ParseBytes(changed)) != nil {
++			t.Fatal("accepted inconsistent citation metadata")
++		}
++	}
++	for path, value := range map[string]any{"type": "file_citation", "url": "javascript:alert(1)", "start_index": -1, "end_index": 1.5} {
++		raw, _ := sjson.Set(annotation.Raw, path, value)
++		if canonicalCodexURLCitation(gjson.Parse(raw)) != nil {
++			t.Fatal("accepted invalid URL annotation")
++		}
++	}
++	raw, _ := sjson.Set(annotation.Raw, "start_index", nil)
++	if canonicalCodexURLCitation(gjson.Parse(raw)) != nil {
++		t.Fatal("accepted null offset")
++	}
++	if codexCitedTextBlock("thinking", "Commentary", gjson.Parse("["+urlCitationFixture+"]")) == nil {
++		t.Fatal("commentary text was lost")
++	}
++}

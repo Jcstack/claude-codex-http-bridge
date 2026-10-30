@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import runtime_bundle
 
@@ -45,6 +46,24 @@ class BundleTests(unittest.TestCase):
             (bundle / "bundle.json").write_text(json.dumps(value))
             with self.assertRaisesRegex(RuntimeError, "path"):
                 runtime_bundle.verify(bundle)
+
+    def test_previously_selected_runtime_survives_launcher_source_update(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); runtime_bundle.private_dir(root)
+            bundle = self.fixture(root)
+            destination = root / "install"; runtime_bundle.private_dir(destination)
+            identity = runtime_bundle.activate(destination, bundle)
+            changed = {"upstream": "0" * 40, "files": {}}
+            with patch.object(runtime_bundle, "source_lock", return_value=changed):
+                self.assertEqual(runtime_bundle.selected(destination)[2], identity)
+                with self.assertRaisesRegex(RuntimeError, "source lock"):
+                    runtime_bundle.activate(destination, bundle)
+                installed = destination / "runtimes" / identity / "bundle.json"
+                value = json.loads(installed.read_text())
+                value["source"] = changed
+                installed.write_text(json.dumps(value))
+                with self.assertRaisesRegex(RuntimeError, "identity"):
+                    runtime_bundle.selected(destination)
 
 
 if __name__ == "__main__": unittest.main()

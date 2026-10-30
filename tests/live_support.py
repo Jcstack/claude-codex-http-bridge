@@ -45,7 +45,7 @@ def temporary_translator(binary: Path, upstream: dict, model: str):
         config.write_text(source)
         process = subprocess.Popen([str(binary), "-config", str(config)],
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL)
+                                   stderr=subprocess.DEVNULL, cwd=root)
         try:
             launcher.wait_for_private_listener(process, port)
             environment = os.environ.copy()

@@ -57,6 +57,21 @@ Trial 1 requests took about 3.6–4.9 seconds; trial 2 took about 18–27 second
 
 ## Regression gates
 
+The URL-citation follow-up adds a source-locked patch and keeps old, previously
+selected immutable bundles valid across launcher source updates. New activations
+still require the current source lock. Local Go translator and race tests,
+28 Python tests, streaming/non-streaming HTTP fixtures and real Claude resume
+passed. The complete managed TLS/background fixture also passed locally.
+
+A live subscription search returned two native search calls, 16 source entries
+and one URL citation in 13.843 seconds. A separate new translator accepted the
+annotation-bearing history and continued in 7.710 seconds, recalling a source
+URL. The annotation URL did not match any native source-list URL byte for byte;
+the cause is not established. Preserving a provider citation does not verify its
+grounding. Claude's source-quotation field remains empty because the URL
+annotation provides no exact source excerpt. Cross-platform promotion evidence
+for this fifth patch is recorded separately from the earlier four-patch run.
+
 | Probe | Result | Scope |
 | --- | --- | --- |
 | [Transport](tests/smoke_transport.py) | Auth before upstream; two pre-output 503 retries; truncated output not replayed or declared successful; disconnect cancels upstream; next request works; quota cooldown retained | Fake upstream; pin and candidate passed locally; included in CI |

@@ -43,6 +43,7 @@
 !upstream/patches/12d97cf-deferred-tools.patch
 !upstream/patches/web-search-replay.patch
 !upstream/patches/loopback-tls.patch
+!upstream/patches/url-citations.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml
