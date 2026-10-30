@@ -9,7 +9,7 @@ Claude Code ──Anthropic Messages──> 127.0.0.1 + private local key
 
 The repository contains source and an example config only. It does **not** contain the upstream proxy binary, OAuth credentials, API keys, prompts, transcripts, or runtime logs.
 
-The installed proxy remains pinned to the reviewed upstream release. An isolated, credential-free candidate adds cache-preserving dynamic tool translation; it is not installed by the normal launcher. See the [community review and release gate](COMMUNITY_REVIEW.md) and [model-versus-harness evidence](MODEL_HARNESS_EVIDENCE.md).
+The installed proxy remains pinned to the reviewed upstream release. An isolated, credential-free candidate adds cache-preserving dynamic tool translation; it is not installed by the normal launcher. See the [community review and release gate](COMMUNITY_REVIEW.md), [model-versus-harness evidence](MODEL_HARNESS_EVIDENCE.md), and [local GPT harness pilot](HARNESS_PILOT.md).
 
 ## 中文快速开始
 
