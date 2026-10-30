@@ -1,9 +1,9 @@
 diff --git a/internal/translator/codex/claude/codex_claude_deferred_tools_test.go b/internal/translator/codex/claude/codex_claude_deferred_tools_test.go
 new file mode 100644
-index 0000000..2e7125d
+index 0000000..c14720d
 --- /dev/null
 +++ b/internal/translator/codex/claude/codex_claude_deferred_tools_test.go
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,124 @@
 +package claude
 +
 +import (
@@ -90,22 +90,57 @@ index 0000000..2e7125d
 +	}
 +}
 +
++func TestConvertClaudeRequestToCodex_UnrelatedToolCannotRevealDeferredTool(t *testing.T) {
++	request := `{"tools":[
++		{"name":"Read","input_schema":{"type":"object"}},
++		{"name":"mcp__demo__lookup","defer_loading":true,"input_schema":{"type":"object"}}
++	],"messages":[
++		{"role":"assistant","content":[{"type":"tool_use","id":"call_read","name":"Read","input":{}}]},
++		{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_read","content":[
++			{"type":"tool_reference","tool_name":"mcp__demo__lookup"}
++		]}]}
++	]}`
++	converted, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(request), false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, item := range gjson.GetBytes(converted, "input").Array() {
++		if item.Get("type").String() == "additional_tools" {
++			t.Fatalf("an unrelated tool result revealed a deferred schema: %s", item.Raw)
++		}
++	}
++}
++
 +func TestConvertClaudeRequestToCodex_DropsAnthropicOnlyEagerFlag(t *testing.T) {
-+	request := `{"tools":[{"name":"Read","eager_input_streaming":true,"input_schema":{"type":"object"}}],
++	request := `{"tools":[{"name":"Read","eager_input_streaming":true,"allowed_callers":["direct"],
++	"cache_control":{"type":"ephemeral"},"future_anthropic_field":"unsafe",
++	"input_schema":{"type":"object"}}],
 +	"messages":[{"role":"user","content":"read"}]}`
 +	converted, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(request), false)
 +	if err != nil {
 +		t.Fatal(err)
 +	}
-+	if gjson.GetBytes(converted, "tools.0.eager_input_streaming").Exists() {
-+		t.Fatalf("Anthropic-only tool field reached Responses: %s", gjson.GetBytes(converted, "tools").Raw)
++	for field := range gjson.GetBytes(converted, "tools.0").Map() {
++		switch field {
++		case "type", "name", "description", "parameters", "strict":
++		default:
++			t.Fatalf("Anthropic-only tool field %q reached Responses: %s", field, gjson.GetBytes(converted, "tools").Raw)
++		}
 +	}
 +}
 diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
-index 5842e50..d13e2f9 100644
+index 5842e50..e8dbcac 100644
 --- a/internal/translator/codex/claude/codex_claude_request.go
 +++ b/internal/translator/codex/claude/codex_claude_request.go
-@@ -141,6 +141,8 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+@@ -109,6 +109,7 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 		messageResults := messagesResult.Array()
+ 		var pendingToolUseIDs []string
+ 		var pendingSystemReminders [][]byte
++		var toolSearchCallIDs map[string]struct{}
+ 
+ 		for i := 0; i < len(messageResults); i++ {
+ 			messageResult := messageResults[i]
+@@ -141,6 +142,8 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
  			}
  			pendingToolUseIDs = nil
  			contentItems := make([][]byte, 0, 4)
@@ -114,11 +149,40 @@ index 5842e50..d13e2f9 100644
  			// Counts only what this turn itself sends, not system reminders flushed beside it.
  			// Empty text is forwarded but does not count: it can hide an emptied attachment.
  			turnSendable := 0
-@@ -324,6 +326,27 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+@@ -273,6 +276,12 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 						flushMessage()
+ 						if id := messageContentResult.Get("id").String(); id != "" {
+ 							pendingToolUseIDs = append(pendingToolUseIDs, id)
++							if messageContentResult.Get("name").String() == "ToolSearch" {
++								if toolSearchCallIDs == nil {
++									toolSearchCallIDs = make(map[string]struct{})
++								}
++								toolSearchCallIDs[id] = struct{}{}
++							}
+ 						}
+ 						functionCallMessage := []byte(`{"type":"function_call"}`)
+ 						functionCallMessage, _ = sjson.SetBytes(functionCallMessage, "call_id", shortenCodexCallIDIfNeeded(messageContentResult.Get("id").String()))
+@@ -289,8 +298,11 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 						inputItems = append(inputItems, functionCallMessage)
+ 					case "tool_result":
+ 						flushMessage()
++						toolUseID := messageContentResult.Get("tool_use_id").String()
++						_, isToolSearchResult := toolSearchCallIDs[toolUseID]
++						delete(toolSearchCallIDs, toolUseID)
+ 						functionCallOutputMessage := []byte(`{"type":"function_call_output"}`)
+-						functionCallOutputMessage, _ = sjson.SetBytes(functionCallOutputMessage, "call_id", shortenCodexCallIDIfNeeded(messageContentResult.Get("tool_use_id").String()))
++						functionCallOutputMessage, _ = sjson.SetBytes(functionCallOutputMessage, "call_id", shortenCodexCallIDIfNeeded(toolUseID))
+ 
+ 						contentResult := messageContentResult.Get("content")
+ 						if contentResult.IsArray() {
+@@ -324,6 +336,30 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
  									toolResultContent := []byte(`{"type":"input_text","text":""}`)
  									toolResultContent, _ = sjson.SetBytes(toolResultContent, "text", contentResults[k].Get("text").String())
  									toolResultContentItems = append(toolResultContentItems, toolResultContent)
 +								} else if toolResultContentType == "tool_reference" {
++									if !isToolSearchResult {
++										continue
++									}
 +									name := contentResults[k].Get("tool_name").String()
 +									if name == "" {
 +										name = contentResults[k].Get("name").String()
@@ -142,7 +206,7 @@ index 5842e50..d13e2f9 100644
  								}
  							}
  							if len(toolResultContentItems) > 0 {
-@@ -340,6 +363,11 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+@@ -340,6 +376,11 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
  					}
  				}
  				flushMessage()
@@ -154,7 +218,7 @@ index 5842e50..d13e2f9 100644
  				if len(pendingSystemReminders) > 0 {
  					inputItems = append(inputItems, pendingSystemReminders...)
  					pendingSystemReminders = nil
-@@ -374,6 +402,9 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+@@ -374,6 +415,9 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
  		toolItems = make([][]byte, 0, len(toolResults))
  		for i := 0; i < len(toolResults); i++ {
  			toolResult := toolResults[i]
@@ -164,15 +228,45 @@ index 5842e50..d13e2f9 100644
  			// Special handling: map Claude web search tool to Codex web_search
  			if isClaudeWebSearchToolType(toolResult.Get("type").String()) {
  				hasWebSearchTool = true
-@@ -674,7 +705,7 @@ func convertClaudeFunctionToolToCodex(toolResult gjson.Result, toolNameMap map[s
+@@ -656,10 +700,9 @@ func buildShortNameMap(names []string) map[string]string {
+ }
+ 
+ func convertClaudeFunctionToolToCodex(toolResult gjson.Result, toolNameMap map[string]string) []byte {
+-	tool := []byte(toolResult.Raw)
+-	if toolResult.Get("type").Type != gjson.String || toolResult.Get("type").String() != "function" {
+-		tool, _ = sjson.SetBytes(tool, "type", "function")
+-	}
++	// Build the Responses function schema from known fields. Claude-specific tool
++	// fields can grow across releases and must not leak into the upstream API.
++	tool := []byte(`{"type":"function","name":""}`)
+ 	// Apply shortened name if needed
+ 	if v := toolResult.Get("name"); v.Exists() {
+ 		originalName := v.String()
+@@ -669,19 +712,13 @@ func convertClaudeFunctionToolToCodex(toolResult gjson.Result, toolNameMap map[s
+ 		} else {
+ 			name = shortenNameIfNeeded(name)
  		}
+-		if v.Type != gjson.String || name != originalName {
+-			tool, _ = sjson.SetBytes(tool, "name", name)
+-		}
++		tool, _ = sjson.SetBytes(tool, "name", name)
  	}
- 	tool, _ = sjson.SetRawBytes(tool, "parameters", []byte(normalizeToolParameters(toolResult.Get("input_schema").Raw)))
+-	tool, _ = sjson.SetRawBytes(tool, "parameters", []byte(normalizeToolParameters(toolResult.Get("input_schema").Raw)))
 -	for _, path := range []string{"input_schema", "parameters.$schema", "cache_control", "defer_loading"} {
-+	for _, path := range []string{"input_schema", "parameters.$schema", "cache_control", "defer_loading", "eager_input_streaming"} {
- 		if gjson.GetBytes(tool, path).Exists() {
- 			tool, _ = sjson.DeleteBytes(tool, path)
- 		}
+-		if gjson.GetBytes(tool, path).Exists() {
+-			tool, _ = sjson.DeleteBytes(tool, path)
+-		}
+-	}
+-	if gjson.GetBytes(tool, "strict").Type != gjson.False {
+-		tool, _ = sjson.SetBytes(tool, "strict", false)
++	if description := toolResult.Get("description"); description.Type == gjson.String {
++		tool, _ = sjson.SetBytes(tool, "description", description.String())
+ 	}
++	tool, _ = sjson.SetRawBytes(tool, "parameters", []byte(normalizeToolParameters(toolResult.Get("input_schema").Raw)))
++	tool, _ = sjson.SetBytes(tool, "strict", false)
+ 	return tool
+ }
+ 
 diff --git a/internal/translator/codex/claude/codex_claude_request_test.go b/internal/translator/codex/claude/codex_claude_request_test.go
 index b23b5e3..312bb29 100644
 --- a/internal/translator/codex/claude/codex_claude_request_test.go
