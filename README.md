@@ -109,6 +109,8 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the Claude Code feature matrix, Cla
 
 See [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md) for the broader local-harness, model-route, provider, plugin, Windows, and community-project audit. [BROWSER.md](BROWSER.md) gives an opt-in browser MCP setup, including an isolated mode that was exercised with a real Codex-backed Claude Code session.
 
+See [API_ROUTE_RESEARCH.md](API_ROUTE_RESEARCH.md) for the direct OpenAI API-key route, current independent Opus/Fable/Sol/Astra comparisons, active gateway issues, privacy requirements, and a credential-free Responses protocol test. The API route is research and a tested protocol candidate; the installed command still uses the ChatGPT-plan route.
+
 ## License
 
 The wrapper and installer are MIT licensed. CLIProxyAPI is downloaded separately under its own MIT license; its license is retained in the local installation.
