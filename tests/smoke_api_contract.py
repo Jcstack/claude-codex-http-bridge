@@ -77,17 +77,36 @@ class Upstream(BaseHTTPRequestHandler):
                                                        "text": "live stream", "annotations": []}]}},
                 events[1],
             ]
+        elif len(self.requests) == 5:
+            call = {"id": "fc_stream", "type": "function_call", "status": "completed",
+                    "call_id": "call_stream", "name": "Read",
+                    "arguments": '{"file_path":"/fixture"}'}
+            response["output"] = [call]
+            events = [
+                events[0],
+                {"type": "response.output_item.added", "output_index": 0,
+                 "item": {"id": "fc_stream", "type": "function_call",
+                          "call_id": "call_stream", "name": "Read", "arguments": ""}},
+                {"type": "response.function_call_arguments.delta", "output_index": 0,
+                 "delta": '{"file_path":'},
+                {"type": "response.function_call_arguments.delta", "output_index": 0,
+                 "delta": '"/fixture"}'},
+                {"type": "response.function_call_arguments.done", "output_index": 0,
+                 "arguments": call["arguments"]},
+                {"type": "response.output_item.done", "output_index": 0, "item": call},
+                {"type": "response.completed", "response": response},
+            ]
         encoded = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
-        if len(self.requests) != 4:
+        if len(self.requests) not in (4, 5):
             self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
-        if len(self.requests) == 4:
+        if len(self.requests) in (4, 5):
             for index, event in enumerate(events):
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
-                if index == 3:
+                if index == (3 if len(self.requests) == 4 else 2):
                     time.sleep(.25)
         else:
             self.wfile.write(encoded)
@@ -251,7 +270,23 @@ def main() -> None:
                                   event.get("delta", {}).get("text") == "live ")
             stop_at = next(when for when, event in stream_events if event.get("type") == "message_stop")
             assert stop_at - first_delta_at >= .10, stream_events
-            assert len(Upstream.requests) == 4, Upstream.requests
+            streamed_call = post_stream(port, local_key, {
+                "model": MODEL, "max_tokens": 1024, "stream": True,
+                "messages": [{"role": "user", "content": "Read /fixture"}],
+                "tools": [{**tools[0], "eager_input_streaming": True}],
+            })
+            call_deltas = [(when, event["delta"].get("partial_json", ""))
+                           for when, event in streamed_call
+                           if event.get("type") == "content_block_delta" and
+                           event.get("delta", {}).get("type") == "input_json_delta"]
+            assert len(call_deltas) >= 2, streamed_call
+            assert "".join(delta for _, delta in call_deltas) == '{"file_path":"/fixture"}', call_deltas
+            call_stop = next(when for when, event in streamed_call
+                             if event.get("type") == "content_block_stop")
+            assert call_stop - call_deltas[0][0] >= .10, streamed_call
+            assert len(Upstream.requests) == 5, Upstream.requests
+            assert any(tool.get("name") == "Read" for tool in
+                       Upstream.requests[4][2].get("tools", [])), Upstream.requests[4]
             for path, authorization, body in Upstream.requests:
                 assert path.endswith("/v1/responses"), path
                 assert authorization == "Bearer " + MOCK_UPSTREAM_KEY, authorization

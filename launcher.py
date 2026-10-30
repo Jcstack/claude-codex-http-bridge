@@ -146,6 +146,10 @@ def claude_environment(port: int, key: str, model: str) -> dict[str, str]:
         "ANTHROPIC_DEFAULT_FABLE_MODEL": model,
         "ENABLE_TOOL_SEARCH": "true",
     })
+    # Custom gateways disable eager tool inputs by default in Claude Code.
+    # The reviewed proxy translates incremental Responses function arguments
+    # to Anthropic input_json_delta events. Respect an explicit user opt-out.
+    environment.setdefault("CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING", "1")
     return environment
 
 

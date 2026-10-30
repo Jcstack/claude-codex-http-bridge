@@ -38,6 +38,14 @@ def model(context: int, search: bool = True) -> dict:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_gateway_tool_streaming_defaults_on_and_respects_opt_out(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")
+            self.assertEqual(environment["CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"], "1")
+        with patch.dict(os.environ, {"CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "0"}):
+            environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")
+            self.assertEqual(environment["CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"], "0")
+
     def test_catalog_intersection_and_model_picker(self) -> None:
         rows = {
             "gpt-6.1-sol": model(500_000),
