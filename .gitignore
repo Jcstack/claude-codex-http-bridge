@@ -10,12 +10,14 @@
 !COMMUNITY_REVIEW.md
 !MODEL_HARNESS_EVIDENCE.md
 !HARNESS_PILOT.md
+!OPERATIONS.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
 !install.py
 !install.sh
 !launcher.py
+!diagnostics.py
 !statusline_adapter.py
 !codex_usage.py
 !webfetch_pdf_guard.py
@@ -25,6 +27,9 @@
 !windows_acl.py
 !tests/
 !tests/*.py
+!tests/claude-client/
+!tests/claude-client/package.json
+!tests/claude-client/package-lock.json
 !upstream/
 !upstream/patches/
 !upstream/patches/12d97cf-inline-tools-backport.patch

@@ -49,6 +49,8 @@ jobs:
           set -euo pipefail
           python tests/smoke_api_contract.py "${{ matrix.binary }}"
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
+          python tests/smoke_transport.py "${{ matrix.binary }}"
+          python tests/smoke_model_state.py "${{ matrix.binary }}"
       - uses: actions/upload-artifact@v4
         with:
           name: proxy-candidate-${{ matrix.os }}

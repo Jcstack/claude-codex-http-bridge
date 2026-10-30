@@ -187,9 +187,9 @@ for line in sys.stdin:
                                  "behavesAs": "claude-sonnet-5-5"}],
                     "replaceBuiltInOptions": True,
                 }}))
-                environment = {
-                    "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-                    "HOME": str(root),
+                environment = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP")
+                               if name in os.environ}
+                environment.update({
                     "CLAUDE_CONFIG_DIR": str(root / "claude-config"),
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
                     "ANTHROPIC_AUTH_TOKEN": key,
@@ -198,10 +198,12 @@ for line in sys.stdin:
                     "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
                     "ENABLE_TOOL_SEARCH": "true",
                     "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "1",
+                    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+                    "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "1",
                     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
                     "DISABLE_TELEMETRY": "1",
-                }
-                command = [claude, "--settings", str(settings),
+                })
+                command = [claude, "--restricted", "--permission-mode", "dontAsk", "--settings", str(settings),
                            "--model", model, "--tools", "Read,ToolSearch",
                            "--allowedTools", "Read,mcp__fixture__lookup",
                            "--mcp-config", str(mcp_config), "--strict-mcp-config", "-p",

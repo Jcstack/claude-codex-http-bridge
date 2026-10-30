@@ -20,6 +20,29 @@ ROOT = Path(__file__).resolve().parent
 REQUIRED_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 
+def context_metadata(row: dict) -> dict:
+    """Use the advertised maximum, preserving the distinct default window.
+
+    Codex's context_window is a default, not necessarily a route ceiling.
+    max_context_window is the server-advertised bound for a larger selection.
+    Never substitute a separate public API model limit into this route.
+    """
+    default = row.get("context_window")
+    maximum = row.get("max_context_window")
+    result = {**row, "default_context_window": default}
+    if default is None and type(maximum) is int and maximum > 0:
+        result.update(context_window=maximum, context_window_source="max_context_window")
+    elif type(default) is not int or default <= 0:
+        result.update(context_window=None, context_window_source="invalid")
+    elif maximum is None:
+        result["context_window_source"] = "context_window"
+    elif type(maximum) is int and maximum >= default:
+        result.update(context_window=maximum, context_window_source="max_context_window")
+    else:
+        result.update(context_window=None, context_window_source="invalid")
+    return result
+
+
 def verify_install() -> None:
     windows = platform.system() == "Windows"
     proxy = ROOT / "bin" / ("cli-proxy-api.exe" if windows else "cli-proxy-api")
@@ -176,12 +199,14 @@ def discover() -> tuple[dict[str, dict], list[str]]:
         if not isinstance(verified, dict):
             raise RuntimeError("OpenAI API model metadata has an unexpected shape")
         rows = {
-            slug: {**rows.get(slug, {}), "slug": slug, **spec}
+            # The proxy may reuse Codex catalog rows for API keys. An API model's
+            # verified spec must not inherit a subscription-only maximum.
+            slug: {**rows.get(slug, {}), "slug": slug, "max_context_window": None, **spec}
             for slug, spec in verified.items()
             if slug in public_ids and isinstance(spec, dict)
         }
     chat = {
-        slug: row
+        slug: context_metadata(row)
         for slug, row in rows.items()
         if isinstance(slug, str)
         and slug.startswith("gpt-")
@@ -199,12 +224,16 @@ def compact_window(row: dict) -> int | None:
     context = row.get("context_window")
     if type(context) is not int or context < 200_000:
         return None
-    # Leave room for output and differences between Claude and Codex token counts.
-    computed = min(int(context * 0.8), context - 70_000)
+    # Match Codex's 90% default policy, unless route metadata declares a lower
+    # native limit. This is Claude's configured auto-compact window; the client
+    # also reserves tokens internally and can compact earlier than this value.
+    computed = context * 9 // 10
     native = row.get("auto_compact_token_limit")
-    if isinstance(native, int) and native > 0:
+    if type(native) is int and native > 0:
         computed = min(computed, native)
-    window = computed // 10_000 * 10_000
+    # Claude Code 2.1.314 accepts autoCompactWindow only through 1M. This caps
+    # the client setting, never the model's dynamically discovered context.
+    window = min(computed, 1_000_000)
     return window if window >= 100_000 else None
 
 
@@ -275,7 +304,7 @@ def runtime_settings(chat: dict[str, dict]) -> Path:
         options.append({
             "model": slug,
             "label": label + (" (OpenAI API)" if api_route else " (Codex)"),
-            "description": f"{'OpenAI API' if api_route else 'Codex route'} {row['context_window'] // 1000}k; auto-compact {window // 1000}k",
+            "description": f"{'OpenAI API' if api_route else 'Codex route'} {row['context_window'] / 1000:g}k; auto-compact window {window / 1000:g}k",
             "behavesAs": behaves_as(slug),
         })
         model_settings[slug] = {"autoCompactWindow": window}

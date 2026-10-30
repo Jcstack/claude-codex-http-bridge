@@ -25,6 +25,8 @@ HELPER = ROOT / "bridge_models.py"
 
 
 def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
+    if arguments and arguments[0] == "diagnostics":
+        return "diagnostics", "", arguments[1:]
     if arguments and arguments[0] == "--help":
         return "help", "", []
     if arguments and arguments[0] in ("codex-login", "models", "--list-models", "usage"):
@@ -147,6 +149,12 @@ def claude_environment(port: int, key: str, model: str,
         "ANTHROPIC_DEFAULT_FABLE_MODEL": model,
         "ENABLE_TOOL_SEARCH": "true",
     })
+    # Documented gateway controls. OpenAI does not strip Anthropic's attribution
+    # block; omit it at the client to keep the reusable prefix stable. Fixed-
+    # vocabulary hint headers distinguish compaction from ordinary turns without
+    # guessing from prompt text. Keep explicit operator overrides.
+    environment.setdefault("CLAUDE_CODE_ATTRIBUTION_HEADER", "0")
+    environment.setdefault("CLAUDE_CODE_GATEWAY_HINT_HEADERS", "1")
     # The subscription endpoint accepted the tool flag in a live call. On the
     # direct API route, this proxy forwards eager_input_streaming as an extra
     # Responses function-tool field, so do not enable it without an upstream
@@ -508,7 +516,11 @@ def main() -> int:
         print("Direct OpenAI API: claude-codex api key set; claude-codex api models; claude-codex api --model sol.")
         print("Run claude-codex [api] bridge start | status | stop to manage each private localhost service.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
+        print("Read-only metadata: claude-codex diagnostics [--hours 2] [--session UUID].")
         return 0
+    if mode == "diagnostics":
+        import diagnostics
+        return diagnostics.main(claude_args, root=ROOT, route=route)
     helper_output("verify")
     if route == "api" and mode in ("login", "usage"):
         raise ValueError("API route uses a project key and API Platform billing; run claude-codex api key set")

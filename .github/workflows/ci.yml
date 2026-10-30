@@ -8,6 +8,28 @@ permissions:
   contents: read
 
 jobs:
+  claude-client:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the integrity-locked client without install scripts
+        run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+      - name: Add the isolated client to PATH
+        run: python -c "import os,pathlib; pathlib.Path(os.environ['GITHUB_PATH']).open('a').write(str(pathlib.Path('tests/claude-client/node_modules/.bin').resolve())+'\n')"
+      - name: Verify local Claude behavior without a model account
+        run: python tests/probe_claude_client.py
   check:
     strategy:
       fail-fast: false
@@ -34,6 +56,8 @@ jobs:
           python tests/smoke_persistent.py "$RUNNER_TEMP/bridge"
           python tests/smoke_api_contract.py "$RUNNER_TEMP/bridge/bin/cli-proxy-api"
           python tests/probe_proxy_features.py "$RUNNER_TEMP/bridge/bin/cli-proxy-api" --report-only
+          python tests/smoke_transport.py "$RUNNER_TEMP/bridge/bin/cli-proxy-api"
+          python tests/smoke_model_state.py "$RUNNER_TEMP/bridge/bin/cli-proxy-api"
           "$RUNNER_TEMP/bridge-bin/claude-codex" --help
       - name: Verify native Windows installation and ACLs
         if: runner.os == 'Windows'
@@ -53,6 +77,10 @@ jobs:
           python tests/smoke_api_contract.py (Join-Path $bridgeRoot 'bin/cli-proxy-api.exe')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/probe_proxy_features.py (Join-Path $bridgeRoot 'bin/cli-proxy-api.exe') --report-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/smoke_transport.py (Join-Path $bridgeRoot 'bin/cli-proxy-api.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/smoke_model_state.py (Join-Path $bridgeRoot 'bin/cli-proxy-api.exe')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $bridgeRoot 'bin/claude-codex.cmd') --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

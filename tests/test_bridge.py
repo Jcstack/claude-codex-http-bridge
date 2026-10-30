@@ -38,10 +38,33 @@ def model(context: int, search: bool = True) -> dict:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_default_context_is_not_the_advertised_maximum(self) -> None:
+        row = {**model(272_000), "max_context_window": 872_000, "auto_compact_token_limit": None}
+        selected = bridge_models.context_metadata(row)
+        self.assertEqual(selected["default_context_window"], 272_000)
+        self.assertEqual(selected["context_window"], 872_000)
+        self.assertEqual(selected["context_window_source"], "max_context_window")
+        self.assertEqual(bridge_models.compact_window(selected), 784_800)
+        self.assertEqual(row["context_window"], 272_000)  # no mutation of source metadata
+        future = bridge_models.context_metadata({**row, "max_context_window": 960_000})
+        self.assertEqual(bridge_models.compact_window(future), 864_000)
+        native_limit = {**selected, "auto_compact_token_limit": 700_123}
+        self.assertEqual(bridge_models.compact_window(native_limit), 700_123)
+        absent_default = bridge_models.context_metadata({**row, "context_window": None})
+        self.assertEqual(absent_default["context_window"], 872_000)
+        for maximum in (True, "872000", 100_000, -1):
+            invalid = bridge_models.context_metadata({**row, "max_context_window": maximum})
+            self.assertFalse(bridge_models.eligible(invalid))
+        huge = bridge_models.context_metadata({**row, "max_context_window": 2_000_000})
+        self.assertEqual(huge["context_window"], 2_000_000)
+        self.assertEqual(bridge_models.compact_window(huge), 1_000_000)  # client setting range only
+
     def test_gateway_tool_streaming_defaults_on_and_respects_opt_out(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")
             self.assertEqual(environment["CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"], "1")
+            self.assertEqual(environment["CLAUDE_CODE_ATTRIBUTION_HEADER"], "0")
+            self.assertEqual(environment["CLAUDE_CODE_GATEWAY_HINT_HEADERS"], "1")
             api_environment = launcher.claude_environment(12345, "mock-local-key",
                                                          "gpt-6.1-sol", "api")
             self.assertNotIn("CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING", api_environment)
@@ -54,6 +77,10 @@ class BridgeTests(unittest.TestCase):
         with patch.dict(os.environ, {"CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "1"}):
             with self.assertRaisesRegex(RuntimeError, "API route"):
                 launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol", "api")
+        with patch.dict(os.environ, {"CLAUDE_CODE_ATTRIBUTION_HEADER": "1", "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "0"}):
+            environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")
+            self.assertEqual(environment["CLAUDE_CODE_ATTRIBUTION_HEADER"], "1")
+            self.assertEqual(environment["CLAUDE_CODE_GATEWAY_HINT_HEADERS"], "0")
 
     def test_catalog_intersection_and_model_picker(self) -> None:
         rows = {
@@ -198,7 +225,8 @@ Model ID: `gpt-6.1-sol`
 
             key = local_key_path.read_text().strip()
             public = {"data": [{"id": "gpt-6.1-sol"}]}
-            rich = {"models": [{"slug": "gpt-6.1-sol", "context_window": 500_000}]}
+            rich = {"models": [{"slug": "gpt-6.1-sol", "context_window": 500_000,
+                                "max_context_window": 872_000}]}
             with patch.dict(os.environ, {"CODEX_BRIDGE_ROUTE": "api",
                                       "CODEX_BRIDGE_API_METADATA_FILE": str(runtime / "catalog.json"),
                                       "CODEX_BRIDGE_KEY_FILE": str(local_key_path),

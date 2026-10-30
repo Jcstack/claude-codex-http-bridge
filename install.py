@@ -246,7 +246,7 @@ def main() -> None:
     private_dir(root / "bin")
     if windows:
         windows_acl.lock([root / "auth", root / "bin"])
-    for filename in ("bridge_models.py", "launcher.py", "statusline_adapter.py", "codex_usage.py",
+    for filename in ("bridge_models.py", "launcher.py", "diagnostics.py", "statusline_adapter.py", "codex_usage.py",
                      "api_profile.py",
                      "webfetch_pdf_guard.py",
                      "windows_acl.py", "run-claude-codex.sh"):
