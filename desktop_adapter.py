@@ -178,7 +178,7 @@ class DesktopSession:
                             self.scope.select_all_text(self.configuration["identity"]["id"])
                             from types import SimpleNamespace
                             result = SimpleNamespace(is_error=False)
-                        elif os.name != "nt" and name == "type_text":
+                        elif name == "type_text":
                             # Do not try AX append then keyboard append after
                             # an uncertain setter result. One explicit PID-
                             # targeted Unicode path, checked between chunks.
