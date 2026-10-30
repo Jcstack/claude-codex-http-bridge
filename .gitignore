@@ -18,6 +18,7 @@
 !webfetch_pdf_guard.py
 !run-claude-codex.sh
 !bridge_models.py
+!api_profile.py
 !windows_acl.py
 !tests/
 !tests/*.py

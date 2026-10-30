@@ -155,6 +155,26 @@ def discover() -> tuple[dict[str, dict], list[str]]:
         and isinstance(row.get("slug"), str)
         and row["slug"] in public_ids
     }
+    if os.environ.get("CODEX_BRIDGE_ROUTE") == "api":
+        metadata_path = Path(os.environ.get("CODEX_BRIDGE_API_METADATA_FILE", ""))
+        if not metadata_path.is_file() or metadata_path.is_symlink():
+            raise RuntimeError("Private OpenAI API model metadata is missing")
+        if platform.system() == "Windows":
+            import windows_acl
+            windows_acl.verify([metadata_path], protected=True)
+        elif metadata_path.stat().st_mode & 0o777 != 0o600:
+            raise RuntimeError("OpenAI API model metadata must have 0600 permissions")
+        try:
+            verified = json.loads(metadata_path.read_text())
+        except ValueError:
+            raise RuntimeError("OpenAI API model metadata is not valid JSON") from None
+        if not isinstance(verified, dict):
+            raise RuntimeError("OpenAI API model metadata has an unexpected shape")
+        rows = {
+            slug: {**rows.get(slug, {}), "slug": slug, **spec}
+            for slug, spec in verified.items()
+            if slug in public_ids and isinstance(spec, dict)
+        }
     chat = {
         slug: row
         for slug, row in rows.items()
@@ -242,14 +262,15 @@ def runtime_settings(chat: dict[str, dict]) -> Path:
         windows_acl.lock([directory])
     options = []
     model_settings = {}
+    api_route = os.environ.get("CODEX_BRIDGE_ROUTE") == "api"
     for slug in sorted(ready, key=display_key):
         row = chat[slug]
         label = "GPT-" + slug.removeprefix("gpt-").replace("-", " ").title()
         window = compact_window(row)
         options.append({
             "model": slug,
-            "label": label + " (Codex)",
-            "description": f"Codex route {row['context_window'] // 1000}k; auto-compact {window // 1000}k",
+            "label": label + (" (OpenAI API)" if api_route else " (Codex)"),
+            "description": f"{'OpenAI API' if api_route else 'Codex route'} {row['context_window'] // 1000}k; auto-compact {window // 1000}k",
             "behavesAs": behaves_as(slug),
         })
         model_settings[slug] = {"autoCompactWindow": window}
@@ -305,7 +326,8 @@ def main() -> int:
         return 0
     choices = aliases(chat)
     if sys.argv[1] == "list":
-        print("Codex chat models listed by local HTTP /v1/models:")
+        print(("OpenAI API" if os.environ.get("CODEX_BRIDGE_ROUTE") == "api" else "Codex") +
+              " chat models listed by local HTTP /v1/models:")
         for slug in sorted(chat, key=display_key):
             row = chat[slug]
             window = compact_window(row)

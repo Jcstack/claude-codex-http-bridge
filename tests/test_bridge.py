@@ -16,6 +16,7 @@ import hashlib
 import subprocess
 
 import bridge_models
+import api_profile
 import codex_usage
 import install
 import launcher
@@ -96,6 +97,89 @@ class BridgeTests(unittest.TestCase):
             self.assertIn("unverified", replacement["content"])
             self.assertIsNone(webfetch_pdf_guard.transform({**event, "tool_name": "WebSearch"}))
             self.assertIsNone(webfetch_pdf_guard.transform({**event, "tool_response": "Ordinary HTML"}))
+
+    def test_api_route_uses_official_ids_and_private_metadata(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "approved OpenAI endpoint"):
+            api_profile.fetch_text("https://example.invalid/v1/models", "mock-project-key-123456789")
+        with self.assertRaisesRegex(RuntimeError, "only be sent"):
+            api_profile.fetch_text(api_profile.DOCS_CATALOG_URL, "mock-project-key-123456789")
+        page = """# GPT-6.1 Sol
+Model ID: `gpt-6.1-sol`
+`reasoning.effort` supports `low`, `medium`, `high`, `xhigh`, and `max`.
+## Model details
+- Input modalities: text, image
+- 1,050,000 context window
+## Supported tools
+- web_search
+- computer_use
+## Snapshots
+"""
+        sources = {
+            api_profile.API_MODELS_URL: json.dumps({"data": [
+                {"id": "gpt-6.1-sol"}, {"id": "gpt-image-2"},
+                {"id": "gpt-6.1-not-documented"}, {"id": "gpt-7-nova"},
+            ]}),
+            api_profile.DOCS_CATALOG_URL: ("[Sol](/api/docs/models/gpt-6.1-sol.md) "
+                                            "[Nova](/api/docs/models/gpt-7-nova.md)"),
+            api_profile.DOCS_MODEL_BASE + "gpt-6.1-sol.md": page,
+            api_profile.DOCS_MODEL_BASE + "gpt-7-nova.md": (
+                page.replace("GPT-6.1 Sol", "GPT-7 Nova")
+                    .replace("gpt-6.1-sol", "gpt-7-nova")
+                    .replace("1,050,000", "2,000,000")
+            ),
+        }
+        with patch.object(api_profile, "fetch_text", side_effect=lambda url, key=None: sources[url]) as fetch:
+            models = api_profile.discover_models("mock-project-key-123456789")
+        self.assertEqual(list(models), ["gpt-6.1-sol", "gpt-7-nova"])
+        self.assertEqual(models["gpt-6.1-sol"]["context_window"], 1_050_000)
+        self.assertEqual(models["gpt-7-nova"]["context_window"], 2_000_000)
+        self.assertTrue(all(call.args[0] == api_profile.API_MODELS_URL or not call.args[1:]
+                            for call in fetch.call_args_list))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime-api"
+            runtime.mkdir(mode=0o700)
+            if platform.system() == "Windows":
+                windows_acl.lock([root, runtime])
+            api_profile.set_key(root, "mock-project-key-123456789")
+            with patch.object(api_profile, "discover_models", return_value=models):
+                port, session_dir, config_path, local_key_path, _ = api_profile.make_session(root, runtime)
+            self.assertTrue(1 <= port <= 65535)
+            config = config_path.read_text()
+            self.assertIn("https://api.openai.com/v1", config)
+            self.assertIn("max-context-length: 1050000", config)
+            self.assertIn("max-context-length: 2000000", config)
+            self.assertIn('disable-image-generation: "passthrough"', config)
+            for setting in ('host: "127.0.0.1"', 'allow-remote: false',
+                            'disable-control-panel: true', 'request-log: false',
+                            'usage-statistics-enabled: false'):
+                self.assertIn(setting, config)
+            self.assertIn("mock-project-key-123456789", config)
+            self.assertIn(str(root / "api-auth"), config)
+            self.assertNotIn(str(root / "auth") + '"', config)
+            self.assertNotIn("mock-project-key-123456789", local_key_path.read_text())
+            self.assertEqual(json.loads((runtime / "catalog.json").read_text()), models)
+            if platform.system() == "Windows":
+                windows_acl.verify([config_path, local_key_path, runtime / "catalog.json"], protected=True)
+            else:
+                self.assertEqual(config_path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(local_key_path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual((runtime / "catalog.json").stat().st_mode & 0o777, 0o600)
+            self.assertTrue(session_dir.is_dir())
+
+            key = local_key_path.read_text().strip()
+            public = {"data": [{"id": "gpt-6.1-sol"}]}
+            rich = {"models": [{"slug": "gpt-6.1-sol", "context_window": 500_000}]}
+            with patch.dict(os.environ, {"CODEX_BRIDGE_ROUTE": "api",
+                                      "CODEX_BRIDGE_API_METADATA_FILE": str(runtime / "catalog.json"),
+                                      "CODEX_BRIDGE_KEY_FILE": str(local_key_path),
+                                      "CODEX_BRIDGE_PORT": str(port)}), patch.object(
+                bridge_models, "get_json", side_effect=[public, rich]
+            ):
+                chat, _ = bridge_models.discover()
+            self.assertEqual(chat["gpt-6.1-sol"]["context_window"], 1_050_000)
+            self.assertTrue(bridge_models.eligible(chat["gpt-6.1-sol"]))
 
     def test_session_key_and_config_are_private(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -280,6 +364,32 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(json.loads(files[0].read_text())["context_windows"], {"gpt-6.1-sol": 500_000})
             self.assertEqual(json.loads(files[0].read_text())["usage_cache"], str(root / "codex-usage.json"))
             self.assertEqual(json.loads(user_settings.read_text())["statusLine"]["command"], "echo HUD")
+            api_dir = root / "api-session"
+            api_dir.mkdir()
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude_dir)}, clear=False):
+                _, api_files = launcher.session_settings(base, {"gpt-6.1-sol": 1_050_000},
+                                                        api_dir, route="api")
+            self.assertNotIn("usage_cache", json.loads(api_files[0].read_text()))
+
+    def test_api_and_subscription_runtime_are_isolated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.object(launcher, "ROOT", Path(directory)):
+            subscription = launcher.runtime_directory()
+            api = launcher.runtime_directory("api")
+            self.assertNotEqual(subscription, api)
+            self.assertEqual(subscription.name, "runtime")
+            self.assertEqual(api.name, "runtime-api")
+
+    def test_api_cli_does_not_use_subscription_login_or_quota(self) -> None:
+        with patch.object(sys, "argv", ["launcher.py", "api", "key", "status"]), patch.object(
+            launcher, "helper_output", return_value=""
+        ), patch.object(api_profile, "key_command", return_value=0) as key_command:
+            self.assertEqual(launcher.main(), 0)
+            key_command.assert_called_once_with(launcher.ROOT, "status")
+        with patch.object(sys, "argv", ["launcher.py", "api", "usage"]), patch.object(
+            launcher, "helper_output", return_value=""
+        ):
+            with self.assertRaisesRegex(ValueError, "API route uses a project key"):
+                launcher.main()
 
     def test_launcher_waits_for_async_model_registration(self) -> None:
         class Proxy:

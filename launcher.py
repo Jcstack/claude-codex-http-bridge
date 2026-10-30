@@ -109,7 +109,8 @@ def wait_for_private_listener(proxy: subprocess.Popen, port: int) -> None:
         raise RuntimeError("Local model port is not owned exclusively by this session's proxy")
 
 
-def wait_for_catalog(proxy: subprocess.Popen, environment: dict[str, str], require_eligible: bool) -> None:
+def wait_for_catalog(proxy: subprocess.Popen, environment: dict[str, str], require_eligible: bool,
+                     route: str = "subscription") -> None:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         if proxy.poll() is not None:
@@ -123,7 +124,8 @@ def wait_for_catalog(proxy: subprocess.Popen, environment: dict[str, str], requi
             if counts.get("eligible" if require_eligible else "chat", 0) > 0:
                 return
         time.sleep(0.3)
-    raise RuntimeError("No Codex models appeared in the local catalog; run claude-codex codex-login")
+    remedy = "claude-codex api key status" if route == "api" else "claude-codex codex-login"
+    raise RuntimeError(f"No {route} models appeared in the local catalog; run {remedy}")
 
 
 def claude_environment(port: int, key: str, model: str) -> dict[str, str]:
@@ -178,14 +180,17 @@ def private_json(path: Path, value: dict) -> None:
         windows_acl.lock([path])
 
 
-def session_settings(base: Path, windows: dict[str, int], directory: Path) -> tuple[Path, list[Path]]:
+def session_settings(base: Path, windows: dict[str, int], directory: Path,
+                     route: str = "subscription") -> tuple[Path, list[Path]]:
     status_line = configured_status_line()
     if status_line is None:
         return base, []
     profile_path = directory / "statusline-profile.json"
     settings_path = directory / "settings.json"
-    private_json(profile_path, {"context_windows": windows,
-                                "usage_cache": str(directory.parent / "codex-usage.json")})
+    profile = {"context_windows": windows}
+    if route == "subscription":
+        profile["usage_cache"] = str(directory.parent / "codex-usage.json")
+    private_json(profile_path, profile)
     if platform.system() == "Windows":
         python_command = "py -3" if shutil.which("py") else "python"
         command = f'{python_command} "{(ROOT / "statusline_adapter.py").as_posix()}" "{profile_path.as_posix()}"'
@@ -208,8 +213,10 @@ def stop_process(process: subprocess.Popen | None) -> None:
         process.wait()
 
 
-def runtime_directory() -> Path:
-    directory = ROOT / "runtime"
+def runtime_directory(route: str = "subscription") -> Path:
+    if route not in ("subscription", "api"):
+        raise RuntimeError("Unknown bridge route")
+    directory = ROOT / ("runtime-api" if route == "api" else "runtime")
     if directory.is_symlink():
         raise RuntimeError("Runtime directory must not be a symlink")
     directory.mkdir(mode=0o700, exist_ok=True)
@@ -221,8 +228,8 @@ def runtime_directory() -> Path:
 
 
 @contextmanager
-def service_lock():
-    directory = runtime_directory()
+def service_lock(route: str = "subscription"):
+    directory = runtime_directory(route)
     path = directory / "service.lock"
     if path.is_symlink():
         raise RuntimeError("Service lock must not be a symlink")
@@ -311,16 +318,22 @@ def remove_state_files(runtime: Path, state: dict) -> None:
         pass
 
 
-def service_environment(state: dict, runtime: Path) -> dict[str, str]:
+def service_environment(state: dict, runtime: Path, route: str = "subscription") -> dict[str, str]:
     _, _, key, _ = state_paths(runtime, state)
     environment = os.environ.copy()
     environment["CODEX_BRIDGE_PORT"] = str(state["port"])
     environment["CODEX_BRIDGE_KEY_FILE"] = str(key)
+    if route == "api":
+        environment["CODEX_BRIDGE_ROUTE"] = "api"
+        environment["CODEX_BRIDGE_API_METADATA_FILE"] = str(runtime / "catalog.json")
+    else:
+        environment.pop("CODEX_BRIDGE_ROUTE", None)
+        environment.pop("CODEX_BRIDGE_API_METADATA_FILE", None)
     return environment
 
 
-def ensure_service(require_catalog: bool = True) -> tuple[Path, dict, bool]:
-    with service_lock() as runtime:
+def ensure_service(require_catalog: bool = True, route: str = "subscription") -> tuple[Path, dict, bool]:
+    with service_lock(route) as runtime:
         state = read_state(runtime)
         if state is not None:
             if state_is_live(runtime, state):
@@ -329,7 +342,11 @@ def ensure_service(require_catalog: bool = True) -> tuple[Path, dict, bool]:
             if owners:
                 raise RuntimeError("Stale bridge state points at an occupied port; no key was sent")
             remove_state_files(runtime, state)
-        session = helper_output("session").split("\t")
+        if route == "api":
+            import api_profile
+            session = list(api_profile.make_session(ROOT, runtime))
+        else:
+            session = helper_output("session").split("\t")
         if len(session) != 5:
             raise RuntimeError("Session helper returned an invalid result")
         port_text, directory_text, config_text, key_text, log_text = session
@@ -352,7 +369,7 @@ def ensure_service(require_catalog: bool = True) -> tuple[Path, dict, bool]:
             wait_for_private_listener(proxy, port)
             state = {"pid": proxy.pid, "port": port, "session": directory.name}
             if require_catalog:
-                wait_for_catalog(proxy, service_environment(state, runtime), True)
+                wait_for_catalog(proxy, service_environment(state, runtime, route), True, route)
             private_json(runtime / "service.json", state)
             return runtime, state, True
         except BaseException:
@@ -366,21 +383,23 @@ def ensure_service(require_catalog: bool = True) -> tuple[Path, dict, bool]:
             raise
 
 
-def bridge_status() -> int:
-    with service_lock() as runtime:
+def bridge_status(route: str = "subscription") -> int:
+    label = "OpenAI API" if route == "api" else "Codex"
+    with service_lock(route) as runtime:
         state = read_state(runtime)
         if state is None or not state_is_live(runtime, state):
-            print("Codex bridge is stopped")
+            print(f"{label} bridge is stopped")
             return 1
-        print(f"Codex bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
+        print(f"{label} bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
         return 0
 
 
-def bridge_stop() -> int:
-    with service_lock() as runtime:
+def bridge_stop(route: str = "subscription") -> int:
+    label = "OpenAI API" if route == "api" else "Codex"
+    with service_lock(route) as runtime:
         state = read_state(runtime)
         if state is None:
-            print("Codex bridge is already stopped")
+            print(f"{label} bridge is already stopped")
             return 0
         if state_is_live(runtime, state):
             os.kill(state["pid"], signal.SIGTERM)
@@ -401,13 +420,14 @@ def bridge_stop() -> int:
                     directory.rmdir()
                 except OSError:
                     pass
-        print("Codex bridge stopped")
+        print(f"{label} bridge stopped")
         return 0
 
 
-def run_session(mode: str, selected: str, claude_args: list[str], claude: str) -> int:
-    runtime, state, created = ensure_service()
-    environment = service_environment(state, runtime)
+def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
+                route: str = "subscription") -> int:
+    runtime, state, created = ensure_service(route=route)
+    environment = service_environment(state, runtime, route)
     if mode == "models":
         return subprocess.call([sys.executable, str(HELPER), "list"], env=environment)
     model_info = helper_output("prepare", selected, environment=environment).split("\t")
@@ -418,14 +438,15 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str) -
     if platform.system() == "Windows":
         import windows_acl
         windows_acl.lock([directory])
-    settings_path, _ = session_settings(Path(settings), json.loads(catalog_json), directory)
-    if settings_path != Path(settings):
+    settings_path, _ = session_settings(Path(settings), json.loads(catalog_json), directory, route)
+    if settings_path != Path(settings) and route == "subscription":
         import codex_usage
         codex_usage.start_refresh(runtime / "codex-usage.json")
     _, _, key_path, _ = state_paths(runtime, state)
     claude_environment_values = claude_environment(state["port"], key_path.read_text().strip(), model)
+    label = "OpenAI API" if route == "api" else "Codex"
     print(
-        f"Codex bridge active on 127.0.0.1:{state['port']}: {model}. "
+        f"{label} bridge active on 127.0.0.1:{state['port']}: {model}. "
         f"Route context {context} tokens; auto-compaction {compact} tokens for this model.",
         file=sys.stderr,
     )
@@ -455,32 +476,45 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str) -
 def main() -> int:
     if sys.version_info < (3, 10):
         raise RuntimeError("Python 3.10 or newer is required")
-    mode, selected, claude_args = parse_args(sys.argv[1:])
+    arguments = sys.argv[1:]
+    route = "api" if arguments and arguments[0] == "api" else "subscription"
+    if route == "api":
+        arguments = arguments[1:]
+    if route == "api" and arguments and arguments[0] == "key":
+        if len(arguments) != 2:
+            raise ValueError("Usage: claude-codex api key set | status")
+        helper_output("verify")
+        import api_profile
+        return api_profile.key_command(ROOT, arguments[1])
+    mode, selected, claude_args = parse_args(arguments)
     if mode == "help":
-        print("Usage: claude-codex [--model MODEL_ID|sol|astra|terra|luna] [Claude Code options]")
-        print("Run claude-codex codex-login once. Run claude-codex models for live model IDs.")
-        print("Run claude-codex usage for live Codex subscription quota if native Codex uses the same account.")
-        print("Run claude-codex bridge start | status | stop to manage the private localhost service.")
+        print("Usage: claude-codex [api] [--model MODEL_ID|sol|astra|terra|luna] [Claude Code options]")
+        print("Subscription: claude-codex codex-login; claude-codex models; claude-codex usage.")
+        print("Direct OpenAI API: claude-codex api key set; claude-codex api models; claude-codex api --model sol.")
+        print("Run claude-codex [api] bridge start | status | stop to manage each private localhost service.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
         return 0
     helper_output("verify")
+    if route == "api" and mode in ("login", "usage"):
+        raise ValueError("API route uses a project key and API Platform billing; run claude-codex api key set")
     if mode == "usage":
         import codex_usage
         return codex_usage.main()
     if mode == "bridge-status":
-        return bridge_status()
+        return bridge_status(route)
     if mode == "bridge-stop":
-        return bridge_stop()
+        return bridge_stop(route)
     if mode == "bridge-start":
-        _, state, _ = ensure_service()
-        print(f"Codex bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
+        _, state, _ = ensure_service(route=route)
+        label = "OpenAI API" if route == "api" else "Codex"
+        print(f"{label} bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
         return 0
     if mode == "login":
         return subprocess.call([str(PROXY), "-config", str(ROOT / "config.yaml"), "-codex-login"])
     claude = os.environ.get("CLAUDE_CODEX_CLAUDE_BIN") or shutil.which("claude")
     if mode != "models" and (not claude or not shutil.which(claude)):
         raise RuntimeError("Claude Code executable not found; set CLAUDE_CODEX_CLAUDE_BIN to its path")
-    return run_session(mode, selected, claude_args, claude)
+    return run_session(mode, selected, claude_args, claude, route)
 
 
 if __name__ == "__main__":

@@ -17,9 +17,14 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import api_profile  # noqa: E402
 
 
 MODEL = "gpt-6.1-sol"
+MOCK_UPSTREAM_KEY = "mock-upstream-key-123456789"
 
 
 class Upstream(BaseHTTPRequestHandler):
@@ -88,18 +93,12 @@ class Upstream(BaseHTTPRequestHandler):
             self.wfile.write(encoded)
 
 
-def free_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return listener.getsockname()[1]
-
-
-def post(port: int, payload: dict) -> dict:
+def post(port: int, local_key: str, payload: dict) -> dict:
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/v1/messages",
         data=json.dumps(payload).encode(),
         headers={
-            "Authorization": "Bearer mock-local",
+            "Authorization": "Bearer " + local_key,
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
         },
@@ -112,22 +111,22 @@ def post(port: int, payload: dict) -> dict:
         raise RuntimeError(f"Mock route returned HTTP {error.code}: {error.read().decode(errors='replace')}") from None
 
 
-def rich_catalog(port: int) -> dict:
+def rich_catalog(port: int, local_key: str) -> dict:
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/v1/models?client_version=cpa",
-        headers={"Authorization": "Bearer mock-local"},
+        headers={"Authorization": "Bearer " + local_key},
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(request, timeout=10) as response:
         return json.load(response)
 
 
-def post_stream(port: int, payload: dict) -> list[tuple[float, dict]]:
+def post_stream(port: int, local_key: str, payload: dict) -> list[tuple[float, dict]]:
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/v1/messages",
         data=json.dumps(payload).encode(),
         headers={
-            "Authorization": "Bearer mock-local",
+            "Authorization": "Bearer " + local_key,
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
         },
@@ -151,43 +150,28 @@ def main() -> None:
     upstream_thread.start()
     with tempfile.TemporaryDirectory(prefix="bridge-api-contract-") as temporary:
         root = Path(temporary)
-        auth = root / "auth"
-        auth.mkdir()
-        port = free_port()
-        config = f'''config-version: 8
-server:
-  host: "127.0.0.1"
-  port: {port}
-management:
-  allow-remote: false
-  secret-key: "mock-management"
-  disable-control-panel: true
-  disable-auto-update-panel: true
-access:
-  api-keys:
-    - "mock-local"
-oauth:
-  auth-dir: "{auth.as_posix()}"
-api-keys:
-  codex:
-    - name: mock-openai-api
-      base-url: "http://127.0.0.1:{upstream.server_port}/v1"
-      models:
-        - name: "{MODEL}"
-          max-context-length: 1050000
-      keys:
-        - api-key: "mock-upstream"
-observability:
-  logs:
-    debug: false
-    logging-to-file: false
-    request-log: false
-  usage:
-    usage-statistics-enabled: false
-multimedia:
-  disable-image-generation: "passthrough"
-'''
-        config_path = root / "config.yaml"
+        runtime = root / "runtime-api"
+        runtime.mkdir(mode=0o700)
+        api_profile.set_key(root, MOCK_UPSTREAM_KEY)
+        model_spec = {
+            "context_window": 1_050_000,
+            "supported_reasoning_levels": [{"effort": level} for level in
+                                           ("low", "medium", "high", "xhigh", "max")],
+            "supports_search_tool": True,
+            "input_modalities": ["text", "image"],
+            "source": api_profile.DOCS_MODEL_BASE + MODEL + ".md",
+        }
+        future_spec = {**model_spec, "context_window": 2_000_000,
+                       "source": api_profile.DOCS_MODEL_BASE + "gpt-7-nova.md"}
+        with patch.object(api_profile, "discover_models", return_value={
+            MODEL: model_spec, "gpt-7-nova": future_spec,
+        }):
+            port, _, config_path, key_path, _ = api_profile.make_session(root, runtime)
+        local_key = key_path.read_text().strip()
+        config = config_path.read_text().replace(
+            'base-url: "https://api.openai.com/v1"',
+            f'base-url: "http://127.0.0.1:{upstream.server_port}/v1"',
+        )
         config_path.write_text(config)
         process = subprocess.Popen(
             [str(binary), "-config", str(config_path)],
@@ -207,19 +191,22 @@ multimedia:
                 raise RuntimeError("Proxy startup timed out")
 
             for _ in range(50):
-                model_rows = [row for row in rich_catalog(port).get("models", [])
+                model_rows = [row for row in rich_catalog(port, local_key).get("models", [])
                               if row.get("slug") == MODEL]
                 if model_rows:
                     break
                 time.sleep(.2)
             assert len(model_rows) == 1 and model_rows[0].get("context_window") == 1050000, model_rows
+            future_rows = [row for row in rich_catalog(port, local_key).get("models", [])
+                           if row.get("slug") == "gpt-7-nova"]
+            assert len(future_rows) == 1 and future_rows[0].get("context_window") == 2000000, future_rows
 
             tools = [{
                 "name": "Read", "description": "Read a fixture file",
                 "input_schema": {"type": "object", "properties": {
                     "file_path": {"type": "string"}}, "required": ["file_path"]},
             }]
-            first = post(port, {
+            first = post(port, local_key, {
                 "model": MODEL, "max_tokens": 1024, "stream": False,
                 "messages": [{"role": "user", "content": "Read /fixture"}],
                 "tools": tools, "thinking": {"type": "adaptive"},
@@ -229,7 +216,7 @@ multimedia:
             assert len(calls) == 1 and calls[0]["name"] == "Read", first
             assert calls[0]["input"] == {"file_path": "/fixture"}, first
 
-            second = post(port, {
+            second = post(port, local_key, {
                 "model": MODEL, "max_tokens": 1024, "stream": False,
                 "messages": [
                     {"role": "user", "content": "Read /fixture"},
@@ -244,13 +231,13 @@ multimedia:
             assert any(part.get("type") == "text" and part.get("text") == "ok"
                        for part in second.get("content", [])), second
 
-            third = post(port, {
+            third = post(port, local_key, {
                 "model": MODEL, "max_tokens": 1024, "stream": False,
                 "messages": [{"role": "user", "content": "Find a source"}],
                 "tools": [{"type": "web_search_20260209", "name": "web_search"}],
             })
             assert third.get("type") == "message", third
-            stream_events = post_stream(port, {
+            stream_events = post_stream(port, local_key, {
                 "model": MODEL, "max_tokens": 1024, "stream": True,
                 "messages": [{"role": "user", "content": "Stream a reply"}],
             })
@@ -267,7 +254,7 @@ multimedia:
             assert len(Upstream.requests) == 4, Upstream.requests
             for path, authorization, body in Upstream.requests:
                 assert path.endswith("/v1/responses"), path
-                assert authorization == "Bearer mock-upstream", authorization
+                assert authorization == "Bearer " + MOCK_UPSTREAM_KEY, authorization
                 assert body.get("model") == MODEL, body
                 assert body.get("store") is False, body
                 assert all(tool.get("type") != "image_generation" for tool in body.get("tools", [])), body

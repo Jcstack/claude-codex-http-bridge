@@ -247,6 +247,7 @@ def main() -> None:
     if windows:
         windows_acl.lock([root / "auth", root / "bin"])
     for filename in ("bridge_models.py", "launcher.py", "statusline_adapter.py", "codex_usage.py",
+                     "api_profile.py",
                      "webfetch_pdf_guard.py",
                      "windows_acl.py", "run-claude-codex.sh"):
         write_file(root / filename, (SOURCE / filename).read_bytes(), 0o700)
@@ -263,7 +264,7 @@ def main() -> None:
     print(f"Installed: {bin_dir / ('claude-codex.cmd' if windows else 'claude-codex')}")
     if windows:
         print("Open a new PowerShell or CMD terminal to pick up the user PATH change")
-    print("Next: claude-codex codex-login, then claude-codex models")
+    print("Next: claude-codex codex-login and models, or claude-codex api key set and api models")
 
 
 if __name__ == "__main__":

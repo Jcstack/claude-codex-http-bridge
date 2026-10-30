@@ -36,13 +36,26 @@ claude-codex --model gpt-6.1-sol
 
 在会话中用 `/model` 切换动态发现的模型，用 `/effort` 调整推理强度。`/background` 需要的本机代理会继续运行；任务结束后可运行 `claude-codex bridge stop`。原有 `claude` 命令仍按原来的账号与设置运行。若本机已有 `claude-codex` 命令，安装器会停止；确认要改用这个仓库的版本后运行 `./install.sh --replace-command`。OAuth 文件和运行日志只留在本机安装目录，不进入 Git。
 
+可选的正式 OpenAI API 路由（目前为 pilot，需自行创建 API 项目密钥并核对账单）：
+
+```text
+claude-codex api key set           # 在终端隐藏输入，密钥只存本机私有目录
+claude-codex api models            # API 可用 ID 与官方模型规格的交集
+claude-codex api --model sol       # Claude Code 仍是 harness
+claude-codex api bridge status
+claude-codex api bridge stop       # 待 API 后台任务结束再停止
+```
+
+API 路由与订阅 OAuth、服务端口及配额缓存分开。`api key set` 不接受命令行明文参数；先在 [OpenAI API Platform](https://platform.openai.com/api-keys) 创建项目密钥，并设置[硬性消费上限](https://developers.openai.com/api/docs/guides/production-best-practices)。如果已领取 [ChatGPT 订阅者 API 赠额](https://developers.openai.com/api/docs/guides/chatgpt-api-credits)，请在 API Platform 核实该项目所属组织和余额。API 路由的真实推理、计费和全部工具能力仍需用该项目密钥实测；本仓库的自动测试只使用假上游。
+
 ## Requirements
 
 - macOS, Linux, or native Windows on ARM64/aarch64 or x64
 - On Windows: Windows 10 1809+ or Windows Server 2019+ and an NTFS installation directory. Windows Subsystem for Linux uses the Linux instructions.
-- Claude Code installed and on `PATH` (verified with Claude Code 2.1.312)
+- Claude Code installed and on `PATH` (verified with Claude Code 2.1.312–2.1.314)
 - Python 3.10+; on macOS/Linux/WSL, `bash` and `lsof`
 - A ChatGPT account with Codex model access
+- Or, for `claude-codex api`, an OpenAI API project key with access to supported GPT models
 - Optional for accurate HUD subscription quota: native Codex CLI signed into the same single ChatGPT account as the bridge
 
 ## Install
@@ -90,6 +103,8 @@ The launcher reads the existing user `statusLine.command` and passes Claude Code
 
 Plain `claude` remains separate and uses its ordinary provider settings. `claude-codex models` is a catalog listing, not an entitlement guarantee; a completed inference request confirms access to a selected model.
 
+`claude-codex api models` first intersects the official API `/v1/models` IDs with the current [official model catalog](https://developers.openai.com/api/docs/models), then reads each matching model's official Markdown specification for context, effort and search support. Only text models with a verified context of at least 200k, `low`–`max` reasoning, and web search enter the Claude Code picker; unknown or unverifiable models are omitted instead of receiving an invented size or unsupported effort. Stop the API bridge after background work and start it again to refresh its upstream model list. The API key is sent only to `https://api.openai.com/v1/models` for discovery and to the pinned local proxy's official OpenAI Responses route for inference; it is never sent to the documentation site.
+
 ## Tested behavior and boundaries
 
 On macOS Apple Silicon, the bridge was tested with GPT-6.1 Sol, GPT-6 Sol, and GPT-5.6 Sol inference. In one interactive session, `/model` switched GPT-6.1 Sol → GPT-6 Sol → GPT-6.1 Terra and the actual response model changed. `/autocompact` reported 400k for the 500k routes and 200k for the 272k routes. An authenticated `--bg` task completed with a `PONG` response after the launcher exited. Claude Code WebSearch, WebFetch, Read, Edit, Bash, Agent, MCP/ToolSearch, image input, structured output, and streaming were exercised during bridge evaluation; this is a functional sample, not exhaustive certification of every Claude Code release and command. Native Windows CI checks installation, file ACLs, model catalog logic, proxy service lifecycle, and launcher startup without storing any OAuth credential; live Windows inference still requires an authenticated Windows session.
@@ -116,7 +131,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the Claude Code feature matrix, Cla
 
 See [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md) for the broader local-harness, model-route, provider, plugin, Windows, and community-project audit. [BROWSER.md](BROWSER.md) gives an opt-in browser MCP setup, including an isolated mode that was exercised with a real Codex-backed Claude Code session.
 
-See [API_ROUTE_RESEARCH.md](API_ROUTE_RESEARCH.md) for the direct OpenAI API-key route, current independent Opus/Fable/Sol/Astra comparisons, active gateway issues, privacy requirements, and a credential-free Responses protocol test. The API route is research and a tested protocol candidate; the installed command still uses the ChatGPT-plan route.
+See [API_ROUTE_RESEARCH.md](API_ROUTE_RESEARCH.md) for the direct OpenAI API-key route, current independent Opus/Fable/Sol/Astra comparisons, active gateway issues, privacy requirements, and a credential-free Responses protocol test. The API command is an opt-in pilot; the plain `claude-codex` command still uses the ChatGPT-plan route.
 
 ## License
 
