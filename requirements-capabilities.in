@@ -1,0 +1,4 @@
+mcp==2.3.0
+Pillow==12.2.0
+pypdf==6.21.4
+websockets==17.4

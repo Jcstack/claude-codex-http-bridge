@@ -12,6 +12,7 @@
 !HARNESS_PILOT.md
 !OPERATIONS.md
 !RUNTIME.md
+!NATIVE_TOOLS.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -27,6 +28,15 @@
 !api_profile.py
 !rolling_runtime.py
 !runtime_bundle.py
+!capabilities.py
+!native_client.py
+!native_services.py
+!native_tools.py
+!desktop_adapter.py
+!desktop_scope.py
+!desktop_windows.py
+!requirements-capabilities.in
+!requirements-capabilities.lock
 !windows_acl.py
 !tests/
 !tests/*.py

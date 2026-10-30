@@ -8,6 +8,34 @@ permissions:
   contents: read
 
 jobs:
+  capabilities:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install only hash-locked capability wheels
+        run: python -m pip --isolated install --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r requirements-capabilities.lock
+      - name: Check native protocols, privacy and window policy without accounts
+        run: python -m unittest discover -s tests -v
+      - name: Install the integrity-locked Claude fixture without scripts
+        run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+      - run: python tests/claude_fixture.py
+      - name: Exercise real Claude MCP image/PDF/realtime results and another plugin
+        run: python tests/probe_native_mcp_client.py
+      - name: Verify real native Windows desktop changes in an owned fixture
+        if: runner.os == 'Windows'
+        run: python tests/live_desktop.py
   claude-client:
     strategy:
       fail-fast: false

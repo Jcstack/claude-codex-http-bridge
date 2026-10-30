@@ -25,6 +25,10 @@ HELPER = ROOT / "bridge_models.py"
 
 
 def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
+    if arguments and arguments[0] == "tools":
+        return "tools", "", arguments[1:]
+    if arguments and arguments[0] == "desktop":
+        return "desktop", "", arguments[1:]
     if arguments and arguments[0] == "diagnostics":
         return "diagnostics", "", arguments[1:]
     if arguments and arguments[0] == "--help":
@@ -496,7 +500,11 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         print("The localhost bridge stays available for /background and --bg; stop it with claude-codex bridge stop.", file=sys.stderr)
     print("Use /model to switch among live Codex models; press s to keep the choice in this session.", file=sys.stderr)
     print("Claude Code may show Claude alias context or list cost; those UI values are not Codex limits or billing.", file=sys.stderr)
-    command = [claude, "--settings", str(settings_path), "--model", model, *claude_args]
+    capability_flags = []
+    if (ROOT / "capabilities.json").exists() or any(value in claude_args for value in ("--native-tools", "--no-native-tools")):
+        import capabilities
+        capability_flags, claude_args = capabilities.launch_flags(ROOT, directory, Path.cwd(), claude_args, route)
+    command = [claude, *capability_flags, "--settings", str(settings_path), "--model", model, *claude_args]
     if platform.system() != "Windows":
         # Replace the Python launcher so tmux sees Claude Code as the foreground process.
         # The localhost service is independent and must remain alive for background agents.
@@ -536,12 +544,23 @@ def main() -> int:
         print("Run claude-codex [api] bridge start | status | stop to manage each private localhost service.")
         print("Reviewed runtime: claude-codex bridge upgrade BUNDLE; bridge reload drains replaced backends.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
+        print("Optional native capabilities: claude-codex tools install | status | enable | disable (Python 3.11+).")
+        print("Use --no-native-tools to omit them for one launch; --native-tools explicitly enables them with strict MCP config.")
+        print("Opt-in scoped computer use: claude-codex desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
         print("Read-only metadata: claude-codex diagnostics [--hours 2] [--session UUID].")
         return 0
     if mode == "diagnostics":
         import diagnostics
         return diagnostics.main(claude_args, root=ROOT, route=route)
     helper_output("verify")
+    if mode == "tools":
+        if route != "subscription": raise ValueError("Native tools use the subscription profile")
+        import capabilities
+        return capabilities.main(claude_args, root=ROOT)
+    if mode == "desktop":
+        if route != "subscription": raise ValueError("Scoped desktop currently uses the subscription capability pack")
+        import desktop_adapter
+        return desktop_adapter.main(claude_args, root=ROOT)
     if route == "api" and mode in ("login", "usage"):
         raise ValueError("API route uses a project key and API Platform billing; run claude-codex api key set")
     if mode == "usage":

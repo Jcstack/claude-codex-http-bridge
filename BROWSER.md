@@ -46,4 +46,4 @@ If a task specifically needs the browser you are already signed into, [Chrome De
 
 Google's [auto-connect privacy guide](https://developer.chrome.com/docs/devtools/agents/use-cases/auto-connect) says the attached agent can access the real profile's tabs, cookies, and storage. Use a dedicated Chrome profile when possible, review browser permission prompts, and keep Claude Code's ordinary permission checks on. The telemetry opt-out flags above disable Chrome DevTools MCP usage statistics and CrUX lookups; they do not change the sites you visit or Claude Code's own network traffic. This mode was reviewed from source documentation but **not** enabled in the user's real browser during this audit.
 
-Neither browser MCP option grants arbitrary desktop control. Native app automation requires a separate, reviewed OS-level tool and OS permissions.
+Neither browser MCP option grants arbitrary desktop control. The optional [native pack](NATIVE_TOOLS.md) supplies a reviewed, explicitly selected macOS/Windows window with OS permissions, one-use observations and no global-pointer fallback. Linux desktop fallback remains disabled.

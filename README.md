@@ -38,7 +38,9 @@ claude-codex --model gpt-6.1-sol
 
 在会话中用 `/model` 切换动态发现的模型，用 `/effort` 调整推理强度。`/background` 需要的本机代理会继续运行；任务结束后可运行 `claude-codex bridge stop`。原有 `claude` 命令仍按原来的账号与设置运行。若本机已有 `claude-codex` 命令，安装器会停止；确认要改用这个仓库的版本后运行 `./install.sh --replace-command`。OAuth 文件和运行日志只留在本机安装目录，不进入 Git。
 
-可选的正式 OpenAI API 路由（目前为 pilot，需自行创建 API 项目密钥并核对账单）：
+可先使用不需要额外项目 API key 的[原生能力包](NATIVE_TOOLS.md)：`claude-codex tools install`，然后正常启动。它通过 MCP 提供图片生成/编辑、PDF 提取和 Realtime 音频；`--no-native-tools` 单次关闭。桌面需另运行 `claude-codex desktop install`、`desktop windows`、`desktop select WINDOW_ID`，仅授权当前项目的指定窗口；`desktop disable` 撤销。Claude Code 继续负责权限，安装不自动开启系统权限、麦克风或全屏采集。当前仍不代表所有 GPT-Live、原生压缩或 Opus 等效能力通过认证。
+
+可选正式 API 路由（目前为 pilot，需自行创建项目密钥并核对账单）：
 
 ```text
 claude-codex api key set           # 在终端隐藏输入，密钥只存本机私有目录

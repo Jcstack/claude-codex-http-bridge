@@ -247,7 +247,9 @@ def main() -> None:
     if windows:
         windows_acl.lock([root / "auth", root / "bin"])
     for filename in ("bridge_models.py", "launcher.py", "diagnostics.py", "statusline_adapter.py", "codex_usage.py",
-                     "api_profile.py", "rolling_runtime.py", "runtime_bundle.py",
+                     "api_profile.py", "rolling_runtime.py", "runtime_bundle.py", "capabilities.py",
+                     "native_client.py", "native_services.py", "native_tools.py", "requirements-capabilities.lock",
+                     "desktop_adapter.py", "desktop_scope.py", "desktop_windows.py",
                      "webfetch_pdf_guard.py",
                      "windows_acl.py", "run-claude-codex.sh"):
         write_file(root / filename, (SOURCE / filename).read_bytes(), 0o700)
