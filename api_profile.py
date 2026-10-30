@@ -14,6 +14,7 @@ import secrets
 import socket
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -43,16 +44,26 @@ def fetch_text(url: str, key: str | None = None) -> str:
         headers["Authorization"] = "Bearer " + key
     request = urllib.request.Request(url, headers=headers)
     opener = urllib.request.build_opener(NoRedirect())
-    try:
-        with opener.open(request, timeout=12) as response:
-            data = response.read(2_000_001)
-            if len(data) > 2_000_000:
-                raise RuntimeError("Official model metadata response is unexpectedly large")
-            return data.decode("utf-8")
-    except urllib.error.HTTPError as error:
-        raise RuntimeError(f"Official model metadata returned HTTP {error.code}") from None
-    except (urllib.error.URLError, TimeoutError, UnicodeError) as error:
-        raise RuntimeError(f"Could not fetch official model metadata: {error}") from None
+    for attempt in range(3):
+        try:
+            with opener.open(request, timeout=12) as response:
+                data = response.read(2_000_001)
+                if len(data) > 2_000_000:
+                    raise RuntimeError("Official model metadata response is unexpectedly large")
+                return data.decode("utf-8")
+        except urllib.error.HTTPError as error:
+            if attempt < 2 and error.code in (429, 500, 502, 503, 504):
+                time.sleep(.25 * (2 ** attempt))
+                continue
+            raise RuntimeError(f"Official model metadata returned HTTP {error.code}") from None
+        except (urllib.error.URLError, TimeoutError) as error:
+            if attempt < 2:
+                time.sleep(.25 * (2 ** attempt))
+                continue
+            raise RuntimeError(f"Could not fetch official model metadata: {error}") from None
+        except UnicodeError as error:
+            raise RuntimeError(f"Official model metadata was not UTF-8: {error}") from None
+    raise RuntimeError("Official model metadata request failed")
 
 
 def key_path(root: Path) -> Path:
@@ -129,12 +140,13 @@ def parse_model_markdown(model_id: str, markdown: str) -> dict | None:
     if declared_id is None or declared_id.group(1) != model_id:
         return None
     context = re.search(r"(?m)^- ([\d,]+) context window\s*$", markdown)
-    efforts = re.search(r"`reasoning\.effort` supports ([\s\S]{0,200}?)\.", markdown)
+    efforts = (re.search(r"`reasoning\.effort` supports ([\s\S]{0,200}?)\.", markdown) or
+               re.search(r"(?im)^Reasoning\.effort supports:\s*([^\n]+)$", markdown))
     modalities = re.search(r"(?m)^- Input modalities: ([^\n]+)$", markdown)
     tools = re.search(r"(?ms)^## Supported tools\n([\s\S]*?)(?=^## |\Z)", markdown)
     if not (context and efforts and modalities and tools):
         return None
-    levels = set(re.findall(r"`(none|low|medium|high|xhigh|max)`", efforts.group(1)))
+    levels = set(re.findall(r"\b(none|low|medium|high|xhigh|max)\b", efforts.group(1)))
     if not REQUIRED_EFFORTS.issubset(levels) or "text" not in modalities.group(1).split(", "):
         return None
     if not re.search(r"(?m)^- web_search\s*$", tools.group(1)):
@@ -169,7 +181,7 @@ def discover_models(key: str) -> dict[str, dict]:
         raise RuntimeError("No API-accessible GPT model appears in the official model catalog")
     models = {}
     unavailable = []
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {pool.submit(fetch_text, DOCS_MODEL_BASE + model_id + ".md"): model_id
                    for model_id in candidates}
         for future in as_completed(futures):

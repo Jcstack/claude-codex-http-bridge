@@ -118,21 +118,30 @@ Model ID: `gpt-6.1-sol`
             api_profile.API_MODELS_URL: json.dumps({"data": [
                 {"id": "gpt-6.1-sol"}, {"id": "gpt-image-2"},
                 {"id": "gpt-6.1-not-documented"}, {"id": "gpt-7-nova"},
+                {"id": "gpt-5.6-sol"},
             ]}),
             api_profile.DOCS_CATALOG_URL: ("[Sol](/api/docs/models/gpt-6.1-sol.md) "
-                                            "[Nova](/api/docs/models/gpt-7-nova.md)"),
+                                            "[Nova](/api/docs/models/gpt-7-nova.md) "
+                                            "[Older](/api/docs/models/gpt-5.6-sol.md)"),
             api_profile.DOCS_MODEL_BASE + "gpt-6.1-sol.md": page,
             api_profile.DOCS_MODEL_BASE + "gpt-7-nova.md": (
                 page.replace("GPT-6.1 Sol", "GPT-7 Nova")
                     .replace("gpt-6.1-sol", "gpt-7-nova")
                     .replace("1,050,000", "2,000,000")
             ),
+            api_profile.DOCS_MODEL_BASE + "gpt-5.6-sol.md": (
+                page.replace("GPT-6.1 Sol", "GPT-5.6 Sol")
+                    .replace("gpt-6.1-sol", "gpt-5.6-sol")
+                    .replace("`reasoning.effort` supports `low`, `medium`, `high`, `xhigh`, and `max`.",
+                             "Reasoning.effort supports: none, low, medium (default), high, xhigh, and max.")
+            ),
         }
         with patch.object(api_profile, "fetch_text", side_effect=lambda url, key=None: sources[url]) as fetch:
             models = api_profile.discover_models("mock-project-key-123456789")
-        self.assertEqual(list(models), ["gpt-6.1-sol", "gpt-7-nova"])
+        self.assertEqual(list(models), ["gpt-5.6-sol", "gpt-6.1-sol", "gpt-7-nova"])
         self.assertEqual(models["gpt-6.1-sol"]["context_window"], 1_050_000)
         self.assertEqual(models["gpt-7-nova"]["context_window"], 2_000_000)
+        self.assertIn("none", [x["effort"] for x in models["gpt-5.6-sol"]["supported_reasoning_levels"]])
         self.assertTrue(all(call.args[0] == api_profile.API_MODELS_URL or not call.args[1:]
                             for call in fetch.call_args_list))
 
