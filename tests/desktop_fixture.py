@@ -105,7 +105,7 @@ def fixture():
                     try:
                         value = json.loads(state.read_text())
                         if value.get("pid") == process.pid: break
-                    except ValueError: pass
+                    except (OSError, ValueError): pass
                 time.sleep(0.1)
             else: raise RuntimeError("Owned desktop fixture never became ready")
             yield process, state, value

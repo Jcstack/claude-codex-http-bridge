@@ -69,8 +69,8 @@ def main():
     parser.add_argument("--archive", type=Path)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="bridge-scoped-desktop-") as temporary:
-        root = Path(temporary); root.chmod(0o700)
-        work = root / "workspace"; work.mkdir(mode=0o700)
+        root = Path(temporary); runtime_bundle.private_dir(root)
+        work = root / "workspace"; runtime_bundle.private_dir(work)
         desktop_adapter.install(root, args.archive)
         with fixture() as (_process, state, value): asyncio.run(exercise(root, work, state, value))
 

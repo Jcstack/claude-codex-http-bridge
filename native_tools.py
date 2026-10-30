@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import json
 from pathlib import Path
 from typing import Literal
+from pydantic import BaseModel, ConfigDict
 
 from mcp import types
 from mcp.server.mcpserver import MCPServer
@@ -14,6 +15,27 @@ from mcp.server.mcpserver.exceptions import ToolError
 from native_services import CapabilityInputError, NativeServices
 from native_client import NativeRouteError
 from desktop_scope import ScopeError
+
+
+class DesktopArguments(BaseModel):
+    """An explicit action schema avoids guessing free-form argument types."""
+    model_config = ConfigDict(extra="forbid")
+    element_index: str | int | None = None
+    value: str | None = None
+    text: str | None = None
+    key: str | None = None
+    x: float | None = None
+    y: float | None = None
+    from_x: float | None = None
+    from_y: float | None = None
+    to_x: float | None = None
+    to_y: float | None = None
+    click_count: Literal[1, 2] | None = None
+    mouse_button: Literal["left", "right", "middle"] | None = None
+    direction: Literal["up", "down", "left", "right"] | None = None
+    pages: float | None = None
+    scrollX: float | None = None
+    scrollY: float | None = None
 
 
 def create_server(services: NativeServices, desktop=None) -> MCPServer:
@@ -115,7 +137,7 @@ def create_server(services: NativeServices, desktop=None) -> MCPServer:
         @server.tool(annotations=types.ToolAnnotations(read_only_hint=False, destructive_hint=True,
                      idempotent_hint=False, open_world_hint=True))
         async def desktop_action(observation: str, action: Literal["click", "set_value", "type_text", "press_key", "scroll", "drag"],
-                                 arguments: dict) -> types.CallToolResult:
+                                 arguments: DesktopArguments) -> types.CallToolResult:
             """Act on the locally selected window using a fresh one-use observation; changes can have real effects.
 
             click: element_index OR x/y, optional click_count and mouse_button. set_value: element_index/value.
@@ -124,7 +146,7 @@ def create_server(services: NativeServices, desktop=None) -> MCPServer:
             Coordinates are pixels from the original returned screenshot. Re-observe after every action/error.
             App/window/method overrides, real-pointer fallback, global shortcuts and automatic activation are disabled.
             """
-            return await guarded(desktop.act(observation, action, arguments))
+            return await guarded(desktop.act(observation, action, arguments.model_dump(exclude_none=True)))
 
     return server
 

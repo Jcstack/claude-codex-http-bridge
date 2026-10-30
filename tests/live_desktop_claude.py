@@ -63,6 +63,20 @@ def main():
                     if isinstance(block, dict) and block.get("type") == "tool_use"]
                 counts = {name: sum(block["name"] == name for block in uses) for name in names}
                 actual = json.loads(state.read_text())
+                if actual["value"] != "DESKTOP_MODEL_READY" or actual["count"] != 1:
+                    results = [block for event in events for block in event.get("message", {}).get("content", [])
+                        if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("is_error")]
+                    failures = []
+                    for result in results:
+                        text = json.dumps(result.get("content", ""))
+                        failures.append([word for word in ("scope", "observation", "expired", "consumed", "worker", "lease", "identity", "argument", "permission", "schema", "window", "withheld") if word in text.lower()])
+                    print(json.dumps({"real_claude": True, "desktop_fixture_pass": False,
+                        "text_matches": actual["value"] == "DESKTOP_MODEL_READY", "button_invocations": actual["count"],
+                        "tool_calls": [block["name"] for block in uses], "failure_classifiers": failures,
+                        "actions": [{"action": b.get("input", {}).get("action"),
+                            "argument_keys": sorted(b.get("input", {}).get("arguments", {})),
+                            "value_matches": b.get("input", {}).get("arguments", {}).get("value") == "DESKTOP_MODEL_READY"}
+                            for b in uses if b["name"] == names[1]]}))
                 assert actual["value"] == "DESKTOP_MODEL_READY" and actual["count"] == 1, "The actual fixture UI state was not updated exactly once"
                 assert counts[names[0]] >= 3 and counts[names[1]] == 2, "Expected observe/action sequence was not used"
                 print(json.dumps({"real_claude": True, "subscription_only": True, "owned_window_only": True,

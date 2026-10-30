@@ -34,7 +34,7 @@ class DesktopPolicyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_observation_is_one_use_even_after_dispatch_failure(self):
         self.receipt()
-        self.assertEqual(await self.session.act("fixture-receipt", "click", {"element_index": "7"}), "fixture-result")
+        self.assertEqual(await self.session.act("fixture-receipt", "click", {"element_index": 7}), "fixture-result")
         self.assertEqual(self.calls[0][1], {"window": {"id": 123}, "element_index": "7", "click_method": "accessibility", "screenshotId": "fixture-shot"})
         with self.assertRaises(ScopeError): await self.session.act("fixture-receipt", "click", {"element_index": "7"})
         self.assertEqual(len(self.calls), 1)

@@ -242,6 +242,8 @@ class DesktopSession:
         if action not in allowed or not isinstance(arguments, dict) or set(arguments)-allowed[action]:
             raise desktop_scope.ScopeError("Unsupported desktop action or argument; app, window, focus and global-method overrides are not accepted")
         result = dict(arguments)
+        if type(result.get("element_index")) is int and result["element_index"] >= 0:
+            result["element_index"] = str(result["element_index"])
         for key in ("element_index", "value", "text", "key"):
             if key in result and (not isinstance(result[key], str) or not (0 if key == "value" else 1) <= len(result[key]) <= 16000):
                 raise desktop_scope.ScopeError("Desktop string arguments exceed their bounds")
