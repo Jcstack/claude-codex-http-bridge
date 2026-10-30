@@ -80,6 +80,8 @@ General desktop screenshot/click/type control would require an additional OS-lev
 
 ## Community project review
 
+The authenticated catalog also advertises `ultra`. OpenAI's [client model guide](https://learn.chatgpt.com/docs/models#choose-a-model) describes Ultra as a subagent orchestration mode, while the [Sol API specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol) lists `low`, `medium`, `high`, `xhigh` and `max` as wire reasoning efforts. This bridge does not silently replace `max` with `ultra` or claim that a model endpoint carries Codex's orchestration. Claude Code retains its own Agent/subagent loop; reproducing or evaluating Codex Ultra's orchestration in that harness is a separate remaining task.
+
 Popularity was a discovery signal, not the decision rule. Checked upstream repositories, releases, documentation, and open issues on 2026-10-30:
 
 | Project | Finding | Decision |

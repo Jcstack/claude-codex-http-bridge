@@ -82,7 +82,8 @@ Anthropic encrypted index. It includes the native annotation and an already
 emitted text-prefix hash. The request translator restores annotations only in
 assistant text with matching prefix, URL and title; edited or merged text does
 not receive stale offsets. This hash checks consistency, not authenticity.
-Envelopes are bounded to 64 KiB per annotation and 1,024 citations per response.
+Envelopes are bounded to 64 KiB per annotation. The citation-count bound is
+1,024 per streaming response, or per text part in a non-streaming response.
 
 OpenAI's [URL annotation](https://developers.openai.com/api/docs/guides/tools-web-search#output-and-citations)
 locates a citation in generated output; it does not supply a quoted source
