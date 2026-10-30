@@ -75,7 +75,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    claude = shutil.which("claude")
+    claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if claude is None:
         raise RuntimeError("Install Claude Code before running this optional probe")
     with tempfile.TemporaryDirectory(prefix="bridge-client-probe-") as temporary:

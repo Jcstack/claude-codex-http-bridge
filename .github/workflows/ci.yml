@@ -26,10 +26,33 @@ jobs:
           node-version: '24'
       - name: Install the integrity-locked client without install scripts
         run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
-      - name: Add the isolated client to PATH
-        run: python -c "import os,pathlib; pathlib.Path(os.environ['GITHUB_PATH']).open('a').write(str(pathlib.Path('tests/claude-client/node_modules/.bin').resolve())+'\n')"
+      - name: Select the pinned native binary without executing the placeholder shim
+        run: python tests/claude_fixture.py
       - name: Verify local Claude behavior without a model account
         run: python tests/probe_claude_client.py
+  gateway:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Test backend handoff and cancellation with race detection
+        if: runner.os != 'Windows'
+        run: go test -race -timeout 60s ./...
+      - name: Test native Windows ACLs and backend handoff
+        if: runner.os == 'Windows'
+        run: go test -timeout 60s ./...
   check:
     strategy:
       fail-fast: false

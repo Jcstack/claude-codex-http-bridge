@@ -30,6 +30,10 @@
 !tests/claude-client/
 !tests/claude-client/package.json
 !tests/claude-client/package-lock.json
+!gateway/
+!gateway/go.mod
+!gateway/*.go
+!gateway/README.md
 !upstream/
 !upstream/patches/
 !upstream/patches/12d97cf-inline-tools-backport.patch
