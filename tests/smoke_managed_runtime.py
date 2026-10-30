@@ -155,7 +155,8 @@ def background_claude(claude, env, settings, work):
             raise RuntimeError("Isolated background inventory contains an unrelated workspace")
         return [row for row in values if row.get("kind") == "background"]
 
-    bad = {**env, "ANTHROPIC_BASE_URL": "http://127.0.0.1:1", "ANTHROPIC_AUTH_TOKEN": "synthetic-invalid"}
+    bad = {**env, "ANTHROPIC_BASE_URL": "http://127.0.0.1:1", "ANTHROPIC_AUTH_TOKEN": "synthetic-invalid",
+           "CLAUDE_CODE_ATTRIBUTION_HEADER": "1"}
     common = ["--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
               "--model", MODEL, "--tools", "", "--permission-mode", "dontAsk", "--bg"]
     baseline = rows()
@@ -168,7 +169,7 @@ def background_claude(claude, env, settings, work):
         run(["stop", first_id], env)
         # Dispatch without shell network variables. The profile must reach a
         # supervisor that was started with the deliberately wrong gateway.
-        profile_env = {k: v for k, v in env.items() if not k.startswith("ANTHROPIC_") and k not in ("NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED")}
+        profile_env = {k: v for k, v in env.items() if not k.startswith("ANTHROPIC_") and k not in ("NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED", "CLAUDE_CODE_ATTRIBUTION_HEADER")}
         before = len(Upstream.requests)
         run([*common, "--settings", str(settings), "Reply only with the synthetic fixture value."], profile_env)
         deadline = time.monotonic() + 60
@@ -181,6 +182,7 @@ def background_claude(claude, env, settings, work):
                         for line in transcript.read_text(encoding="utf-8").splitlines():
                             record = json.loads(line)
                             if record.get("type") == "assistant" and any(b.get("text") == "FIXTURE" for b in record.get("message", {}).get("content", []) if isinstance(b, dict)):
+                                assert all("x-anthropic-billing-header:" not in json.dumps(body) for body in Upstream.requests[before:])
                                 return
             if current and current[0].get("state") in ("failed", "stopped"):
                 raise RuntimeError("Background TLS/profile continuation failed")
