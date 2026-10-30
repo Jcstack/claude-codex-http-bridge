@@ -31,6 +31,7 @@ class NativeServices:
         self.workspace = workspace.resolve()
         self._client = client
         self._artifacts = None
+        self._produced = set()
 
     @property
     def client(self):
@@ -40,15 +41,20 @@ class NativeServices:
 
     def read_file(self, name: str) -> bytes:
         path = Path(name)
-        if path.is_absolute() or not name or any(part == ".." for part in path.parts):
-            raise CapabilityInputError("Use a relative file path inside the current workspace")
-        candidate = self.workspace / path
+        base = self.workspace
+        if path.is_absolute():
+            if str(path) not in self._produced or self._artifacts is None:
+                raise CapabilityInputError("Use a workspace-relative path or an artifact returned by this MCP session")
+            base, path = self._artifacts, Path(path.name)
+        if not name or any(part == ".." for part in path.parts):
+            raise CapabilityInputError("Use a workspace-relative path or an artifact returned by this MCP session")
+        candidate = base / path
         for parent in (candidate, *candidate.parents):
-            if parent == self.workspace: break
+            if parent == base: break
             if parent.is_symlink() or (os.name == "nt" and parent.exists() and getattr(parent.stat(), "st_file_attributes", 0) & 0x400):
                 raise CapabilityInputError("Symlinked or reparse-point inputs are not accepted")
         resolved = candidate.resolve(strict=True)
-        if not resolved.is_relative_to(self.workspace):
+        if base.is_symlink() or not resolved.is_relative_to(base):
             raise CapabilityInputError("Input file is outside the current workspace")
         info = resolved.stat()
         if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE:
@@ -73,6 +79,7 @@ class NativeServices:
         if os.name == "nt":
             import windows_acl
             windows_acl.lock([path])
+        self._produced.add(str(path))
         return str(path)
 
     @staticmethod
@@ -122,7 +129,12 @@ class NativeServices:
             payload["images"] = encoded
             payload["input_fidelity"] = "high"
             if mask is not None:
-                image = self.image(self.read_file(mask)); output = io.BytesIO(); image.save(output, format="PNG")
+                image = self.image(self.read_file(mask))
+                if image.size != self.image(self.read_file(images[0])).size:
+                    raise CapabilityInputError("The mask must match the first edit input's pixel dimensions")
+                if image.getextrema()[3][0] == 255:
+                    raise CapabilityInputError("The edit mask needs a transparent region to select pixels for editing")
+                output = io.BytesIO(); image.save(output, format="PNG")
                 payload["mask"] = {"image_url": "data:image/png;base64," + base64.b64encode(output.getvalue()).decode()}
         elif mask is not None: raise CapabilityInputError("A mask requires edit input images")
         if len(json.dumps(payload)) > 64 << 20: raise CapabilityInputError("Combined image input exceeds the request bound")

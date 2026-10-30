@@ -67,7 +67,7 @@ def create_server(services: NativeServices, desktop=None) -> MCPServer:
             exact_size: bool = True) -> types.CallToolResult:
         """Edit 1–8 workspace image files, optionally with a workspace mask, using native image generation.
 
-        Use relative file paths inside this workspace. Input metadata is stripped before sending images.
+        Use workspace-relative paths or an image artifact returned by this MCP session. Input metadata is stripped before sending images.
         The native original and any explicitly resized result remain separate private artifacts.
         """
         metadata, image = await guarded(services.image_request(prompt, model=model, size=size, quality=quality,
@@ -95,7 +95,7 @@ def create_server(services: NativeServices, desktop=None) -> MCPServer:
                              max_seconds: int = 60) -> dict:
         """Use streaming OpenAI realtime speech through the existing authenticated local route.
 
-        Returns a spoken-reply WAV and its transcript. Optional input: a workspace mono 24 kHz 16-bit PCM WAV.
+        Returns a spoken-reply WAV and its transcript. Optional input: a workspace or same-session artifact mono 24 kHz 16-bit PCM WAV.
         This never records a microphone, plays sound, starts Codex, or silently retries partial output.
         It is a realtime media tool; it does not turn Claude's terminal into a full-duplex voice UI.
         """

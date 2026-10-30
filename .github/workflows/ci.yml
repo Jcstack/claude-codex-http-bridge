@@ -25,7 +25,8 @@ jobs:
         with:
           node-version: '24'
       - name: Install only hash-locked capability wheels
-        run: python -m pip --isolated install --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r requirements-capabilities.lock
+        run: >-
+          python -m pip --isolated install --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r requirements-capabilities.lock
       - name: Check native protocols, privacy and window policy without accounts
         run: python -m unittest discover -s tests -v
       - name: Install the integrity-locked Claude fixture without scripts

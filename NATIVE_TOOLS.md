@@ -38,8 +38,10 @@ credentials. Use normal Claude permissions for remote or desktop tools.
 | `desktop_observe` / `desktop_action` | Explicitly selected macOS/Windows window | Ordinary macOS app screenshot, AX text change and one button invocation passed; native Windows GUI fixture is in CI |
 
 Artifacts stay under private `runtime-tools/session-*` directories. Inputs must
-be relative to the current workspace; absolute paths, parent traversal, symlinks
-and reparse points are rejected. Each input is at most 32 MiB. This scope is an
+be workspace-relative or an exact artifact path returned by this MCP process;
+other absolute paths, parent traversal, symlinks and reparse points are rejected.
+This lets generation feed editing without granting reads of another session's
+artifacts. Each input is at most 32 MiB. This scope is an
 application guardrail, not an OS sandbox against other same-user programs.
 Returned document/screen/transcript contents enter the model conversation.
 

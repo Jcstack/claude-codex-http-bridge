@@ -118,6 +118,10 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
         image = Image.open(io.BytesIO(padded))
         self.assertEqual(image.getpixel((0, 0))[3], 0)
         self.assertEqual(image.size, (96, 64))
+        # Composition works without granting reads of all private artifacts.
+        await self.services.image_request("Edit fixture", images=[metadata["artifact"]])
+        other = NativeServices(self.root, self.work, client=self.services.client)
+        with self.assertRaises(CapabilityInputError): other.read_file(metadata["artifact"])
 
     async def test_async_transport_is_local_private_tls_bounded_and_never_redirects(self):
         import ssl
