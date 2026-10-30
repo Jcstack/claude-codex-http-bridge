@@ -124,6 +124,14 @@ def background_claude(claude, env, settings, work):
     # https://code.claude.com/docs/en/agent-view#where-state-is-stored
     config = Path(env["CLAUDE_CONFIG_DIR"])
     assert config.name == "claude-config" and config.parent.name.startswith("bridge-managed-probe-")
+    # Bootstrap trust only for this empty, disposable test workspace. This is a
+    # version-pinned client fixture, never production launcher behavior.
+    profile = config / ".claude.json"
+    data = json.loads(profile.read_text()) if profile.exists() else {}
+    projects = data.setdefault("projects", {})
+    for path in {str(work), str(work.resolve()), work.resolve().as_posix()}:
+        projects.setdefault(path, {})["hasTrustDialogAccepted"] = True
+    api_profile.write_private(profile, json.dumps(data))
 
     def run(arguments, environment):
         result = subprocess.run([claude, *arguments], cwd=work, env=environment,
@@ -165,7 +173,13 @@ def background_claude(claude, env, settings, work):
             if current and current[0].get("state") in ("failed", "stopped"):
                 raise RuntimeError("Background TLS/profile continuation failed")
             time.sleep(.25)
-        raise RuntimeError("Background fixture did not finish on the selected gateway")
+        details = [{name: row.get(name) for name in ("state", "status", "waitingFor")} for row in current]
+        labels = set()
+        for row in current:
+            output = run(["logs", row["id"]], env).lower()
+            for label in ("certificate", "tls", "auth", "gateway", "login", "trust", "127.0.0.1:1", "503", "500", "fixture"):
+                if label in output: labels.add(label)
+        raise RuntimeError("Background fixture did not finish; states=" + repr(details) + "; classes=" + repr(sorted(labels)) + "; origin_delta=" + str(len(Upstream.requests)-before))
     finally:
         # Scoped exclusively to the temporary config, never the user's daemon.
         subprocess.run([claude, "daemon", "stop", "--any"], cwd=work, env=env,

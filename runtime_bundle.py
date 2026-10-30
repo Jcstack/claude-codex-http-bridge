@@ -8,8 +8,7 @@ import json
 import os
 from pathlib import Path
 import platform
-
-import install
+import secrets
 
 
 SOURCE = Path(__file__).resolve().parent
@@ -19,6 +18,27 @@ PATCHES = ("12d97cf-inline-tools-backport.patch", "12d97cf-deferred-tools.patch"
 
 def canonical(value: dict) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def write_file(path: Path, content: bytes, mode: int) -> None:
+    if path.is_symlink(): raise RuntimeError("Runtime file must not be symlinked")
+    temporary = path.with_name(path.name + "." + secrets.token_hex(8) + ".tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content); handle.flush(); os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def target() -> str:
@@ -36,11 +56,13 @@ def source_lock() -> dict:
         return json.loads(saved.read_text())
     files = [SOURCE / "upstream" / "patches" / name for name in PATCHES]
     files += [SOURCE / "gateway" / name for name in ("go.mod", "main.go", "tls.go")]
-    return {"upstream": UPSTREAM, "files": {str(path.relative_to(SOURCE)).replace(os.sep, "/"): install.file_hash(path) for path in files}}
+    return {"upstream": UPSTREAM, "files": {str(path.relative_to(SOURCE)).replace(os.sep, "/"): file_hash(path) for path in files}}
 
 
 def private_dir(path: Path) -> None:
-    install.private_dir(path)
+    if path.is_symlink(): raise RuntimeError("Runtime directory must not be symlinked")
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.chmod(0o700)
     if os.name == "nt":
         import windows_acl
         windows_acl.lock([path])
@@ -75,7 +97,7 @@ def verify(bundle: Path) -> tuple[dict, str]:
         if not isinstance(row, dict) or set(row) != {"file", "sha256"} or row["file"] != filename:
             raise RuntimeError("Unexpected runtime binary path")
         safe_file(bundle / filename, private=False)
-        if install.file_hash(bundle / filename) != row["sha256"]:
+        if file_hash(bundle / filename) != row["sha256"]:
             raise RuntimeError("Runtime binary checksum mismatch")
     identity = hashlib.sha256(canonical(value)).hexdigest()
     return value, identity
@@ -90,9 +112,9 @@ def pack(proxy: Path, ingress: Path, output: Path) -> None:
     for kind, source, name in (("proxy", proxy, "cli-proxy-api"), ("ingress", ingress, "bridge-ingress")):
         safe_file(source, private=False)
         name += suffix
-        install.write_file(output / name, source.read_bytes(), 0o700)
-        binaries[kind] = {"file": name, "sha256": install.file_hash(output / name)}
-    install.write_file(output / "bundle.json", canonical({"format": 1, "target": target(),
+        write_file(output / name, source.read_bytes(), 0o700)
+        binaries[kind] = {"file": name, "sha256": file_hash(output / name)}
+    write_file(output / "bundle.json", canonical({"format": 1, "target": target(),
                        "source": source_lock(), "binaries": binaries}), 0o600)
     if os.name == "nt":
         import windows_acl
@@ -110,17 +132,17 @@ def activate(root: Path, source: Path) -> str:
         name = value["binaries"][kind]["file"]
         path = destination / name
         if not path.exists():
-            install.write_file(path, (source / name).read_bytes(), 0o700)
+            write_file(path, (source / name).read_bytes(), 0o700)
         safe_file(path)
     manifest = destination / "bundle.json"
     if not manifest.exists():
-        install.write_file(manifest, canonical(value), 0o600)
+        write_file(manifest, canonical(value), 0o600)
     if os.name == "nt":
         import windows_acl
         windows_acl.lock(list(destination.iterdir()))
     if verify(destination)[1] != identity:
         raise RuntimeError("Installed runtime bundle changed unexpectedly")
-    install.write_file(root / "runtime-selected.json", canonical({"bundle": identity}), 0o600)
+    write_file(root / "runtime-selected.json", canonical({"bundle": identity}), 0o600)
     if os.name == "nt":
         windows_acl.lock([root / "runtime-selected.json"])
     return identity
