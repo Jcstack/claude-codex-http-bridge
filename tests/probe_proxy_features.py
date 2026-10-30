@@ -123,11 +123,37 @@ def probe(binary: Path) -> dict[str, bool]:
                     "tools": [tool("ToolSearch"), tool("Read"),
                               tool("mcp__demo__lookup", deferred=True)],
                 })
-                if len(Upstream.requests) != 3:
+                post(port, key_path.read_text().strip(), {
+                    **base,
+                    "messages": [
+                        {"role": "user", "content": "Search synthetic tools"},
+                        {"role": "assistant", "content": [{
+                            "type": "tool_use", "id": "toolu_search", "name": "ToolSearch",
+                            "input": {"query": "mcp__demo__lookup"},
+                        }]},
+                        {"role": "user", "content": [{
+                            "type": "tool_result", "tool_use_id": "toolu_search",
+                            "content": [{"type": "tool_reference",
+                                         "tool_name": "mcp__demo__lookup"}],
+                        }]},
+                        {"role": "system", "content": [{
+                            "type": "tool_removal", "tool": {
+                                "type": "tool_reference", "name": "mcp__demo__lookup"},
+                        }]},
+                    ],
+                    "tools": [tool("ToolSearch"), tool("Read"),
+                              tool("mcp__demo__lookup", deferred=True)],
+                })
+                if len(Upstream.requests) != 4:
                     raise RuntimeError("Candidate proxy did not forward all synthetic requests")
-                addition, before, after = [entry[2] for entry in Upstream.requests]
+                addition, before, after, removed = [entry[2] for entry in Upstream.requests]
                 before_names = {entry.get("name") for entry in before.get("tools", [])}
                 after_names = {entry.get("name") for entry in after.get("tools", [])}
+                removed_names = {entry.get("name") for entry in removed.get("tools", [])}
+                removed_choice = removed.get("tool_choice")
+                if not isinstance(removed_choice, dict):
+                    removed_choice = {}
+                allowed = {entry.get("name") for entry in removed_choice.get("tools", [])}
                 return {
                     "mid_conversation_tool_addition":
                         "SubagentHandback" in names_in_additional_tools(addition),
@@ -136,6 +162,12 @@ def probe(binary: Path) -> dict[str, bool]:
                     "deferred_tool_revealed_without_prefix_change":
                         "mcp__demo__lookup" in names_in_additional_tools(after)
                         and before_names == after_names,
+                    "removed_tool_is_uncallable_without_prefix_change":
+                        removed_choice.get("type") == "allowed_tools"
+                        and "mcp__demo__lookup" not in allowed
+                        and {"ToolSearch", "Read"}.issubset(allowed)
+                        and before_names == removed_names
+                        and "mcp__demo__lookup" in names_in_additional_tools(removed),
                 }
             finally:
                 process.terminate()

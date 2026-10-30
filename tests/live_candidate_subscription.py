@@ -69,6 +69,9 @@ def run(binary: Path, installed: Path, claude_smoke: bool = False) -> dict:
                 {"name": "ToolSearch", "description": "Find a fixture tool",
                  "input_schema": {"type": "object", "properties": {
                      "query": {"type": "string"}}}},
+                {"name": "Read", "description": "Read a local fixture file",
+                 "input_schema": {"type": "object", "properties": {
+                     "file_path": {"type": "string"}}, "required": ["file_path"]}},
                 {"name": tool_name, "description": "Look up a synthetic value",
                  "defer_loading": True,
                  "input_schema": {"type": "object", "properties": {
@@ -119,8 +122,23 @@ def run(binary: Path, installed: Path, claude_smoke: bool = False) -> dict:
                                  if part.get("type") == "text")
             if third_text.strip() != "PONG":
                 raise RuntimeError("Candidate did not continue after the synthetic tool result")
+            removed = post(port, key, {
+                **base, "tool_choice": {"type": "any"},
+                "messages": [*history,
+                             {"role": "system", "content": [{
+                                 "type": "tool_removal", "tool": {
+                                     "type": "tool_reference", "name": tool_name},
+                             }]},
+                             {"role": "user", "content":
+                              "Call Read on the local fixture file README.md."}],
+            }, timeout=60)
+            allowed_calls = [part.get("name") for part in removed.get("content", [])
+                             if part.get("type") == "tool_use"]
+            if not allowed_calls or any(name not in {"Read", "ToolSearch"}
+                                        for name in allowed_calls):
+                raise RuntimeError("Removed tool remained callable in live inference")
             result = {"model": model, "reveal": "pass", "tool_call": "pass",
-                      "tool_result_continuation": "pass"}
+                      "tool_result_continuation": "pass", "tool_removal": "pass"}
             if claude_smoke:
                 claude = shutil.which("claude")
                 if claude is None:
