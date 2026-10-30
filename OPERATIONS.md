@@ -76,8 +76,7 @@ annotation-bearing history and continued in 7.710 seconds, recalling a source
 URL. The annotation URL did not match any native source-list URL byte for byte;
 the cause is not established. Preserving a provider citation does not verify its
 grounding. Claude's source-quotation field remains empty because the URL
-annotation provides no exact source excerpt. Cross-platform promotion evidence
-for this fifth patch is recorded separately from the earlier four-patch run.
+annotation provides no exact source excerpt. The [fifth-patch candidate run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41078035682) passed macOS, Linux and native Windows, including real Claude resume and the complete managed TLS/background fixture. The source/install run at the same commit also passed.
 
 | Probe | Result | Scope |
 | --- | --- | --- |
@@ -104,7 +103,18 @@ The [candidate run at `22112c7`](https://github.com/Jcstack/claude-codex-http-br
 
 The [official Image API](https://developers.openai.com/api/reference/resources/images/methods/generate) documents the requested standard size, so the native Codex route's observed image dimensions are a real compatibility boundary. The [repeatable image probe](tests/live_native_images.py) checks PNG dimensions and fails on a mismatch. This does not certify Claude-side image tools, editing, streaming images, desktop control or GPT-Live. It corrects the earlier blanket assumption that this subscription backend could not generate images.
 
-Both cache successes and misses are retained here; no guaranteed hit rate or coding-quality advantage is inferred. Native citation annotations, slow compaction, upstream transport failures, authenticated Windows inference and broader model/harness evaluations remain open. The original direct listener and the TLS ingress itself have not been seamlessly replaced; the verified reload target is the translator behind the fixed ingress.
+The URL-citation runtime was then activated on the same installed TLS listener,
+without changing the original authenticated service or its state. A live search
+through that endpoint returned two searches, 16 source entries and one native
+URL citation in **10.712 seconds**. The backend was reloaded, the same listener
+accepted the annotation-bearing history, and source recall completed in **3.355
+seconds** with 4,224 cached input tokens. The native citation URL matched a source
+receipt after normalization that removes UTM parameters and fragments; raw URLs
+are preserved by the bridge. This explains the observed normalized match, not
+whether the cited page supports every generated claim. No source excerpt was
+invented and no OAuth material entered the translator.
+
+Both cache successes and misses are retained here; no guaranteed hit rate or coding-quality advantage is inferred. Exact source quotations and remaining citation types, slow compaction, upstream transport failures, authenticated Windows inference and broader model/harness evaluations remain open. The original direct listener and the TLS ingress itself have not been seamlessly replaced; the verified reload target is the translator behind the fixed ingress.
 
 ## Read-only diagnostics
 
@@ -125,4 +135,4 @@ A safe upgrade needs a stable authenticated listener, a ready replacement backen
 
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
-Remaining work: replacement of the legacy origin and TLS ingress itself; stronger cache consistency evidence; native citation annotation mapping; transport failures and slow compaction; diverse repeated repository evaluations; authenticated Windows inference/HUD/browser/resume; Codex-native context retrieval, desktop, steering, Claude-side media tools and image-size fidelity. Native `/context`, `/usage` and budget UI still have Claude-alias limitations. API-key pilots stay disabled by user preference and Opus lacks an account. These checks do not certify every feature or Opus parity.
+Remaining work: replacement of the legacy origin and TLS ingress itself; stronger cache consistency evidence; source excerpts, file/container citations and complete citation UI fidelity; transport failures and slow compaction; diverse repeated repository evaluations; authenticated Windows inference/HUD/browser/resume; Codex-native context retrieval, desktop, steering, Claude-side media tools and image-size fidelity. Native `/context`, `/usage` and budget UI still have Claude-alias limitations. API-key pilots stay disabled by user preference and Opus lacks an account. These checks do not certify every feature or Opus parity.
