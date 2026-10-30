@@ -5,7 +5,14 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 from pathlib import Path
+import sys
 from typing import Literal
+
+if __name__ == "__main__":
+    # The launcher uses Python isolated mode. Add only this reviewed immutable
+    # snapshot, never the workspace/PYTHONPATH, for sibling module imports.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from pydantic import BaseModel, ConfigDict
 
 from mcp import types
@@ -89,7 +96,7 @@ def create_server(services: NativeServices, desktop=None) -> MCPServer:
             exact_size: bool = True) -> types.CallToolResult:
         """Edit 1–8 workspace image files, optionally with a workspace mask, using native image generation.
 
-        Use workspace-relative paths or an image artifact returned by this MCP session. Input metadata is stripped before sending images.
+        Use workspace-relative paths or a verified bridge image artifact owned by this workspace, including after resume. Input metadata is stripped before sending images.
         The native original and any explicitly resized result remain separate private artifacts.
         """
         metadata, image = await guarded(services.image_request(prompt, model=model, size=size, quality=quality,
@@ -117,7 +124,7 @@ def create_server(services: NativeServices, desktop=None) -> MCPServer:
                              max_seconds: int = 60) -> dict:
         """Use streaming OpenAI realtime speech through the existing authenticated local route.
 
-        Returns a spoken-reply WAV and its transcript. Optional input: a workspace or same-session artifact mono 24 kHz 16-bit PCM WAV.
+        Returns a spoken-reply WAV and its transcript. Optional input: a workspace or verified workspace-owned artifact mono 24 kHz 16-bit PCM WAV.
         This never records a microphone, plays sound, starts Codex, or silently retries partial output.
         It is a realtime media tool; it does not turn Claude's terminal into a full-duplex voice UI.
         """
@@ -137,7 +144,7 @@ def create_server(services: NativeServices, desktop=None) -> MCPServer:
         @server.tool(annotations=types.ToolAnnotations(read_only_hint=False, destructive_hint=True,
                      idempotent_hint=False, open_world_hint=True))
         async def desktop_action(observation: str, action: Literal["click", "set_value", "type_text", "press_key", "scroll", "drag"],
-                                 arguments: DesktopArguments) -> types.CallToolResult:
+                                 arguments: DesktopArguments) -> dict:
             """Act on the locally selected window using a fresh one-use observation; changes can have real effects.
 
             click: element_index OR x/y, optional click_count and mouse_button. set_value: element_index/value.

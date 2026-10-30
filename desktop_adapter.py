@@ -166,7 +166,27 @@ class DesktopSession:
                     if future.cancelled(): continue
                     try:
                         self.check(keyboard=name in ("type_text", "press_key"))
-                        result = await client.call_tool(name, arguments)
+                        method, payload = name, arguments
+                        if os.name != "nt" and name == "click" and arguments.get("click_method") == "accessibility":
+                            # Upstream's heuristic AX click may try descendants
+                            # and hit-tests after an uncertain AXPress. Request
+                            # one exact action on the observed element instead.
+                            method = "perform_secondary_action"
+                            payload = {key: arguments[key] for key in ("window", "element_index")}
+                            payload["action"] = "AXPress"
+                        if os.name != "nt" and name == "press_key" and arguments.get("key") in ("cmd+a", "ctrl+a"):
+                            self.scope.select_all_text(self.configuration["identity"]["id"])
+                            from types import SimpleNamespace
+                            result = SimpleNamespace(is_error=False)
+                        elif os.name != "nt" and name == "type_text":
+                            # Do not try AX append then keyboard append after
+                            # an uncertain setter result. One explicit PID-
+                            # targeted Unicode path, checked between chunks.
+                            await self.scope.type_text(self.configuration["identity"]["id"], arguments["text"])
+                            from types import SimpleNamespace
+                            result = SimpleNamespace(is_error=False)
+                        else:
+                            result = await client.call_tool(method, payload)
                         self.check()
                         if result.is_error: raise desktop_scope.ScopeError("Desktop action failed; observe again. No foreground fallback was attempted")
                         if not future.done(): future.set_result(result)
@@ -225,15 +245,36 @@ class DesktopSession:
             import base64
             raw = base64.b64decode(images[0].data, validate=True)
             with Image.open(io.BytesIO(raw)) as image:
-                if image.width*image.height > 32_000_000: raise desktop_scope.ScopeError("Desktop screenshot exceeds the pixel bound")
-                width, height = image.size
+                if image.format != "PNG" or image.width*image.height > 32_000_000: raise desktop_scope.ScopeError("Desktop screenshot exceeds the format/pixel bound")
+                native_width, native_height = image.size
+                scale = min(1, 1280/max(image.size), math.sqrt(1_000_000/(image.width*image.height)))
+                width, height = max(1, int(image.width*scale)), max(1, int(image.height*scale))
+                if scale < 1:
+                    image = image.resize((width, height), Image.Resampling.LANCZOS)
+                    output = io.BytesIO(); image.save(output, format="PNG"); raw = output.getvalue()
             screenshots = metadata.get("screenshots", [])
             shot = screenshots[0].get("id") if len(screenshots) == 1 else None
             if not isinstance(shot, str): raise desktop_scope.ScopeError("Scoped screenshot identity is missing")
             token = secrets.token_urlsafe(24)
-            self.receipt = (token, time.monotonic()+60, shot, width, height)
-            return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps({"observation": token,
-                "expires_in_seconds": 60, "scope": "one selected window", "image_width": width, "image_height": height})), *result.content])
+            self.receipt = (token, time.monotonic()+60, shot, width, height, native_width, native_height)
+            # OCU includes the PNG twice: as ImageContent and a data URL inside
+            # JSON text. Never feed base64 image bytes into the text context.
+            accessibility, truncated, remaining = {}, [], 64000
+            fields = metadata.get("accessibility", {})
+            for key in ("tree", "focused_element", "selected_text", "document_text"):
+                value = fields.get(key) if isinstance(fields, dict) else None
+                if isinstance(value, str):
+                    length = min(len(value), remaining)
+                    accessibility[key] = value[:length]; remaining -= length
+                    if length < len(value): truncated.append(key)
+            clean = {"observation": token, "expires_in_seconds": 60, "scope": "one selected window",
+                "window": {"id": self.configuration["identity"]["id"]}, "accessibility": accessibility,
+                "truncated_fields": truncated, "image_width": width, "image_height": height,
+                "native_image_width": native_width, "native_image_height": native_height,
+                "coordinate_space": "returned image pixels; the bridge maps to the native screenshot",
+                "screenshots": [{"id": shot, "width": width, "height": height}]}
+            return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(clean)),
+                types.ImageContent(type="image", data=base64.b64encode(raw).decode(), mime_type="image/png")])
 
     def action_arguments(self, action: str, arguments: dict) -> dict:
         allowed = {"click": {"element_index", "x", "y", "click_count", "mouse_button"}, "set_value": {"element_index", "value"},
@@ -273,6 +314,11 @@ class DesktopSession:
                 raise desktop_scope.ScopeError("Coordinate scroll requires an observed point and pixel delta")
             if any(abs(result.get(key, 0)) > 10000 for key in ("scrollX", "scrollY")): raise desktop_scope.ScopeError("Scroll delta exceeds the window policy")
         result["window"] = {"id": self.configuration["identity"]["id"]}
+        if len(self.receipt) == 7:
+            for x, y in (("x", "y"), ("from_x", "from_y"), ("to_x", "to_y")):
+                if x in result:
+                    result[x] *= self.receipt[5]/self.receipt[3]
+                    result[y] *= self.receipt[6]/self.receipt[4]
         if action in ("click", "scroll", "drag"): result["screenshotId"] = self.receipt[2]
         return result
 
@@ -283,7 +329,9 @@ class DesktopSession:
             self.check(keyboard=action in ("type_text", "press_key"))
             payload = self.action_arguments(action, arguments)
             self.receipt = None  # Consume before dispatch, including errors/cancellation.
-            return await self.call(action, payload)
+            await self.call(action, payload)
+            return {"action": action, "backend_dispatches": 1, "outcome": "dispatched_verify_effect",
+                    "next": "Observe and verify the expected effect before any further action"}
 
 
 def main(arguments: list[str], *, root: Path) -> int:

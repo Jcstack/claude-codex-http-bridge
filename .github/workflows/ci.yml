@@ -36,7 +36,7 @@ jobs:
         run: python tests/probe_native_mcp_client.py
       - name: Verify real native Windows desktop changes in an owned fixture
         if: runner.os == 'Windows'
-        run: python tests/live_desktop.py
+        run: python tests/live_desktop.py --keyboard
   claude-client:
     strategy:
       fail-fast: false

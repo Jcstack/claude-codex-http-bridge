@@ -33,7 +33,7 @@ def element(tree, label):
     raise RuntimeError("Fixture element absent from actual accessibility tree")
 
 
-async def exercise(root, work, state, value):
+async def exercise(root, work, state, value, keyboard=False):
     identity = desktop_scope.inventory().identity(value["id"])
     assert identity["pid"] == value["pid"]
     selection = {"format": 1, "enabled": True, "workspace": str(work.resolve()), "identity": identity}
@@ -49,30 +49,45 @@ async def exercise(root, work, state, value):
         try: await session.act(receipt, "set_value", {"element_index": field, "value": "MUST_NOT_REPLAY"})
         except desktop_scope.ScopeError: pass
         else: raise AssertionError("An observation was reused")
+        expected = "DESKTOP_FIXTURE_READY"
+        if keyboard:
+            observed = await session.observe()
+            view = state_metadata(observed)
+            await session.act(session.receipt[0], "click", {"x": view["image_width"]*0.5,
+                "y": view["image_height"]*(0.38 if sys.platform == "darwin" else 0.25)})
+            await session.observe()
+            await session.act(session.receipt[0], "press_key", {"key": "cmd+a" if sys.platform == "darwin" else "ctrl+a"})
+            await session.observe()
+            expected = "UNICODE_FIXTURE_READY_😀"
+            await session.act(session.receipt[0], "type_text", {"text": expected})
         observed = await session.observe()
         button = element(state_metadata(observed).get("accessibility", {}).get("tree", ""), "Save fixture")
         await session.act(session.receipt[0], "click", {"element_index": button})
         current = json.loads(state.read_text())
-        assert current["value"] == "DESKTOP_FIXTURE_READY" and current["count"] == 1, "Native UI state did not change exactly once"
+        if keyboard and (current["value"] != expected or current["count"] != 1):
+            print(json.dumps({"synthetic_fixture_text": current["value"], "button_invocations": current["count"], "keyboard_pass": False}))
+        assert current["value"] == expected and current["count"] == 1, "Native UI state did not change exactly once"
         selection["enabled"] = False
         runtime_bundle.write_file(root / "desktop.json", runtime_bundle.canonical(selection), 0o600)
         try: await session.observe()
         except desktop_scope.ScopeError: pass
         else: raise AssertionError("Disabled scope remained observable")
         print(json.dumps({"platform": sys.platform, "owned_window_only": True, "native_screenshot": "pass", "native_accessibility": "pass",
-            "actual_text_change": "pass", "actual_button_action": "pass", "one_use_observation": "pass", "immediate_disable": "pass", "global_input": False}))
+            "actual_text_change": "pass", "actual_button_action": "pass", "one_use_observation": "pass", "immediate_disable": "pass",
+            "literal_unicode_keyboard": "pass" if keyboard else "not_run", "global_input": False}))
     finally: await session.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--keyboard", action="store_true", help="Also exercise targeted coordinate click, select-all and Unicode text in the owned window")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="bridge-scoped-desktop-") as temporary:
         root = Path(temporary); runtime_bundle.private_dir(root)
         work = root / "workspace"; runtime_bundle.private_dir(work)
         desktop_adapter.install(root, args.archive)
-        with fixture() as (_process, state, value): asyncio.run(exercise(root, work, state, value))
+        with fixture() as (_process, state, value): asyncio.run(exercise(root, work, state, value, args.keyboard))
 
 
 if __name__ == "__main__": main()

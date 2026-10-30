@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes as C
+import asyncio
 import os
 import plistlib
 import sys
@@ -27,6 +28,10 @@ class MacWindows:
         self.proc = C.CDLL("/usr/lib/libproc.dylib")
         for lib, name, result, args in (
             (self.cg, "CGWindowListCopyWindowInfo", C.c_void_p, [C.c_uint32, C.c_uint32]),
+            (self.cg, "CGEventCreateKeyboardEvent", C.c_void_p, [C.c_void_p, C.c_uint16, C.c_bool]),
+            (self.cg, "CGEventKeyboardSetUnicodeString", None, [C.c_void_p, C.c_ulong, C.POINTER(C.c_uint16)]),
+            (self.cg, "CGEventSetFlags", None, [C.c_void_p, C.c_uint64]),
+            (self.cg, "CGEventPostToPid", None, [C.c_int, C.c_void_p]),
             (self.cf, "CFPropertyListCreateData", C.c_void_p, [C.c_void_p, C.c_void_p, C.c_long, C.c_ulong, C.c_void_p]),
             (self.cf, "CFDataGetLength", C.c_long, [C.c_void_p]),
             (self.cf, "CFDataGetBytePtr", C.c_void_p, [C.c_void_p]),
@@ -35,9 +40,13 @@ class MacWindows:
             (self.cf, "CFArrayGetCount", C.c_long, [C.c_void_p]),
             (self.cf, "CFArrayGetValueAtIndex", C.c_void_p, [C.c_void_p, C.c_long]),
             (self.cf, "CFBooleanGetValue", C.c_bool, [C.c_void_p]),
+            (self.cf, "CFStringGetCString", C.c_bool, [C.c_void_p, C.c_void_p, C.c_long, C.c_uint32]),
+            (self.cf, "CFStringGetLength", C.c_long, [C.c_void_p]),
             (self.ax, "AXUIElementCreateApplication", C.c_void_p, [C.c_int]),
             (self.ax, "AXUIElementCopyAttributeValue", C.c_int, [C.c_void_p, C.c_void_p, C.POINTER(C.c_void_p)]),
             (self.ax, "_AXUIElementGetWindow", C.c_int, [C.c_void_p, C.POINTER(C.c_uint32)]),
+            (self.ax, "AXValueCreate", C.c_void_p, [C.c_int, C.c_void_p]),
+            (self.ax, "AXUIElementSetAttributeValue", C.c_int, [C.c_void_p, C.c_void_p, C.c_void_p]),
             (self.proc, "proc_pidinfo", C.c_int, [C.c_int, C.c_int, C.c_uint64, C.c_void_p, C.c_int]),
             (self.proc, "proc_pidpath", C.c_int, [C.c_int, C.c_void_p, C.c_uint32]),
         ):
@@ -113,6 +122,74 @@ class MacWindows:
             if windows: self.cf.CFRelease(windows)
             if app: self.cf.CFRelease(app)
         return {"id": window_id, "pid": pid, "created": created, "executable": executable}
+
+    def keyboard_target(self, app, window_id, *, keep_element=False):
+        focused, element, owner, role = None, None, None, None
+        try:
+            focused = self.attribute(app, "AXFocusedWindow")
+            if self.window_number(focused) != window_id: raise ScopeError("The selected window lost keyboard focus")
+            element = self.attribute(app, "AXFocusedUIElement")
+            owner = self.attribute(element, "AXWindow")
+            if self.window_number(owner) != window_id: raise ScopeError("The focused element belongs to a different window")
+            role = self.attribute(element, "AXRole")
+            buffer = C.create_string_buffer(128)
+            if not self.cf.CFStringGetCString(role, buffer, len(buffer), 0x08000100) or buffer.value not in (b"AXTextField", b"AXTextArea", b"AXComboBox"):
+                raise ScopeError("Literal text requires a focused editable, non-password element in the selected window")
+            if keep_element:
+                result, element = element, None
+                return result
+        finally:
+            for value in (focused, element, owner, role):
+                if value: self.cf.CFRelease(value)
+
+    def select_all_text(self, window_id):
+        identity = self.identity(window_id, keyboard=True)
+        app = self.ax.AXUIElementCreateApplication(identity["pid"])
+        element, value, selected, key = None, None, None, None
+        try:
+            element = self.keyboard_target(app, window_id, keep_element=True)
+            value = self.attribute(element, "AXValue")
+            # Selection is scoped to the actual focused text element. Command-A
+            # as an app event can otherwise depend on the foreground menu bar.
+            class Range(C.Structure): _fields_ = [("location", C.c_long), ("length", C.c_long)]
+            span = Range(0, self.cf.CFStringGetLength(value))
+            selected = self.ax.AXValueCreate(4, C.byref(span))  # kAXValueCFRangeType
+            key = self.cf.CFStringCreateWithCString(None, b"AXSelectedTextRange", 0x08000100)
+            if not selected or self.ax.AXUIElementSetAttributeValue(element, key, selected):
+                raise ScopeError("The selected text element did not confirm select-all; no keyboard fallback was attempted")
+        finally:
+            for handle in (element, value, selected, key, app):
+                if handle: self.cf.CFRelease(handle)
+
+    async def type_text(self, window_id: int, text: str):
+        identity = self.identity(window_id, keyboard=True)
+        # Encode before sending anything. Split by Unicode characters, keeping
+        # UTF-16 surrogate pairs together in the OS event's short text payload.
+        chunks, chunk = [], b""
+        for character in text:
+            encoded = character.encode("utf-16-le")
+            if len(chunk)+len(encoded) > 40: chunks.append(chunk); chunk = b""
+            chunk += encoded
+        if chunk: chunks.append(chunk)
+        app = self.ax.AXUIElementCreateApplication(identity["pid"])
+        try:
+            for raw in chunks:
+                self.keyboard_target(app, window_id)
+                data = (C.c_uint16*(len(raw)//2)).from_buffer_copy(raw)
+                down = self.cg.CGEventCreateKeyboardEvent(None, 0, True)
+                up = self.cg.CGEventCreateKeyboardEvent(None, 0, False)
+                try:
+                    if not down or not up: raise ScopeError("Targeted keyboard events are unavailable; no alternative input method was attempted")
+                    for event in (down, up):
+                        self.cg.CGEventSetFlags(event, 0)
+                        self.cg.CGEventKeyboardSetUnicodeString(event, len(data), data)
+                        self.cg.CGEventPostToPid(identity["pid"], event)
+                finally:
+                    if down: self.cf.CFRelease(down)
+                    if up: self.cf.CFRelease(up)
+                await asyncio.sleep(0)  # Cancellation stops subsequent chunks.
+        finally:
+            if app: self.cf.CFRelease(app)
 
 
 class WindowsWindows:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import os
@@ -42,12 +43,28 @@ class NativeServices:
     def read_file(self, name: str) -> bytes:
         path = Path(name)
         base = self.workspace
+        expected_digest = None
         if path.is_absolute():
-            if str(path) not in self._produced or self._artifacts is None:
-                raise CapabilityInputError("Use a workspace-relative path or an artifact returned by this MCP session")
-            base, path = self._artifacts, Path(path.name)
+            # A private sidecar lets a resumed MCP process reuse generated
+            # media from this workspace without opening all runtime files.
+            parent = path.parent
+            if (parent.parent != self.root/"runtime-tools" or not re.fullmatch(r"session-[a-f0-9]{24}", parent.name) or
+                not re.fullmatch(r"[a-f0-9]{32}\.(?:png|wav)", path.name) or parent.is_symlink() or parent.parent.is_symlink()):
+                raise CapabilityInputError("Use a workspace-relative path or a bridge artifact owned by this workspace")
+            sidecar = path.with_suffix(path.suffix+".bridge.json")
+            try:
+                runtime_bundle.safe_file(sidecar, limit=16384)
+                metadata = json.loads(sidecar.read_text())
+            except (OSError, RuntimeError, ValueError):
+                raise CapabilityInputError("Artifact ownership could not be verified") from None
+            workspace_hash = hashlib.sha256(os.path.normcase(str(self.workspace)).encode()).hexdigest()
+            if (not isinstance(metadata, dict) or metadata.get("format") != 1 or metadata.get("artifact") != path.name or
+                metadata.get("workspace") != workspace_hash or not re.fullmatch(r"[a-f0-9]{64}", str(metadata.get("sha256", "")))):
+                raise CapabilityInputError("This artifact is not owned by the current workspace")
+            expected_digest = metadata["sha256"]
+            base, path = parent, Path(path.name)
         if not name or any(part == ".." for part in path.parts):
-            raise CapabilityInputError("Use a workspace-relative path or an artifact returned by this MCP session")
+            raise CapabilityInputError("Use a workspace-relative path or a bridge artifact owned by this workspace")
         candidate = base / path
         for parent in (candidate, *candidate.parents):
             if parent == base: break
@@ -66,6 +83,8 @@ class NativeServices:
                 raise CapabilityInputError("Input identity changed before reading")
             raw = handle.read(MAX_FILE + 1)
         if len(raw) > MAX_FILE: raise CapabilityInputError("Input exceeded the file limit")
+        if expected_digest and hashlib.sha256(raw).hexdigest() != expected_digest:
+            raise CapabilityInputError("The generated artifact was modified outside the bridge; copy it into the workspace to use it as a new input")
         return raw
 
     def artifact(self, raw: bytes, extension: str) -> str:
@@ -76,9 +95,13 @@ class NativeServices:
             runtime_bundle.private_dir(self._artifacts)
         path = self._artifacts / (secrets.token_hex(16) + "." + extension)
         runtime_bundle.write_file(path, raw, 0o600)
+        sidecar = path.with_suffix(path.suffix+".bridge.json")
+        metadata = {"format": 1, "artifact": path.name, "sha256": hashlib.sha256(raw).hexdigest(),
+                    "workspace": hashlib.sha256(os.path.normcase(str(self.workspace)).encode()).hexdigest()}
+        runtime_bundle.write_file(sidecar, runtime_bundle.canonical(metadata), 0o600)
         if os.name == "nt":
             import windows_acl
-            windows_acl.lock([path])
+            windows_acl.lock([path, sidecar])
         self._produced.add(str(path))
         return str(path)
 

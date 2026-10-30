@@ -7,9 +7,10 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch, AsyncMock
+from types import SimpleNamespace
 
 import desktop_adapter
-from desktop_scope import ScopeError
+from desktop_scope import ScopeError, MacWindows
 import runtime_bundle
 
 
@@ -34,7 +35,8 @@ class DesktopPolicyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_observation_is_one_use_even_after_dispatch_failure(self):
         self.receipt()
-        self.assertEqual(await self.session.act("fixture-receipt", "click", {"element_index": 7}), "fixture-result")
+        result = await self.session.act("fixture-receipt", "click", {"element_index": 7})
+        self.assertEqual(result["backend_dispatches"], 1)
         self.assertEqual(self.calls[0][1], {"window": {"id": 123}, "element_index": "7", "click_method": "accessibility", "screenshotId": "fixture-shot"})
         with self.assertRaises(ScopeError): await self.session.act("fixture-receipt", "click", {"element_index": "7"})
         self.assertEqual(len(self.calls), 1)
@@ -89,6 +91,26 @@ class DesktopPolicyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ScopeError): await worker.call_tool("click", args)
         self.assertEqual(worker.operation.await_count, 1)
         with self.assertRaises(ScopeError): await worker.call_tool("get_window_state", {"window": {"id": 999}})
+
+    async def test_unicode_input_stops_on_focus_change_and_never_splits_surrogate_pairs(self):
+        scope = MacWindows.__new__(MacWindows)
+        scope.identity = lambda _window, **_kwargs: {"pid": 456}
+        scope.ax = SimpleNamespace(AXUIElementCreateApplication=lambda _pid: 1)
+        scope.cf = SimpleNamespace(CFRelease=lambda _value: None)
+        events, data, posted, checks = [], {}, [], []
+        def event(_source, _key, down):
+            events.append(down); return len(events)
+        def unicode_value(event_id, _length, values): data[event_id] = bytes(values)
+        scope.cg = SimpleNamespace(CGEventCreateKeyboardEvent=event, CGEventSetFlags=lambda *_args: None,
+            CGEventKeyboardSetUnicodeString=unicode_value, CGEventPostToPid=lambda pid, event_id: posted.append((pid,event_id)))
+        def focus(_app, _window):
+            checks.append(True)
+            if len(checks) > 1: raise ScopeError("Synthetic focus change")
+        scope.keyboard_target = focus
+        with self.assertRaises(ScopeError): await scope.type_text(123, "😀"*22)
+        self.assertEqual(posted, [(456,1),(456,2)])
+        self.assertEqual(data[1].decode("utf-16-le"), "😀"*10)
+        self.assertEqual(data[1], data[2])
 
 
 if __name__ == "__main__": unittest.main()

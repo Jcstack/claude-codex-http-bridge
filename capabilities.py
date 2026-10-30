@@ -133,7 +133,7 @@ def launch_flags(root: Path, directory: Path, workspace: Path, arguments: list[s
         if explicit: raise ValueError("These native capabilities use the subscription route; the API profile remains separate")
         return [], clean
     executable = selected_python(root)
-    data = {"mcpServers": {"codex_native": {"command": str(executable), "args": [str(selected_server(root)),
+    data = {"mcpServers": {"codex_native": {"command": str(executable), "args": ["-I", str(selected_server(root)),
              "--root", str(root), "--workspace", str(workspace.resolve())]}}}
     path = directory / "native-mcp.json"
     runtime_bundle.write_file(path, runtime_bundle.canonical(data), 0o600)

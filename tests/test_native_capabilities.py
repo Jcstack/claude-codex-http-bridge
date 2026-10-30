@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import os
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -16,7 +17,7 @@ import capabilities
 import runtime_bundle
 
 try:
-    from mcp import Client
+    from mcp import Client, StdioServerParameters
     from PIL import Image, PngImagePlugin
     from pypdf import PdfWriter
     from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
@@ -77,6 +78,7 @@ class LocalScopeTests(unittest.TestCase):
                 flags, clean = capabilities.launch_flags(root, ui, root, original, "subscription")
                 self.assertEqual(flags, ["--mcp-config", str(ui / "native-mcp.json")])
                 self.assertEqual(clean, original)
+                self.assertEqual(json.loads((ui/"native-mcp.json").read_text())["mcpServers"]["codex_native"]["args"][0], "-I")
                 self.assertEqual(capabilities.launch_flags(root, ui, root, ["--strict-mcp-config"], "subscription")[0], [])
 
 
@@ -121,6 +123,10 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
         # Composition works without granting reads of all private artifacts.
         await self.services.image_request("Edit fixture", images=[metadata["artifact"]])
         other = NativeServices(self.root, self.work, client=self.services.client)
+        self.assertEqual(other.read_file(metadata["artifact"]), padded)  # Resume in the same workspace.
+        outside = NativeServices(self.root, self.root, client=self.services.client)
+        with self.assertRaises(CapabilityInputError): outside.read_file(metadata["artifact"])
+        Path(metadata["artifact"]).write_bytes(b"MODIFIED_FIXTURE")
         with self.assertRaises(CapabilityInputError): other.read_file(metadata["artifact"])
 
     async def test_async_transport_is_local_private_tls_bounded_and_never_redirects(self):
@@ -176,6 +182,55 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
             text = "".join(getattr(block, "text", "") for block in result.content)
             self.assertNotIn("SYNTHETIC_PRIVATE_VALUE", text)
             self.assertIn("withheld", text)
+
+    async def test_desktop_image_is_not_duplicated_in_text_and_coordinates_map_to_native_pixels(self):
+        import desktop_adapter
+        from mcp import types
+        identity = {"id": 123, "pid": 456, "created": "1", "executable": "synthetic-fixture"}
+        choice = {"format": 1, "enabled": True, "workspace": str(self.work.resolve()), "identity": identity}
+        runtime_bundle.private_dir(self.root)
+        runtime_bundle.write_file(self.root/"desktop.json", runtime_bundle.canonical(choice), 0o600)
+        class Scope:
+            def identity(inner, _window, **_kwargs): return identity
+        session = desktop_adapter.DesktopSession(self.root, self.work, scope=Scope())
+        output = io.BytesIO(); Image.new("RGB", (2560,1600), "blue").save(output, format="PNG")
+        encoded = base64.b64encode(output.getvalue()).decode()
+        requests = []
+        async def call(name, arguments):
+            requests.append((name,arguments))
+            return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps({"window": {"id": 123},
+                "screenshots": [{"id": "fixture-shot", "url": "DO_NOT_COPY_IMAGE_BASE64"}],
+                "accessibility": {"tree": "T"*70000}})), types.ImageContent(type="image",data=encoded,mime_type="image/png")])
+        session.call = call
+        result = await session.observe()
+        value = json.loads(result.content[0].text)
+        self.assertNotIn("DO_NOT_COPY_IMAGE_BASE64", result.content[0].text)
+        self.assertEqual(len(value["accessibility"]["tree"]), 64000)
+        self.assertEqual(value["truncated_fields"], ["tree"])
+        self.assertLessEqual(value["image_width"]*value["image_height"], 1_000_000)
+        with Image.open(io.BytesIO(base64.b64decode(result.content[1].data))) as image:
+            self.assertEqual(image.size, (value["image_width"],value["image_height"]))
+        await session.act(value["observation"], "click", {"x": value["image_width"]/2, "y": value["image_height"]/2})
+        self.assertEqual(requests[-1][1]["x"], 1280)
+        self.assertEqual(requests[-1][1]["y"], 800)
+
+    async def test_frozen_stdio_entry_ignores_workspace_pythonpath(self):
+        runtime_bundle.private_dir(self.root)
+        source = Path(__file__).resolve().parents[1]
+        for name in capabilities.SERVER_SOURCES:
+            runtime_bundle.write_file(self.root/name, (source/name).read_bytes(), 0o700)
+        snapshot = capabilities.freeze_server(self.root, "a"*64)
+        entry = self.root/"capabilities/servers"/snapshot/"native_tools.py"
+        marker = self.work/"UNTRUSTED_IMPORT_EXECUTED"
+        (self.work/"sitecustomize.py").write_text("from pathlib import Path\nPath("+repr(str(marker))+").write_text('unsafe')\n")
+        writer = PdfWriter(); writer.add_blank_page(width=200,height=200); writer.write(self.work/"blank.pdf")
+        params = StdioServerParameters(command=sys.executable, args=["-I",str(entry),"--root",str(self.root),"--workspace",str(self.work)],
+                                       env={"PYTHONPATH":str(self.work)}, cwd=self.work)
+        async with Client(params,read_timeout_seconds=30) as client:
+            result = await client.call_tool("document_extract", {"path":"blank.pdf"})
+            self.assertFalse(result.is_error)
+            self.assertIn('"total_pages":1', "".join(b.text for b in result.content if b.type=="text").replace(" ",""))
+        self.assertFalse(marker.exists())
 
     async def test_pdf_extracts_actual_page_text_and_marks_empty_pages(self):
         writer = PdfWriter(); page = writer.add_blank_page(width=200, height=200)

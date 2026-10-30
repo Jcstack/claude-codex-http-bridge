@@ -45,7 +45,7 @@ def main():
             names = ("mcp__codex_native__desktop_observe", "mcp__codex_native__desktop_action")
             prompt = ("Use ToolSearch to load the two codex_native desktop tools. Only the selected synthetic fixture window is authorized. "
                 "Observe it, set the observed Fixture input field to exactly DESKTOP_MODEL_READY, observe again, click Save fixture once, "
-                "and observe once more to verify the text. Use set_value and element click with the one-use observation. "
+                "and observe once more to verify the text. Use set_value and element click with click_count=1 and the one-use observation. "
                 "Do not use other tools, switch windows, activate anything, type into a terminal, record audio or retry an uncertain click. "
                 "Report whether you completed those actions.")
             started = time.monotonic()
@@ -75,6 +75,7 @@ def main():
                         "tool_calls": [block["name"] for block in uses], "failure_classifiers": failures,
                         "actions": [{"action": b.get("input", {}).get("action"),
                             "argument_keys": sorted(b.get("input", {}).get("arguments", {})),
+                            "click_count": b.get("input", {}).get("arguments", {}).get("click_count"),
                             "value_matches": b.get("input", {}).get("arguments", {}).get("value") == "DESKTOP_MODEL_READY"}
                             for b in uses if b["name"] == names[1]]}))
                 assert actual["value"] == "DESKTOP_MODEL_READY" and actual["count"] == 1, "The actual fixture UI state was not updated exactly once"
