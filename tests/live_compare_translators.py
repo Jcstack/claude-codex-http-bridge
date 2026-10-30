@@ -55,6 +55,10 @@ def stream(port, key, payload):
                 block["_arguments"] = block.get("_arguments", "") + delta["partial_json"]
             elif delta.get("type") == "text_delta":
                 block["text"] = block.get("text", "") + delta["text"]
+            elif delta.get("type") == "thinking_delta":
+                block["thinking"] = block.get("thinking", "") + delta["thinking"]
+            elif delta.get("type") == "signature_delta":
+                block["signature"] = block.get("signature", "") + delta["signature"]
             if delta.get("type") in ("text_delta", "input_json_delta", "thinking_delta"):
                 deltas.append(at)
     for block in blocks.values():

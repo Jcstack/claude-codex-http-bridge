@@ -38,6 +38,7 @@
 !upstream/patches/
 !upstream/patches/12d97cf-inline-tools-backport.patch
 !upstream/patches/12d97cf-deferred-tools.patch
+!upstream/patches/web-search-replay.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml

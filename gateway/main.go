@@ -100,13 +100,13 @@ func checkPrivateRoot(root string) error {
 		}
 		return nil
 	}
-	// Paths are data in the child environment, never interpolated into code.
-	script := `$ErrorActionPreference='Stop'; $a=Get-Acl -LiteralPath $env:CLAUDE_CODEX_INGRESS_ROOT; $u=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; if (!$a.AreAccessRulesProtected) {exit 21}; $n=0; foreach ($r in $a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {if ($r.AccessControlType -eq 'Allow') {$n++; if ($r.IdentityReference.Value -ne $u) {exit 22}}}; if ($n -eq 0) {exit 23}`
+	// Paths are data, never interpolated into code. Use the .NET ACL API so
+	// PowerShell 7's inherited module path cannot break Windows PowerShell 5.1.
+	script := `$ErrorActionPreference='Stop'; $a=[IO.Directory]::GetAccessControl($env:CLAUDE_CODEX_INGRESS_ROOT,[Security.AccessControl.AccessControlSections]::Access); $u=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; if (!$a.AreAccessRulesProtected) {exit 21}; $n=0; foreach ($r in $a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {if ($r.AccessControlType -eq 'Allow') {$n++; if ($r.IdentityReference.Value -ne $u) {exit 22}}}; if ($n -eq 0) {exit 23}`
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	script = "try { " + script + " } catch { [Console]::Error.WriteLine($_.Exception.GetType().FullName); [Console]::Error.WriteLine($_.FullyQualifiedErrorId); exit 24 }"
-	cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	cmd.Env = append(os.Environ(), "CLAUDE_CODEX_INGRESS_ROOT="+root)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		var failure *exec.ExitError

@@ -1,0 +1,250 @@
+diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
+index bc2bd3d..6200554 100644
+--- a/internal/translator/codex/claude/codex_claude_request.go
++++ b/internal/translator/codex/claude/codex_claude_request.go
+@@ -213,6 +213,13 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 				}
+ 
+ 				rawSignature := part.Get("signature").String()
++				if strings.HasPrefix(rawSignature, codexWebReplayPrefix) {
++					if item := decodeCodexWebReplay(rawSignature); item != nil {
++						flushMessage()
++						inputItems = append(inputItems, item)
++					}
++					return
++				}
+ 				if sigcompat.IsCodexCommentarySignatureMarker(rawSignature) {
+ 					appendCommentaryContent(part)
+ 					return
+diff --git a/internal/translator/codex/claude/codex_claude_response.go b/internal/translator/codex/claude/codex_claude_response.go
+index 5c28be1..b4cbc14 100644
+--- a/internal/translator/codex/claude/codex_claude_response.go
++++ b/internal/translator/codex/claude/codex_claude_response.go
+@@ -194,6 +194,12 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 		output = appendDeferredCodexStreamEvents(output, originalRequestRawJSON, param)
+ 		output = append(output, finalizeCodexThinkingBlock(params)...)
+ 		output = append(output, stopCodexTextBlock(params)...)
++		responseData.Get("output").ForEach(func(_, item gjson.Result) bool {
++			if item.Get("type").String() == "web_search_call" {
++				output = appendCodexWebSearchToolResult(output, params, gjson.Result{}, item)
++			}
++			return true
++		})
+ 		template, _ = sjson.SetBytes(template, "delta.stop_reason", mapCodexStopReasonToClaude(codexStopReason(responseData), params.HasEmittedToolUse))
+ 		template = setClaudeStopSequence(template, "delta.stop_sequence", responseData)
+ 		inputTokens, outputTokens, cachedTokens, cacheWriteTokens := extractResponsesUsage(responseData.Get("usage"))
+diff --git a/internal/translator/codex/claude/codex_claude_response_web_search.go b/internal/translator/codex/claude/codex_claude_response_web_search.go
+index 333e021..6a97f23 100644
+--- a/internal/translator/codex/claude/codex_claude_response_web_search.go
++++ b/internal/translator/codex/claude/codex_claude_response_web_search.go
+@@ -1,6 +1,7 @@
+ package claude
+ 
+ import (
++	"encoding/base64"
+ 	"encoding/json"
+ 	"fmt"
+ 	"strings"
+@@ -10,6 +11,49 @@ import (
+ 	"github.com/tidwall/sjson"
+ )
+ 
++// This internal envelope carries a native web-search output item through the
++// Claude transcript. It is not an encrypted reasoning signature or a credential.
++// Keeping state in the transcript makes replay independent of proxy memory.
++const codexWebReplayPrefix = "codex_web_search:v1:"
++const maxCodexWebReplayBytes = 1 << 20
++
++func validCodexWebReplay(item gjson.Result) bool {
++	if item.Get("type").String() != "web_search_call" || item.Get("id").String() == "" || item.Get("status").String() != "completed" {
++		return false
++	}
++	switch item.Get("action.type").String() {
++	case "search":
++		return item.Get("action.query").String() != "" || item.Get("action.queries.#").Int() > 0 || item.Get("action.sources.#").Int() > 0
++	case "open_page":
++		return item.Get("action.url").String() != ""
++	case "find":
++		return item.Get("action.url").String() != "" && item.Get("action.pattern").String() != ""
++	default:
++		return false
++	}
++}
++
++func decodeCodexWebReplay(signature string) []byte {
++	encoded := strings.TrimPrefix(signature, codexWebReplayPrefix)
++	if len(encoded) > base64.RawURLEncoding.EncodedLen(maxCodexWebReplayBytes) {
++		return nil
++	}
++	raw, err := base64.RawURLEncoding.DecodeString(encoded)
++	if err != nil || !json.Valid(raw) || !validCodexWebReplay(gjson.ParseBytes(raw)) {
++		return nil
++	}
++	return raw
++}
++
++func codexWebReplayBlock(item gjson.Result) []byte {
++	if len(item.Raw) > maxCodexWebReplayBytes || !validCodexWebReplay(item) {
++		return nil
++	}
++	block := []byte(`{"type":"thinking","thinking":"","signature":""}`)
++	block, _ = sjson.SetBytes(block, "signature", codexWebReplayPrefix+base64.RawURLEncoding.EncodeToString([]byte(item.Raw)))
++	return block
++}
++
+ func appendCodexWebSearchServerToolUse(output []byte, params *ConvertCodexResponseToClaudeParams, root, item gjson.Result) []byte {
+ 	toolUseID := codexWebSearchToolUseID(params, root, item)
+ 	if toolUseID == "" {
+@@ -21,10 +65,8 @@ func appendCodexWebSearchServerToolUse(output []byte, params *ConvertCodexRespon
+ 	query := codexWebSearchQuery(root, item)
+ 	alreadyStarted := false
+ 	if _, ok := params.WebSearchToolUseIDs[toolUseID]; ok {
+-		alreadyStarted = true
+-		if query == "" {
+-			return output
+-		}
++		// The previous block is closed. Never emit a delta at the next index.
++		return output
+ 	}
+ 
+ 	if !alreadyStarted {
+@@ -83,6 +125,19 @@ func appendCodexWebSearchToolResult(output []byte, params *ConvertCodexResponseT
+ 	output = translatorcommon.AppendSSEEventBytes(output, "content_block_stop", stop, 2)
+ 	params.WebSearchToolResultIDs[toolUseID] = struct{}{}
+ 	params.BlockIndex++
++	if block := codexWebReplayBlock(item); block != nil {
++		start := []byte(`{"type":"content_block_start","index":0,"content_block":{}}`)
++		start, _ = sjson.SetBytes(start, "index", params.BlockIndex)
++		start, _ = sjson.SetRawBytes(start, "content_block", []byte(`{"type":"thinking","thinking":""}`))
++		output = translatorcommon.AppendSSEEventBytes(output, "content_block_start", start, 2)
++		delta := []byte(`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":""}}`)
++		delta, _ = sjson.SetBytes(delta, "index", params.BlockIndex)
++		delta, _ = sjson.SetBytes(delta, "delta.signature", gjson.GetBytes(block, "signature").String())
++		output = translatorcommon.AppendSSEEventBytes(output, "content_block_delta", delta, 2)
++		stop, _ = sjson.SetBytes(stop, "index", params.BlockIndex)
++		output = translatorcommon.AppendSSEEventBytes(output, "content_block_stop", stop, 2)
++		params.BlockIndex++
++	}
+ 	if toolUseID == params.LastWebSearchToolUseID {
+ 		params.LastWebSearchToolUseID = ""
+ 	}
+@@ -178,7 +233,7 @@ func appendCodexWebSearchNonStreamBlocks(contentBlocks [][]byte, item gjson.Resu
+ 	emptyRoot := gjson.Result{}
+ 	query := codexWebSearchQuery(emptyRoot, item)
+ 	resultContent := codexWebSearchResultContent(emptyRoot, item)
+-	if query == "" && len(resultContent) == 0 {
++	if query == "" && len(resultContent) == 0 && !validCodexWebReplay(item) {
+ 		return contentBlocks
+ 	}
+ 
+@@ -196,6 +251,9 @@ func appendCodexWebSearchNonStreamBlocks(contentBlocks [][]byte, item gjson.Resu
+ 		resultBlock, _ = sjson.SetRawBytes(resultBlock, "content", resultContent)
+ 	}
+ 	contentBlocks = append(contentBlocks, resultBlock)
++	if block := codexWebReplayBlock(item); block != nil {
++		contentBlocks = append(contentBlocks, block)
++	}
+ 	seen[id] = struct{}{}
+ 	return contentBlocks
+ }
+diff --git a/internal/translator/codex/claude/codex_web_replay_test.go b/internal/translator/codex/claude/codex_web_replay_test.go
+new file mode 100644
+index 0000000..46ac626
+--- /dev/null
++++ b/internal/translator/codex/claude/codex_web_replay_test.go
+@@ -0,0 +1,95 @@
++package claude
++
++import (
++	"context"
++	"encoding/base64"
++	"strings"
++	"testing"
++
++	"github.com/tidwall/gjson"
++	"github.com/tidwall/sjson"
++)
++
++const replayFixture = `{"id":"ws_fixture","type":"web_search_call","status":"completed","encrypted_content":"synthetic-web-state","action":{"type":"search","query":"fixture","sources":[{"type":"url","url":"https://fixture.invalid/docs","title":"Fixture"}]}}`
++
++func TestWebReplaySurvivesTranslationWithoutProcessMemory(t *testing.T) {
++	response := []byte(`{"type":"response.completed","response":{"output":[` + replayFixture + `]}}`)
++	converted := ConvertCodexResponseToClaudeNonStream(context.Background(), "gpt-6.1-sol", nil, nil, response, nil)
++	request := []byte(`{"messages":[{"role":"assistant","content":[]}]}`)
++	request, _ = sjson.SetRawBytes(request, "messages.0.content", []byte(gjson.GetBytes(converted, "content").Raw))
++	replayed, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", request, false)
++	if err != nil || gjson.GetBytes(replayed, "input.0").Raw != replayFixture {
++		t.Fatalf("native search item changed on replay: %s (%v)", replayed, err)
++	}
++	if gjson.GetBytes(replayed, "input.#").Int() != 1 {
++		t.Fatal("search state was duplicated")
++	}
++	request, _ = sjson.SetBytes(request, "messages.0.role", "user")
++	replayed, _ = ConvertClaudeRequestToCodex("gpt-6.1-sol", request, false)
++	if strings.Contains(string(replayed), `"web_search_call"`) {
++		t.Fatal("user content must not inject an assistant search envelope")
++	}
++}
++
++func TestWebReplayRejectsOtherItemKindsAndOversizedState(t *testing.T) {
++	for _, raw := range []string{`{"type":"function_call","name":"shell"}`, `{}`, "not-json"} {
++		if decodeCodexWebReplay(codexWebReplayPrefix+base64.RawURLEncoding.EncodeToString([]byte(raw))) != nil {
++			t.Fatal("accepted invalid replay envelope")
++		}
++	}
++	if decodeCodexWebReplay(codexWebReplayPrefix+strings.Repeat("A", 2*maxCodexWebReplayBytes)) != nil {
++		t.Fatal("accepted oversized replay envelope")
++	}
++}
++
++func TestWebReplayStreamBlocksRemainBalancedOnDuplicateAndTerminalEvents(t *testing.T) {
++	for _, terminalOnly := range []bool{false, true} {
++		var param any
++		events := []string{`{"type":"response.created","response":{"id":"resp_fixture"}}`}
++		if !terminalOnly {
++			for range 2 {
++				events = append(events, `{"type":"response.output_item.done","item":`+replayFixture+`}`)
++			}
++		}
++		events = append(events, `{"type":"response.completed","response":{"output":[`+replayFixture+`]}}`)
++		open := map[int64]bool{}
++		seen := map[int64]bool{}
++		carriers := 0
++		for _, event := range events {
++			for _, chunk := range ConvertCodexResponseToClaude(context.Background(), "gpt-6.1-sol", nil, nil, []byte("data: "+event), &param) {
++				for _, line := range strings.Split(string(chunk), "\n") {
++					if !strings.HasPrefix(line, "data: ") {
++						continue
++					}
++					data := gjson.Parse(strings.TrimPrefix(line, "data: "))
++					idx := data.Get("index").Int()
++					switch data.Get("type").String() {
++					case "content_block_start":
++						if seen[idx] {
++							t.Fatal("block index reused")
++						}
++						open[idx], seen[idx] = true, true
++					case "content_block_delta":
++						if !open[idx] {
++							t.Fatal("delta outside an open block")
++						}
++						if data.Get("delta.type").String() == "signature_delta" {
++							if string(decodeCodexWebReplay(data.Get("delta.signature").String())) != replayFixture {
++								t.Fatal("stream carrier changed")
++							}
++							carriers++
++						}
++					case "content_block_stop":
++						if !open[idx] {
++							t.Fatal("stop outside an open block")
++						}
++						delete(open, idx)
++					}
++				}
++			}
++		}
++		if len(open) != 0 || carriers != 1 {
++			t.Fatalf("unbalanced/duplicate search state: %d/%d", len(open), carriers)
++		}
++	}
++}
