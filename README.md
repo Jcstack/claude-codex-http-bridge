@@ -9,7 +9,7 @@ Claude Code ──Anthropic Messages──> 127.0.0.1 + private local key
 
 The repository contains source and an example config only. It does **not** contain the upstream proxy binary, OAuth credentials, API keys, prompts, transcripts, or runtime logs.
 
-The installed proxy remains pinned to the reviewed upstream release. An isolated candidate adds cache-preserving dynamic tools and native search-state replay; it is not installed by the normal launcher. CI uses no model credentials, and local live probes use only the existing service's localhost key. See the [community review and release gate](COMMUNITY_REVIEW.md), [measured cache and rolling-backend results](OPERATIONS.md), [model-versus-harness evidence](MODEL_HARNESS_EVIDENCE.md), and [local GPT harness pilot](HARNESS_PILOT.md).
+The default installer remains pinned to the reviewed upstream release. A source-locked runtime bundle adds cache-preserving dynamic tools and native search-state replay behind a stable TLS listener. It can be activated without replacing the original service used by existing sessions. CI uses no model credentials, and local live probes use only the existing service's localhost key. See [runtime rollout](RUNTIME.md), the [community review and release gate](COMMUNITY_REVIEW.md), [measured cache and rolling-backend results](OPERATIONS.md), [model-versus-harness evidence](MODEL_HARNESS_EVIDENCE.md), and [local GPT harness pilot](HARNESS_PILOT.md).
 
 ## 中文快速开始
 
@@ -84,6 +84,7 @@ claude-codex                         # newest catalog-listed Sol
 claude-codex --model gpt-6-sol       # exact model ID
 claude-codex --model gpt-5.6-sol --effort max
 claude-codex bridge status            # localhost service state
+claude-codex bridge reload            # replace a managed backend and drain old requests
 claude-codex diagnostics --hours 2    # read-only cache, latency, failures and compaction
 claude-codex bridge stop              # after background work has finished
 ```
@@ -95,6 +96,8 @@ Inside Claude Code:
 - `/autocompact` shows the configured window for the selected model. The launcher supplies a per-model setting, so `/model` switches also switch that setting. Claude reserves space internally and may compact earlier. Its higher-priority launch setting cannot currently be changed by `/autocompact` within that session.
 
 The model list, context windows, compaction settings and HUD mapping come from the authenticated catalog at session start. Discovery uses a valid `max_context_window`, preserves `context_window` as the default, and otherwise uses the declared default. Model IDs and context sizes remain dynamic. New sessions refresh these values; running sessions retain their startup settings. The proxy release itself stays pinned until its checksum and compatibility have been reviewed.
+
+With an activated [reviewed runtime bundle](RUNTIME.md), new launches use the stable TLS endpoint automatically. Existing direct sessions retain their original service. `bridge reload` keeps the TLS listener and active model streams; replacing that listener or the legacy origin itself is a separate migration. `diagnostics` reports origin and managed backend logs separately, without reading keys or summing duplicate layer counts.
 
 Claude Code streams partial model output through the bridge. See [STREAMING.md](STREAMING.md) for what was measured and how ordinary SSE differs from GPT-6 mid-turn steering and GPT-Live voice.
 

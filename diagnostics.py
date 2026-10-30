@@ -22,7 +22,8 @@ LINE_LIMIT = 2 * 1024 * 1024
 GIN = re.compile(r'^\[([^]]+)\].*?\]\s+(\d{3})\s*\|\s*([^|]+)\|.*?\|\s*(GET|POST|DELETE)\s+"([^"]+)"')
 ERRORS = {"tls_handshake": "tls handshake", "eof": "eof",
           "timeout": "timeout", "cancelled": "context canceled"}
-ENDPOINTS = {"/v1/messages", "/v1/responses", "/v1/models", "/v1/messages/count_tokens"}
+ENDPOINTS = {"/v1/messages", "/v1/responses", "/v1/models", "/v1/messages/count_tokens",
+             "/v1/responses/compact", "/v1/images/generations", "/v1/images/edits"}
 
 
 def lines(path: Path):
@@ -184,6 +185,26 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
             result["service"]["listener_matches_state"] = None
         if log.is_file() and not log.is_symlink() and not log.parent.is_symlink():
             result["proxy"] = proxy_summary(log, since)
+    if route == "subscription":
+        try:
+            import rolling_runtime
+            managed = rolling_runtime.state(root)
+            if managed:
+                detail = {"recorded": True, "listener_matches_state": launcher.listener_pids(managed["port"]) == {managed["pid"]},
+                          "backends": [], "limits": "Layers may record the same inference; counts are not additive. Only the 32 most recent private backend logs are inspected."}
+                managed_root = root / "runtime-managed"
+                if managed_root.is_symlink(): raise RuntimeError("Unsafe managed log root")
+                logs = [p for p in managed_root.glob("g-*/proxy.log") if p.is_file() and not p.is_symlink()
+                        and not p.parent.is_symlink() and re.fullmatch(r"g-[a-f0-9]{24}", p.parent.name)]
+                logs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                for log in logs[:32]:
+                    summary = proxy_summary(log, since)
+                    if summary["completed_http_statuses"] or summary["transport_error_mentions"]:
+                        detail["backends"].append({"generation_tag": hashlib.sha256(log.parent.name.encode()).hexdigest()[:12],
+                                                  "current": log.parent.name == managed["current"], **summary})
+                result["managed"] = detail
+        except (OSError, RuntimeError, ValueError, ImportError):
+            result["managed"] = {"metadata_unavailable": True}
     paths = []
     for directory in claude_roots:
         projects = directory / "projects"

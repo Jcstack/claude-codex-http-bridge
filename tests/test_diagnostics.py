@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import diagnostics
 import launcher
+import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -80,6 +81,22 @@ class DiagnosticsTests(unittest.TestCase):
                                              datetime.now(timezone.utc))
             self.assertFalse(report["service"]["recorded"])
             self.assertFalse(root.exists())
+
+    def test_managed_backend_logs_remain_metadata_only_and_do_not_read_keys(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            generation = "g-" + "a" * 24
+            directory = root / "runtime-managed" / generation
+            directory.mkdir(parents=True)
+            (directory / "proxy.log").write_text('[2026-01-02 12:00:00] [fixture] [info] [gin.go:1] 503 | 2ms | 127.0.0.1 | POST "/v1/messages?key=PRIVATE_SECRET"\n', encoding="utf-8")
+            with patch.object(rolling_runtime, "state", return_value={"pid": 123, "port": 12345, "current": generation}), \
+                 patch.object(rolling_runtime, "private_key", side_effect=AssertionError("must not read keys")), \
+                 patch.object(launcher, "listener_pids", return_value={123}):
+                report = diagnostics.collect(root, "subscription", [], datetime(2026, 1, 1, tzinfo=timezone.utc))
+            self.assertTrue(report["managed"]["listener_matches_state"])
+            self.assertEqual(report["managed"]["backends"][0]["completed_http_statuses"], {"503": 1})
+            for private in ("PRIVATE_SECRET", generation, "127.0.0.1", str(root)):
+                self.assertNotIn(private, json.dumps(report))
 
     def test_large_blob_does_not_hide_next_metadata_record(self):
         with tempfile.TemporaryDirectory() as temporary:
