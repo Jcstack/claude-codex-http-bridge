@@ -1,9 +1,9 @@
 diff --git a/internal/translator/codex/claude/codex_claude_deferred_tools_test.go b/internal/translator/codex/claude/codex_claude_deferred_tools_test.go
 new file mode 100644
-index 0000000..bf634c9
+index 0000000..3605283
 --- /dev/null
 +++ b/internal/translator/codex/claude/codex_claude_deferred_tools_test.go
-@@ -0,0 +1,226 @@
+@@ -0,0 +1,241 @@
 +package claude
 +
 +import (
@@ -202,11 +202,26 @@ index 0000000..bf634c9
 +		{"role":"system","content":[{"type":"tool_removal","tool":{"type":"tool_reference","name":"Bash"}}]}]}`
 +	if _, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(forced), false); err == nil {
 +		t.Fatal("forcing a removed tool must fail closed")
++	} else if policy, ok := err.(*claudeToolPolicyError); !ok || policy.StatusCode() != 400 || !policy.IsRequestScoped() {
++		t.Fatalf("invalid tool policy must be a request-scoped 400: %v", err)
 +	}
 +	unknown := `{"tools":[{"name":"Read","input_schema":{"type":"object"}}],"messages":[
 +		{"role":"system","content":[{"type":"tool_removal","tool":{"type":"tool_reference","name":"Unknown"}}]}]}`
 +	if _, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(unknown), false); err == nil {
 +		t.Fatal("unknown tool removal must not silently disappear")
++	}
++}
++
++func TestConvertClaudeRequestToCodex_RemovalKeepsDeferredSearchController(t *testing.T) {
++	request := `{"tools":[{"name":"ToolSearch","defer_loading":true,"input_schema":{"type":"object"}},
++		{"name":"Read","input_schema":{"type":"object"}}],"messages":[
++		{"role":"system","content":[{"type":"tool_removal","tool":{"type":"tool_reference","name":"Read"}}]}]}`
++	converted, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", []byte(request), false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if gjson.GetBytes(converted, "tool_choice.tools.0.name").String() != "ToolSearch" {
++		t.Fatalf("search controller was accidentally hidden: %s", gjson.GetBytes(converted, "tool_choice").Raw)
 +	}
 +}
 +
@@ -231,7 +246,7 @@ index 0000000..bf634c9
 +	return false
 +}
 diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
-index 5842e50..4ed1080 100644
+index 5842e50..bc2bd3d 100644
 --- a/internal/translator/codex/claude/codex_claude_request.go
 +++ b/internal/translator/codex/claude/codex_claude_request.go
 @@ -109,6 +109,7 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
@@ -383,7 +398,7 @@ index 5842e50..4ed1080 100644
  	return tool
  }
  
-@@ -781,6 +824,162 @@ func convertClaudeSystemAdditionalTools(content, toolsResult gjson.Result, decla
+@@ -781,6 +824,171 @@ func convertClaudeSystemAdditionalTools(content, toolsResult gjson.Result, decla
  	return item, true
  }
  
@@ -391,6 +406,9 @@ index 5842e50..4ed1080 100644
 +// a tool. Responses allowed_tools expresses the effective callable set without
 +// rewriting that prefix or any historical additional_tools input items.
 +func claudeToolChoiceAfterRemovals(root gjson.Result, toolNameMap map[string]string) ([]byte, bool, error) {
++	if !strings.Contains(root.Raw, "tool_removal") && !strings.Contains(root.Raw, `\u`) && !strings.Contains(root.Raw, `\U`) {
++		return nil, false, nil
++	}
 +	definitions := make(map[string]gjson.Result)
 +	active := make(map[string]bool)
 +	var order []string
@@ -409,7 +427,7 @@ index 5842e50..4ed1080 100644
 +	}
 +	if tools := root.Get("tools"); tools.IsArray() {
 +		for _, def := range tools.Array() {
-+			declare(def, def.Get("defer_loading").Type != gjson.True)
++			declare(def, def.Get("defer_loading").Type != gjson.True || def.Get("name").String() == "ToolSearch")
 +		}
 +	}
 +
@@ -476,7 +494,7 @@ index 5842e50..4ed1080 100644
 +				if typeName == "tool_removal" {
 +					removed = true
 +					if !definitions[name].IsObject() {
-+						return nil, true, fmt.Errorf("tool_removal references unknown tool %q", name)
++						return nil, true, &claudeToolPolicyError{fmt.Sprintf("tool_removal references unknown tool %q", name)}
 +					}
 +					active[name] = false
 +				} else if def := definitions[name]; def.IsObject() &&
@@ -501,7 +519,7 @@ index 5842e50..4ed1080 100644
 +	if choiceType == "tool" {
 +		name := choice.Get("name").String()
 +		if !active[name] {
-+			return nil, true, fmt.Errorf("tool_choice forces removed or unavailable tool %q", name)
++			return nil, true, &claudeToolPolicyError{fmt.Sprintf("tool_choice forces removed or unavailable tool %q", name)}
 +		}
 +		return convertClaudeToolChoiceToCodex(choice, toolNameMap, buildClaudeWebSearchToolNameSet(root.Get("tools"))), true, nil
 +	}
@@ -529,7 +547,7 @@ index 5842e50..4ed1080 100644
 +	}
 +	if len(allowed) == 0 {
 +		if choiceType == "any" {
-+			return nil, true, fmt.Errorf("tool_choice requires a tool after all tools were removed")
++			return nil, true, &claudeToolPolicyError{"tool_choice requires a tool after all tools were removed"}
 +		}
 +		return []byte(`"none"`), true, nil
 +	}
@@ -542,6 +560,12 @@ index 5842e50..4ed1080 100644
 +	out, _ = sjson.SetRawBytes(out, "tools", translatorcommon.JoinRawArray(allowed))
 +	return out, true, nil
 +}
++
++type claudeToolPolicyError struct{ message string }
++
++func (e *claudeToolPolicyError) Error() string         { return e.message }
++func (e *claudeToolPolicyError) StatusCode() int       { return 400 }
++func (e *claudeToolPolicyError) IsRequestScoped() bool { return true }
 +
  func collectClaudeDeclaredToolNames(rootResult gjson.Result, hasToolAddition bool) []string {
  	var names []string

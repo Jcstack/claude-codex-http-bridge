@@ -16,6 +16,8 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -144,9 +146,34 @@ def probe(binary: Path) -> dict[str, bool]:
                     "tools": [tool("ToolSearch"), tool("Read"),
                               tool("mcp__demo__lookup", deferred=True)],
                 })
-                if len(Upstream.requests) != 4:
+                forced_removed_rejected = False
+                invalid_payload = {
+                    **base, "tools": [tool("Read")],
+                    "tool_choice": {"type": "tool", "name": "Read"},
+                    "messages": [{"role": "user", "content": "Synthetic fixture"}, {
+                        "role": "system", "content": [{
+                            "type": "tool_removal", "tool": {
+                                "type": "tool_reference", "name": "Read"},
+                        }],
+                    }],
+                }
+                invalid_request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/v1/messages",
+                    data=json.dumps(invalid_payload).encode(),
+                    headers={"Authorization": "Bearer " + key_path.read_text().strip(),
+                             "Content-Type": "application/json",
+                             "anthropic-version": "2023-06-01"},
+                )
+                try:
+                    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    with opener.open(invalid_request, timeout=10) as response:
+                        response.read()
+                except urllib.error.HTTPError as error:
+                    forced_removed_rejected = error.code == 400
+                    error.close()
+                if len(Upstream.requests) not in {4, 5}:
                     raise RuntimeError("Candidate proxy did not forward all synthetic requests")
-                addition, before, after, removed = [entry[2] for entry in Upstream.requests]
+                addition, before, after, removed = [entry[2] for entry in Upstream.requests[:4]]
                 before_names = {entry.get("name") for entry in before.get("tools", [])}
                 after_names = {entry.get("name") for entry in after.get("tools", [])}
                 removed_names = {entry.get("name") for entry in removed.get("tools", [])}
@@ -167,7 +194,8 @@ def probe(binary: Path) -> dict[str, bool]:
                         and "mcp__demo__lookup" not in allowed
                         and {"ToolSearch", "Read"}.issubset(allowed)
                         and before_names == removed_names
-                        and "mcp__demo__lookup" in names_in_additional_tools(removed),
+                        and "mcp__demo__lookup" in names_in_additional_tools(removed)
+                        and forced_removed_rejected and len(Upstream.requests) == 4,
                 }
             finally:
                 process.terminate()
