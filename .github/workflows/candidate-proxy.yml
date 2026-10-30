@@ -55,6 +55,8 @@ jobs:
           go mod verify
           go test ./internal/translator/codex/claude
           go test ./internal/runtime/executor/helps
+          cp ../tests/auth_handoff_fixture.go sdk/cliproxy/auth/bridge_handoff_local_test.go
+          go test -timeout 60s -run '^TestBridgeAccountHandoffKeepsAdmittedStream$' ./sdk/cliproxy/auth
           go build -o "../${{ matrix.binary }}" ./cmd/server
           cd ../gateway
           go test -timeout 60s ./...

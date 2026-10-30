@@ -38,6 +38,8 @@ claude-codex --model gpt-6.1-sol
 
 在会话中用 `/model` 切换动态发现的模型，用 `/effort` 调整推理强度。`/background` 需要的本机代理会继续运行；任务结束后可运行 `claude-codex bridge stop`。原有 `claude` 命令仍按原来的账号与设置运行。若本机已有 `claude-codex` 命令，安装器会停止；确认要改用这个仓库的版本后运行 `./install.sh --replace-command`。OAuth 文件和运行日志只留在本机安装目录，不进入 Git。
 
+运行中的会话可[热切换 Codex 账号](ACCOUNTS.md)：`claude-codex account login work` 授权并暂存新账号，`claude-codex account use work` 验证后切换后续请求，`claude-codex account list` 查看与回退。旧账号保留为停用备份，已开始的输出继续完成；服务、Claude 会话和原生 Codex 登录均不重启或替换。共用该代理的会话会一起切换；提示缓存可能需要重新预热。
+
 可先使用不需要额外项目 API key 的[原生能力包](NATIVE_TOOLS.md)：`claude-codex tools install`，然后正常启动。它通过 MCP 提供图片生成/编辑、PDF 提取和 Realtime 音频；`--no-native-tools` 单次关闭。桌面需另运行 `claude-codex desktop install`、`desktop windows`、`desktop select WINDOW_ID`，仅授权当前项目的指定窗口；`desktop disable` 撤销。Claude Code 继续负责权限，安装不自动开启系统权限、麦克风或全屏采集。当前仍不代表所有 GPT-Live、原生压缩或 Opus 等效能力通过认证。
 
 可选正式 API 路由（目前为 pilot，需自行创建项目密钥并核对账单）：
@@ -60,7 +62,7 @@ API 路由与订阅 OAuth、服务端口及配额缓存分开。`api key set` �
 - Python 3.10+; on macOS/Linux/WSL, `bash` and `lsof`
 - A ChatGPT account with Codex model access
 - Or, for `claude-codex api`, an OpenAI API project key with access to supported GPT models
-- Optional for accurate HUD subscription quota: native Codex CLI signed into the same single ChatGPT account as the bridge
+- Optional quota fallback: native Codex CLI signed into the selected bridge account; a different selected account uses its fixed ChatGPT usage endpoint
 
 ## Install
 
@@ -107,7 +109,7 @@ On 2026-10-30 Astra advertised a **272,000 default and 872,000 maximum**; Sol/Te
 
 ### Claude HUD and other status-line plugins
 
-The launcher reads the existing user `statusLine.command` and passes Claude Code a private per-launch settings file that runs that same command through `statusline_adapter.py`. The adapter corrects the context size and percentage for the **current** Codex model, including after `/model` switches. It removes Claude-list-price dollars, Anthropic prompt-cache timers, and Anthropic rate-limit fields because they do not describe this Codex route. When native Codex CLI is installed and signed into the **same single ChatGPT account** as the bridge, it uses the official `account/rateLimits/read` RPC to supply actual Codex 5-hour and/or weekly windows to HUD. It never invents a window that the account does not report. A private local cache holds only percentages, reset times, and an account fingerprint for five minutes. Other status-line fields and the user's original command are preserved; the user's settings file is not changed. The per-launch file remains available to detached background sessions and is removed by `claude-codex bridge stop`. Set `CLAUDE_CODEX_STATUSLINE_ADAPTER=0` before launch to disable the adapter. Run `claude-codex usage` to see exactly which windows your account reports.
+The launcher reads the existing user `statusLine.command` and passes Claude Code a private per-launch settings file that runs that same command through `statusline_adapter.py`. The adapter corrects the context size and percentage for the **current** Codex model, including after `/model` switches. It removes Claude-list-price dollars, Anthropic prompt-cache timers, and Anthropic rate-limit fields because they do not describe this Codex route. It follows the **selected bridge account**, excluding disabled backups. It reads the official `account/rateLimits/read` RPC when native Codex uses that account, or that account's fixed ChatGPT usage endpoint otherwise. It never invents a missing window or displays a cache from another account. A private local cache holds only percentages, reset times, and an account fingerprint for five minutes. Other status-line fields and the user's original command are preserved; the user's settings file is not changed. The per-launch file remains available to detached background sessions and is removed by `claude-codex bridge stop`. Set `CLAUDE_CODEX_STATUSLINE_ADAPTER=0` before launch to disable the adapter. Run `claude-codex usage` to see exactly which windows your account reports.
 
 Plain `claude` remains separate and uses its ordinary provider settings. `claude-codex models` is a catalog listing, not an entitlement guarantee; a completed inference request confirms access to a selected model.
 

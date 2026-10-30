@@ -13,6 +13,7 @@
 !OPERATIONS.md
 !RUNTIME.md
 !NATIVE_TOOLS.md
+!ACCOUNTS.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -26,6 +27,7 @@
 !run-claude-codex.sh
 !bridge_models.py
 !api_profile.py
+!accounts.py
 !rolling_runtime.py
 !runtime_bundle.py
 !capabilities.py
@@ -40,6 +42,7 @@
 !windows_acl.py
 !tests/
 !tests/*.py
+!tests/auth_handoff_fixture.go
 !tests/claude-client/
 !tests/claude-client/package.json
 !tests/claude-client/package-lock.json

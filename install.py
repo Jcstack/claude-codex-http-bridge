@@ -247,7 +247,7 @@ def main() -> None:
     if windows:
         windows_acl.lock([root / "auth", root / "bin"])
     for filename in ("bridge_models.py", "launcher.py", "diagnostics.py", "statusline_adapter.py", "codex_usage.py",
-                     "api_profile.py", "rolling_runtime.py", "runtime_bundle.py", "capabilities.py",
+                     "api_profile.py", "accounts.py", "rolling_runtime.py", "runtime_bundle.py", "capabilities.py",
                      "native_client.py", "native_services.py", "native_tools.py", "requirements-capabilities.lock",
                      "desktop_adapter.py", "desktop_scope.py", "desktop_windows.py",
                      "webfetch_pdf_guard.py",

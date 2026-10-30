@@ -25,6 +25,8 @@ HELPER = ROOT / "bridge_models.py"
 
 
 def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
+    if arguments and arguments[0] == "account":
+        return "account", "", arguments[1:]
     if arguments and arguments[0] == "tools":
         return "tools", "", arguments[1:]
     if arguments and arguments[0] == "desktop":
@@ -544,6 +546,7 @@ def main() -> int:
     if mode == "help":
         print("Usage: claude-codex [api] [--model MODEL_ID|sol|astra|terra|luna] [Claude Code options]")
         print("Subscription: claude-codex codex-login; claude-codex models; claude-codex usage.")
+        print("Independent accounts: claude-codex account login ALIAS; account check ALIAS; account use ALIAS; account list.")
         print("Direct OpenAI API: claude-codex api key set; claude-codex api models; claude-codex api --model sol.")
         print("Run claude-codex [api] bridge start | status | stop to manage each private localhost service.")
         print("Reviewed runtime: claude-codex bridge upgrade BUNDLE; bridge reload drains replaced backends.")
@@ -557,6 +560,10 @@ def main() -> int:
         import diagnostics
         return diagnostics.main(claude_args, root=ROOT, route=route)
     helper_output("verify")
+    if mode == "account":
+        if route != "subscription": raise ValueError("Account selection uses the Codex subscription profile")
+        import accounts
+        return accounts.main(claude_args, root=ROOT)
     if mode == "tools":
         if route != "subscription": raise ValueError("Native tools use the subscription profile")
         import capabilities
@@ -599,7 +606,9 @@ def main() -> int:
         print(f"{label} bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
         return 0
     if mode == "login":
-        return subprocess.call([str(PROXY), "-config", str(ROOT / "config.yaml"), "-codex-login"], cwd=ROOT)
+        import accounts
+        accounts.initial_login(ROOT)
+        return 0
     claude = os.environ.get("CLAUDE_CODEX_CLAUDE_BIN") or shutil.which("claude")
     if mode != "models" and (not claude or not shutil.which(claude)):
         raise RuntimeError("Claude Code executable not found; set CLAUDE_CODEX_CLAUDE_BIN to its path")
