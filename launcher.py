@@ -143,6 +143,7 @@ def claude_environment(port: int, key: str, model: str,
     environment = os.environ.copy()
     for name in (
         "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+        "ANTHROPIC_MODEL",
         "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS", "CLAUDE_CODE_SUBAGENT_MODEL",
         "CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
         "DISABLE_COMPACT", "CLAUDE_CODE_EXTRA_BODY",
@@ -222,6 +223,7 @@ def session_settings(base: Path, windows: dict[str, int], directory: Path,
     profile_path = directory / "statusline-profile.json"
     settings_path = directory / "settings.json"
     profile = {"context_windows": windows}
+    profile.update({"remember_model": True, "route": route})
     if route == "subscription":
         profile["usage_cache"] = str(directory.parent / "codex-usage.json")
     private_json(profile_path, profile)
@@ -468,11 +470,19 @@ def bridge_stop(route: str = "subscription") -> int:
 
 
 def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
-                route: str = "subscription") -> int:
+                route: str = "subscription", *, explicit_model: bool = True) -> int:
     runtime, state, created = ensure_service(route=route)
     environment = service_environment(state, runtime, route)
     if mode == "models":
         return subprocess.call([sys.executable, str(HELPER), "list"], env=environment)
+    resume_without_model = False
+    if not explicit_model:
+        import session_models
+        resuming, remembered = session_models.restore(ROOT, claude_args, Path.cwd(), route)
+        if remembered:
+            selected = remembered
+        elif resuming:
+            resume_without_model = True
     model_info = helper_output("prepare", selected, environment=environment).split("\t")
     if len(model_info) != 5:
         raise RuntimeError("Model helper returned an invalid result")
@@ -498,7 +508,8 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         settings_path = rolling_runtime.client_settings(settings_path, claude_environment_values, directory)
     label = "OpenAI API" if route == "api" else "Codex"
     print(
-        f"{label} bridge active on {claude_environment_values['ANTHROPIC_BASE_URL']}: {model}. "
+        f"{label} bridge active on {claude_environment_values['ANTHROPIC_BASE_URL']}: "
+        f"{'native resume selection; fallback ' if resume_without_model else ''}{model}. "
         f"Route context {context} tokens; auto-compaction {compact} tokens for this model.",
         file=sys.stderr,
     )
@@ -510,7 +521,8 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
     if (ROOT / "capabilities.json").exists() or any(value in claude_args for value in ("--native-tools", "--no-native-tools")):
         import capabilities
         capability_flags, claude_args = capabilities.launch_flags(ROOT, directory, Path.cwd(), claude_args, route)
-    command = [claude, *capability_flags, "--settings", str(settings_path), "--model", model, *claude_args]
+    model_flags = [] if resume_without_model else ["--model", model]
+    command = [claude, *capability_flags, "--settings", str(settings_path), *model_flags, *claude_args]
     if platform.system() != "Windows":
         # Replace the Python launcher so tmux sees Claude Code as the foreground process.
         # The localhost service is independent and must remain alive for background agents.
@@ -612,7 +624,9 @@ def main() -> int:
     claude = os.environ.get("CLAUDE_CODEX_CLAUDE_BIN") or shutil.which("claude")
     if mode != "models" and (not claude or not shutil.which(claude)):
         raise RuntimeError("Claude Code executable not found; set CLAUDE_CODEX_CLAUDE_BIN to its path")
-    return run_session(mode, selected, claude_args, claude, route)
+    before_separator = arguments[:arguments.index("--")] if "--" in arguments else arguments
+    explicit_model = any(value == "--model" or value.startswith("--model=") for value in before_separator)
+    return run_session(mode, selected, claude_args, claude, route, explicit_model=explicit_model)
 
 
 if __name__ == "__main__":

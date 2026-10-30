@@ -75,6 +75,12 @@ def main() -> int:
     try:
         payload = json.loads(raw)
         if isinstance(payload, dict):
+            if profile.get("remember_model"):
+                try:
+                    import session_models
+                    session_models.record(Path(__file__).resolve().parent, payload, windows, profile.get("route", "subscription"))
+                except (OSError, RuntimeError, ValueError):
+                    pass
             raw = (json.dumps(corrected_payload(payload, windows, limits), separators=(",", ":")) + "\n").encode()
     except (UnicodeDecodeError, ValueError):
         pass

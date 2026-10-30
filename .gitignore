@@ -22,6 +22,7 @@
 !launcher.py
 !diagnostics.py
 !statusline_adapter.py
+!session_models.py
 !codex_usage.py
 !webfetch_pdf_guard.py
 !run-claude-codex.sh

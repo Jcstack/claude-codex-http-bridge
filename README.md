@@ -38,6 +38,8 @@ claude-codex --model gpt-6.1-sol
 
 在会话中用 `/model` 切换动态发现的模型，用 `/effort` 调整推理强度。`/background` 需要的本机代理会继续运行；任务结束后可运行 `claude-codex bridge stop`。原有 `claude` 命令仍按原来的账号与设置运行。若本机已有 `claude-codex` 命令，安装器会停止；确认要改用这个仓库的版本后运行 `./install.sh --replace-command`。OAuth 文件和运行日志只留在本机安装目录，不进入 Git。
 
+`--resume 会话ID`、`-r 会话ID` 和 `--continue` 会恢复本地元数据中最后观察到的 GPT 模型；显式 `--model` 始终优先。HUD 中后来选择的模型也会保存在本机的私有记录里，不保存提示词或原文。原生恢复选择器仍由 Claude Code 处理，启动器不会再强行附加默认 Sol；存在重名等歧义时不猜测。恢复后仍按当前账号目录核验模型是否可用。
+
 运行中的会话可[热切换 Codex 账号](ACCOUNTS.md)：`claude-codex account login work` 授权并暂存新账号，`claude-codex account use work` 验证后切换后续请求，`claude-codex account list` 查看与回退。旧账号保留为停用备份，已开始的输出继续完成；服务、Claude 会话和原生 Codex 登录均不重启或替换。共用该代理的会话会一起切换；提示缓存可能需要重新预热。
 
 可先使用不需要额外项目 API key 的[原生能力包](NATIVE_TOOLS.md)：`claude-codex tools install`，然后正常启动。它通过 MCP 提供图片生成/编辑、PDF 提取和 Realtime 音频；`--no-native-tools` 单次关闭。桌面需另运行 `claude-codex desktop install`、`desktop windows`、`desktop select WINDOW_ID`，仅授权当前项目的指定窗口；`desktop disable` 撤销。Claude Code 继续负责权限，安装不自动开启系统权限、麦克风或全屏采集。当前仍不代表所有 GPT-Live、原生压缩或 Opus 等效能力通过认证。

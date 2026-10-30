@@ -14,6 +14,10 @@ import sys
 import tempfile
 import threading
 import uuid
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import session_models
 
 
 class FixtureServer(ThreadingHTTPServer):
@@ -130,6 +134,14 @@ def main():
             resumed = run("Report the fixture key.", ["--resume", sid, "--model", "gpt-6.1-terra", "--effort", "high", "--tools", ""])
             assert resumed and all(r.get("model") == "gpt-6.1-terra" and r.get("output_config", {}).get("effort") == "high" for r in resumed)
             assert "violet-73" in json.dumps(resumed[0].get("messages"))
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(config)}):
+                requested, restored = session_models.restore(root, ["--resume", sid], work, "subscription")
+                assert requested and restored == "gpt-6.1-terra"
+                _, continued = session_models.restore(root, ["--continue"], work, "subscription")
+                assert continued == restored
+            auto = run("Report the fixture key after restoring its model.",
+                       ["--resume", sid, "--model", restored, "--tools", ""])
+            assert auto and all(r.get("model") == "gpt-6.1-terra" for r in auto)
             server.mode = "read"
             read = run("Read fixture.txt.", ["--model", "gpt-6.1-sol", "--tools", "Read", "--allowedTools", "Read"])
             assert marker.read_text(encoding="utf-8") == "PostToolUse"
