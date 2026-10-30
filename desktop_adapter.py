@@ -174,7 +174,7 @@ class DesktopSession:
                             method = "perform_secondary_action"
                             payload = {key: arguments[key] for key in ("window", "element_index")}
                             payload["action"] = "AXPress"
-                        if os.name != "nt" and name == "press_key" and arguments.get("key") in ("cmd+a", "ctrl+a"):
+                        if name == "press_key" and arguments.get("key") in ("cmd+a", "ctrl+a"):
                             self.scope.select_all_text(self.configuration["identity"]["id"])
                             from types import SimpleNamespace
                             result = SimpleNamespace(is_error=False)

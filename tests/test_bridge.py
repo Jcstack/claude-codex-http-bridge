@@ -65,6 +65,7 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(environment["CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING"], "1")
             self.assertEqual(environment["CLAUDE_CODE_ATTRIBUTION_HEADER"], "0")
             self.assertEqual(environment["CLAUDE_CODE_GATEWAY_HINT_HEADERS"], "1")
+            self.assertEqual(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
             api_environment = launcher.claude_environment(12345, "mock-local-key",
                                                          "gpt-6.1-sol", "api")
             self.assertNotIn("CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING", api_environment)
@@ -77,10 +78,11 @@ class BridgeTests(unittest.TestCase):
         with patch.dict(os.environ, {"CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "1"}):
             with self.assertRaisesRegex(RuntimeError, "API route"):
                 launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol", "api")
-        with patch.dict(os.environ, {"CLAUDE_CODE_ATTRIBUTION_HEADER": "1", "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "0"}):
+        with patch.dict(os.environ, {"CLAUDE_CODE_ATTRIBUTION_HEADER": "1", "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "0", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "0"}):
             environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")
             self.assertEqual(environment["CLAUDE_CODE_ATTRIBUTION_HEADER"], "1")
             self.assertEqual(environment["CLAUDE_CODE_GATEWAY_HINT_HEADERS"], "0")
+            self.assertEqual(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "0")
 
     def test_catalog_intersection_and_model_picker(self) -> None:
         rows = {

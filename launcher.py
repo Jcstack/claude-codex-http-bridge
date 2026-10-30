@@ -161,6 +161,10 @@ def claude_environment(port: int, key: str, model: str,
     # guessing from prompt text. Keep explicit operator overrides.
     environment.setdefault("CLAUDE_CODE_ATTRIBUTION_HEADER", "0")
     environment.setdefault("CLAUDE_CODE_GATEWAY_HINT_HEADERS", "1")
+    # The user chose a private local gateway. Disable optional Anthropic
+    # telemetry/survey traffic by default using the documented host control;
+    # ordinary tools, plugins and the WebFetch safety check remain available.
+    environment.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
     # The subscription endpoint accepted the tool flag in a live call. On the
     # direct API route, this proxy forwards eager_input_streaming as an extra
     # Responses function-tool field, so do not enable it without an upstream

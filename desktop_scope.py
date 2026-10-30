@@ -204,6 +204,9 @@ class WindowsWindows:
             (self.user, "GetWindowTextW", C.c_int, [W.HWND, W.LPWSTR, C.c_int]),
             (self.user, "GetForegroundWindow", W.HWND, []),
             (self.user, "GetWindowRect", W.BOOL, [W.HWND, C.POINTER(W.RECT)]),
+            (self.user, "GetAncestor", W.HWND, [W.HWND, W.UINT]),
+            (self.user, "GetClassNameW", C.c_int, [W.HWND, W.LPWSTR, C.c_int]),
+            (self.user, "SendMessageTimeoutW", C.c_ssize_t, [W.HWND, W.UINT, W.WPARAM, W.LPARAM, W.UINT, W.UINT, C.POINTER(C.c_size_t)]),
             (self.kernel, "OpenProcess", W.HANDLE, [W.DWORD, W.BOOL, W.DWORD]),
             (self.kernel, "GetProcessTimes", W.BOOL, [W.HANDLE, C.POINTER(W.FILETIME), C.POINTER(W.FILETIME), C.POINTER(W.FILETIME), C.POINTER(W.FILETIME)]),
             (self.kernel, "QueryFullProcessImageNameW", W.BOOL, [W.HANDLE, W.DWORD, W.LPWSTR, C.POINTER(W.DWORD)]),
@@ -256,6 +259,29 @@ class WindowsWindows:
                 raise ScopeError("Keyboard input requires the selected window to be foreground; the bridge does not activate it")
             return {"id": window_id, "pid": pid.value, "created": str(times[0].dwLowDateTime | times[0].dwHighDateTime << 32), "executable": path.value}
         finally: self.kernel.CloseHandle(process)
+
+    def select_all_text(self, window_id):
+        identity = self.identity(window_id, keyboard=True)
+        W = self.W
+        class GUIInfo(C.Structure):
+            _fields_ = [("cbSize",W.DWORD),("flags",W.DWORD),("active",W.HWND),("focus",W.HWND),
+                        ("capture",W.HWND),("menu_owner",W.HWND),("move_size",W.HWND),("caret",W.HWND),("rect",W.RECT)]
+        self.user.GetGUIThreadInfo.argtypes = [W.DWORD,C.POINTER(GUIInfo)]
+        self.user.GetGUIThreadInfo.restype = W.BOOL
+        pid = W.DWORD(); thread = self.user.GetWindowThreadProcessId(window_id,C.byref(pid))
+        info = GUIInfo(); info.cbSize = C.sizeof(info)
+        if not self.user.GetGUIThreadInfo(thread,C.byref(info)) or not info.focus or self.user.GetAncestor(info.focus,2) != window_id:
+            raise ScopeError("The selected window has no confirmed focused text control")
+        self.user.GetWindowThreadProcessId(info.focus,C.byref(pid))
+        name = C.create_unicode_buffer(256); self.user.GetClassNameW(info.focus,name,len(name))
+        classname = name.value.lower()
+        if pid.value != identity["pid"] or not (classname == "edit" or classname.startswith(("richedit","windowsforms10.edit"))):
+            raise ScopeError("Select-all requires a focused native Edit/RichEdit control; no global shortcut fallback was attempted")
+        result = C.c_size_t()
+        # EM_SETSEL has element-local semantics. Targeted WM_KEYDOWN Ctrl+A
+        # does not reliably carry the control state to another UI thread.
+        if not self.user.SendMessageTimeoutW(info.focus,0xB1,0,-1,2,1000,C.byref(result)):
+            raise ScopeError("Text selection was not confirmed; observe before continuing")
 
 
 def inventory():
