@@ -15,7 +15,7 @@ oauth:
   auth-dir: __AUTH_DIR__
 routing:
   retry:
-    request-retry: 1
+    request-retry: 2
   cooldown:
     transient-error-cooldown-seconds: -1
 observability:

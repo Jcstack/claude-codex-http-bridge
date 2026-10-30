@@ -245,7 +245,7 @@ oauth:
   auth-dir: {json.dumps(str(auth))}
 routing:
   retry:
-    request-retry: 1
+    request-retry: 2
   cooldown:
     transient-error-cooldown-seconds: -1
 api-keys:
