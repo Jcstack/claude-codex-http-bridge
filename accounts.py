@@ -464,6 +464,8 @@ def select_record(root: Path, alias: str) -> dict:
         record = private_json(path)
         if record.get("type") != "codex":
             raise RuntimeError("Alias does not contain a staged Codex account")
+        if (path.parent / ("refresh-" + fingerprint(record) + ".pending")).exists():
+            raise RuntimeError("Private refreshed credentials need recovery; run account recover")
         if (root / "auth").is_dir():
             matches = [row["record"] for row in local_accounts(root)
                        if row["fingerprint"] == fingerprint(record)]
@@ -477,6 +479,8 @@ def select_record(root: Path, alias: str) -> dict:
                    "account-" + row["fingerprint"] == alias or
                    "account-" + hashlib.sha256(row["record"]["account_id"].encode()).hexdigest()[:16] == alias]
         if len(matches) == 1:
+            if (path.parent / ("refresh-" + fingerprint(matches[0]) + ".pending")).exists():
+                raise RuntimeError("Private refreshed credentials need recovery; run account recover")
             return matches[0]
     raise RuntimeError("Unknown account alias; run claude-codex account list")
 
@@ -507,6 +511,7 @@ def validation_route(root: Path, record: dict):
 def check_account(root: Path, alias: str) -> dict:
     import bridge_models
     record = select_record(root, alias)
+    original = dict(record)
     try:
         with validation_route(root, record) as probe:
             models = probe["models"]
@@ -521,6 +526,28 @@ def check_account(root: Path, alias: str) -> dict:
         path = stage_path(root, alias)
         if path.exists():
             api_profile.write_private(path, json.dumps(record) + "\n")
+        # Validation can rotate an inactive account's refresh token. Persist it
+        # back to its disabled auth record before use() reloads that record;
+        # keeping it only in a staging alias would lose the refresh generation.
+        changed = any(record.get(key) != original.get(key) for key in
+                      ("access_token", "refresh_token", "id_token", "expired", "last_refresh"))
+        if original.get("disabled") is True and changed:
+            existing = [row for row in local_accounts(root) if row["fingerprint"] == fingerprint(original)]
+            if len(existing) == 1:
+                checkpoint = stage_path(root, alias).parent / ("refresh-" + fingerprint(original) + ".pending")
+                saved = {"name": existing[0]["name"], "record": {**record, "disabled": True},
+                         "before_token_hash": hashlib.sha256(str(original.get("refresh_token", "")).encode()).hexdigest()}
+                api_profile.write_private(checkpoint, json.dumps(saved) + "\n")
+                management = Management(root)
+                live = next((row for row in management.files() if row["name"] == existing[0]["name"]), None)
+                if live is None or live.get("disabled") is not True:
+                    raise RuntimeError("Account selection changed during validation; private refreshed credentials retained. Run account recover")
+                management.call("POST", "auth-files?" + urllib.parse.urlencode({"name": existing[0]["name"]}),
+                                {**record, "disabled": True})
+                persisted = private_json(root / "auth" / existing[0]["name"])
+                if persisted.get("refresh_token") != record.get("refresh_token"):
+                    raise RuntimeError("Refreshed credentials need local recovery; run account recover")
+                checkpoint.unlink()
     api_profile.write_private(stage_path(root, alias).with_suffix(".checked"), json.dumps(checked) + "\n")
     return checked
 
@@ -589,9 +616,34 @@ def switch_account(root: Path, alias: str) -> None:
 
 def recover_account(root: Path) -> None:
     with switch_lock(root) as directory:
+        recovered = 0
+        for checkpoint in directory.glob("refresh-*.pending"):
+            saved = private_json(checkpoint)
+            record, name = saved.get("record"), saved.get("name")
+            if (not isinstance(record, dict) or record.get("type") != "codex" or not isinstance(name, str)
+                    or Path(name).name != name or checkpoint.name != "refresh-" + fingerprint(record) + ".pending"):
+                raise RuntimeError("Private credential recovery record is invalid")
+            current = private_json(root / "auth" / name)
+            if fingerprint(current) != fingerprint(record):
+                raise RuntimeError("Credential recovery identity changed; private checkpoint retained")
+            if current.get("refresh_token") != record.get("refresh_token"):
+                token_hash = hashlib.sha256(str(current.get("refresh_token", "")).encode()).hexdigest()
+                if token_hash != saved.get("before_token_hash"):
+                    raise RuntimeError("Credential recovery conflicts with a newer refresh; private checkpoint retained for review")
+                management = Management(root)
+                live = next((row for row in management.files() if row["name"] == name), None)
+                if live is None:
+                    raise RuntimeError("Credential recovery account is absent; private checkpoint retained")
+                management.call("POST", "auth-files?" + urllib.parse.urlencode({"name": name}),
+                                {**record, "disabled": bool(live.get("disabled"))})
+                if private_json(root / "auth" / name).get("refresh_token") != record.get("refresh_token"):
+                    raise RuntimeError("Credential recovery could not be verified; private checkpoint retained")
+            checkpoint.unlink()
+            recovered += 1
         path = directory / "switch.pending"
         if not path.exists():
-            print("No interrupted account change needs recovery.")
+            print("Refreshed credentials recovered; selection and sessions retained." if recovered else
+                  "No interrupted account change needs recovery.")
             return
         saved = private_json(path).get("before")
         if (not isinstance(saved, dict) or not saved or
@@ -623,7 +675,8 @@ def main(arguments: list[str], *, root: Path) -> int:
     if options.command == "login":
         oauth_login(root, options.alias)
     elif options.command == "check":
-        check_account(root, options.alias)
+        with switch_lock(root):
+            check_account(root, options.alias)
         print("Account inference verified; active sessions were not changed.")
     elif options.command == "use":
         switch_account(root, options.alias)

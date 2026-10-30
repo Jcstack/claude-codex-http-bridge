@@ -40,6 +40,13 @@ private transaction journal remains; run:
 claude-codex account recover
 ```
 
+Validation can rotate an inactive account's refresh token. The helper saves
+that generation back to its disabled record before a later switch can reuse
+it. An interrupted save leaves a private refresh checkpoint and blocks using
+that alias until `account recover` succeeds. Recovery preserves the current
+enabled/disabled selection and refuses to overwrite a newer refresh generation.
+Checks, switches and recovery share the same local lock.
+
 ## Security and quota
 
 Authorization uses PKCE, a random callback state, a loopback-only

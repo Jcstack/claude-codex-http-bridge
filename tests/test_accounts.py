@@ -1,6 +1,7 @@
 """Account changes use private OAuth staging and do not restart the user's service."""
 
 import base64
+from contextlib import contextmanager
 from contextlib import redirect_stdout
 from io import StringIO
 import json
@@ -29,6 +30,101 @@ def tokens(account="synthetic-account-b", user=None):
 
 
 class AccountTests(unittest.TestCase):
+    def test_rotated_refresh_checkpoint_recovers_without_changing_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            accounts.private_directory(root / "auth")
+            record = accounts.token_record(tokens())
+            path = root / "auth/old.json"
+            accounts.api_profile.write_private(path, json.dumps(record))
+            alias = "account-" + accounts.fingerprint(record)
+
+            @contextmanager
+            def validate(_root, value):
+                try:
+                    yield {"models": {"gpt-6.1-sol": {}}}
+                finally:
+                    value.update(refresh_token="synthetic-rotated-refresh", access_token="synthetic-rotated-access")
+
+            class Manager:
+                failed = True
+                def files(self): return [{"name": "old.json", "disabled": True}]
+                def call(self, method, resource, body):
+                    if self.failed:
+                        raise RuntimeError("synthetic interrupted persistence")
+                    self_test.assertTrue(body["disabled"])
+                    accounts.api_profile.write_private(path, json.dumps(body))
+
+            self_test = self
+            manager = Manager()
+            with patch.object(accounts, "validation_route", side_effect=validate), \
+                    patch.object(accounts, "Management", return_value=manager), \
+                    patch.object(accounts, "inference", return_value={"status": "completed", "output": [{}]}):
+                with self.assertRaisesRegex(RuntimeError, "interrupted persistence"):
+                    accounts.check_account(root, alias)
+                checkpoint, = (root / "accounts").glob("refresh-*.pending")
+                with self.assertRaisesRegex(RuntimeError, "account recover"):
+                    accounts.select_record(root, alias)
+                manager.failed = False
+                with redirect_stdout(StringIO()):
+                    accounts.recover_account(root)
+            self.assertFalse(checkpoint.exists())
+            saved = accounts.select_record(root, alias)
+            self.assertEqual(saved["refresh_token"], "synthetic-rotated-refresh")
+            self.assertEqual(saved["access_token"], "synthetic-rotated-access")
+            self.assertTrue(saved["disabled"])
+
+    def test_refresh_recovery_never_overwrites_a_newer_generation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            accounts.private_directory(root / "auth")
+            record = accounts.token_record(tokens())
+            accounts.api_profile.write_private(root / "auth/old.json", json.dumps({
+                **record, "refresh_token": "synthetic-newer-refresh"}))
+            checkpoint = accounts.stage_path(root, "secondary").parent / (
+                "refresh-" + accounts.fingerprint(record) + ".pending")
+            import hashlib
+            accounts.api_profile.write_private(checkpoint, json.dumps({
+                "name": "old.json", "record": {**record, "refresh_token": "synthetic-pending-refresh"},
+                "before_token_hash": hashlib.sha256(record["refresh_token"].encode()).hexdigest()}))
+            with patch.object(accounts, "Management") as manager:
+                with self.assertRaisesRegex(RuntimeError, "newer refresh"):
+                    accounts.recover_account(root)
+                manager.assert_not_called()
+            self.assertTrue(checkpoint.exists())
+            self.assertEqual(accounts.private_json(root / "auth/old.json")["refresh_token"],
+                             "synthetic-newer-refresh")
+
+    def test_inactive_validation_does_not_lose_rotated_refresh_credentials(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            accounts.private_directory(root / "auth")
+            record = accounts.token_record(tokens())
+            path = root / "auth/old.json"
+            accounts.api_profile.write_private(path, json.dumps(record))
+            alias = "account-" + accounts.fingerprint(record)
+            @contextmanager
+            def validate(_root, value):
+                try:
+                    yield {"models": {"gpt-6.1-sol": {}}}
+                finally:
+                    value.update(refresh_token="synthetic-rotated-refresh", access_token="synthetic-rotated-access")
+            class Manager:
+                def files(self): return [{"name": "old.json", "disabled": True}]
+                def call(self, method, resource, body):
+                    self_test.assertEqual(method, "POST")
+                    self_test.assertTrue(body["disabled"])
+                    accounts.api_profile.write_private(path, json.dumps(body))
+            self_test = self
+            with patch.object(accounts, "validation_route", side_effect=validate), \
+                    patch.object(accounts, "Management", return_value=Manager()), \
+                    patch.object(accounts, "inference", return_value={"status": "completed", "output": [{}]}):
+                accounts.check_account(root, alias)
+            saved = accounts.private_json(path)
+            self.assertEqual(saved["refresh_token"], "synthetic-rotated-refresh")
+            self.assertEqual(saved["access_token"], "synthetic-rotated-access")
+            self.assertTrue(saved["disabled"])
+
     def test_oauth_is_loopback_only_staged_and_redacted(self):
         callback_errors = []
         exchanges = []
