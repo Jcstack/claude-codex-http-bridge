@@ -297,3 +297,34 @@ func TestLocalIdentitySurvivesRenewalAndHalfWrittenKeyPair(t *testing.T) {
 		t.Fatal("routine renewal replaced the trusted CA")
 	}
 }
+
+func TestNativeRoutesPreserveBytesAndRejectPathTraversal(t *testing.T) {
+	front, frontKey, _ := fixture(t)
+	origin, _, write := fixture(t)
+	origin.key = strings.Repeat("o", 32)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("a", 32) {
+			t.Error("native credentials were not replaced")
+		}
+		_, _ = w.Write([]byte{0, 255, 13, 10, 0})
+	}))
+	defer upstream.Close()
+	write("native", upstream, strings.Repeat("a", 32))
+	server := httptest.NewServer(withOrigin(front, origin))
+	defer server.Close()
+	for _, path := range []string{"/v1/responses", "/v1/images/generations", "/v1/models"} {
+		res := call(t, server.URL, frontKey, path)
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 200 || string(body) != string([]byte{0, 255, 13, 10, 0}) {
+			t.Fatal("native bytes were translated or dropped")
+		}
+	}
+	for _, path := range []string{"/v1/../v0/management/api-call", "/v1/%2e%2e/v0/management/api-call"} {
+		res := call(t, server.URL, frontKey, path)
+		res.Body.Close()
+		if res.StatusCode != 404 {
+			t.Fatal("path traversal was accepted")
+		}
+	}
+}

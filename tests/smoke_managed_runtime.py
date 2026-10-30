@@ -37,6 +37,12 @@ class Upstream(BaseHTTPRequestHandler):
 
     def log_message(self, *_args): pass
 
+    def do_GET(self):
+        if self.headers.get("Authorization") != "Bearer " + "a" * 64:
+            self.send_error(401); return
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+        self.wfile.write(json.dumps({"data": [{"id": MODEL}]}).encode())
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.headers.get("Authorization") != "Bearer " + "a" * 64:

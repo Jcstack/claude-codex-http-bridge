@@ -45,13 +45,14 @@ type backend struct {
 }
 
 type gateway struct {
-	mu         sync.Mutex
-	root       string
-	manifest   string
-	key        string
-	current    string
-	backends   map[string]*backend
-	checkOwner func(context.Context, int, int) error
+	mu           sync.Mutex
+	root         string
+	manifest     string
+	key          string
+	current      string
+	backends     map[string]*backend
+	nativeActive int
+	checkOwner   func(context.Context, int, int) error
 }
 
 func privateFile(root, path string, limit int64) ([]byte, error) {
@@ -240,12 +241,28 @@ func gatewayError(w http.ResponseWriter, code int) {
 	_, _ = io.WriteString(w, `{"error":{"type":"gateway_error","message":"Local gateway request could not be completed"}}`)
 }
 
-func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (g *gateway) authorized(r *http.Request) bool {
 	key := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if key == "" {
 		key = r.Header.Get("X-Api-Key")
 	}
-	if subtle.ConstantTimeCompare([]byte(key), []byte(g.key)) != 1 {
+	return subtle.ConstantTimeCompare([]byte(key), []byte(g.key)) == 1
+}
+
+func validAPIPath(path string) bool {
+	if !strings.HasPrefix(path, "/v1/") || strings.ContainsAny(path, "\\\x00\r\n") {
+		return false
+	}
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !g.authorized(r) {
 		gatewayError(w, 401)
 		return
 	}
@@ -253,6 +270,9 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		active := map[string]int{}
+		if g.nativeActive > 0 {
+			active["native"] = g.nativeActive
+		}
 		for id, b := range g.backends {
 			active[id] = b.active
 		}
@@ -260,7 +280,7 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"current": g.current, "active": active})
 		return
 	}
-	if !strings.HasPrefix(r.URL.Path, "/v1/") || (r.Method != "GET" && r.Method != "POST") {
+	if !validAPIPath(r.URL.Path) || (r.Method != "GET" && r.Method != "POST") {
 		gatewayError(w, 404)
 		return
 	}
@@ -295,6 +315,25 @@ func withOrigin(front, origin http.Handler) http.Handler {
 			cloned.URL.Path = strings.TrimPrefix(r.URL.Path, "/bridge/origin")
 			cloned.URL.RawPath = ""
 			origin.ServeHTTP(w, cloned)
+			return
+		}
+		// Preserve the origin's native Responses, media and model-discovery
+		// routes. Only Anthropic Messages/count_tokens need the translator.
+		f, frontOK := front.(*gateway)
+		o, originOK := origin.(*gateway)
+		if frontOK && originOK && strings.HasPrefix(r.URL.Path, "/v1/") && r.URL.Path != "/v1/messages" && r.URL.Path != "/v1/messages/count_tokens" {
+			if !f.authorized(r) {
+				gatewayError(w, 401)
+				return
+			}
+			f.mu.Lock()
+			f.nativeActive++
+			f.mu.Unlock()
+			defer func() { f.mu.Lock(); f.nativeActive--; f.mu.Unlock() }()
+			cloned := r.Clone(r.Context())
+			cloned.Header.Set("Authorization", "Bearer "+o.key)
+			cloned.Header.Del("X-Api-Key")
+			o.ServeHTTP(w, cloned)
 			return
 		}
 		front.ServeHTTP(w, r)

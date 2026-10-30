@@ -16,6 +16,11 @@ Claude Code -> stable TLS ingress -> reviewed translator
 
 The extra localhost hops are a migration arrangement. They do not start another
 agent or change which application owns permissions, tools and conversation.
+Only `/v1/messages` and `/v1/messages/count_tokens` use the compatibility
+translator. Native Responses, model discovery, image/media and other `/v1/`
+routes pass through the guarded origin with their bytes intact. This preserves
+the origin's API surface; it does not establish model/account entitlement to
+every hosted tool. Native requests participate in the active-request stop guard.
 Retiring the original service requires its dependent sessions to finish. Moving
 an already-running client from its old endpoint is not implemented by editing
 its environment or settings files.
@@ -84,6 +89,15 @@ translator has no OAuth files. Its retries are disabled because the existing
 Codex service handles upstream retries. Its transient-error cooldown is disabled
 so a recovered localhost fault does not create another minute of 503 responses;
 quota/429 behavior is retained.
+
+Proxy processes start in their own private runtime directories so they do not
+automatically load a user's project `.env`. Claude Code still starts in the
+requested project. Background fixtures use a separate `CLAUDE_CONFIG_DIR`
+[supervisor instance](https://code.claude.com/docs/en/agent-view#where-state-is-stored).
+The warm-supervisor test records a real background model reply after starting
+that supervisor with a deliberately wrong gateway, then dispatching with the
+private per-session profile. It tests routing/reply delivery, not the mock
+model's task-state classification.
 
 ## Acceptance scope
 
