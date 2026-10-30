@@ -129,12 +129,12 @@ class DesktopSession:
         path = directory / ("lease-" + digest + ".lock")
         if path.is_symlink(): raise desktop_scope.ScopeError("Desktop lease must not be symlinked")
         fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        handle = os.fdopen(fd, "r+b")
+        handle = os.fdopen(fd, "r+b", buffering=0)
         try:
             if os.name == "nt":
                 import msvcrt
-                handle.write(b"0"); handle.flush(); handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                if os.fstat(handle.fileno()).st_size == 0: handle.write(b"0")
             else:
                 import fcntl
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
