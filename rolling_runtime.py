@@ -167,6 +167,7 @@ routing:
   retry:
     request-retry: 0
   cooldown:
+    disable-cooling: true
     transient-error-cooldown-seconds: -1
 api-keys:
   codex:
@@ -243,7 +244,8 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
                 launcher.wait_for_private_listener(ingress, front_port)
                 value = {"pid": ingress.pid, "port": front_port, "ingress_bundle": identity, "current": "", "generations": {}}
                 endpoint_status(root, value)
-            fingerprint = hashlib.sha256(runtime_bundle.canonical({"bundle": identity, "models": models})).hexdigest()
+            fingerprint = hashlib.sha256(runtime_bundle.canonical({"bundle": identity, "models": models,
+                "quota_owner": "origin-v1"})).hexdigest()
             old = value["generations"].get(value["current"])
             if not force and old and old["fingerprint"] == fingerprint and launcher.listener_pids(old["port"]) == {old["pid"]}:
                 drain(root, value)

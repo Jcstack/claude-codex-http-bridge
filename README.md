@@ -46,6 +46,8 @@ Claude 摘要。已运行会话不会被修改。详见[验证结果与边界](N
 
 运行中的会话可[热切换 Codex 账号](ACCOUNTS.md)：`claude-codex account login work` 授权并暂存新账号，`claude-codex account use work` 验证后切换后续请求，`claude-codex account list` 查看与回退。旧账号保留为停用备份，已开始的输出继续完成；服务、Claude 会话和原生 Codex 登录均不重启或替换。共用该代理的会话会一起切换；提示缓存可能需要重新预热。
 
+如果用量已重置却仍返回旧的 429，[配额恢复机制](QUOTA_RECOVERY.md)会核对当前桥接账号的真实可用状态，再清除已失效的本地周配额冷却。中转层不再重复缓存来源服务的限流；真实上游 429 仍保留。也可运行 `claude-codex quota recover` 做一次核对，无需关闭会话、切账号或重启推理服务。
+
 可先使用不需要额外项目 API key 的[原生能力包](NATIVE_TOOLS.md)：`claude-codex tools install`，然后正常启动。它通过 MCP 提供图片生成/编辑、PDF 提取和 Realtime 音频；`--no-native-tools` 单次关闭。桌面需另运行 `claude-codex desktop install`、`desktop windows`、`desktop select WINDOW_ID`，仅授权当前项目的指定窗口；`desktop disable` 撤销。Claude Code 继续负责权限，安装不自动开启系统权限、麦克风或全屏采集。当前仍不代表所有 GPT-Live、原生压缩或 Opus 等效能力通过认证。
 
 可选正式 API 路由（目前为 pilot，需自行创建项目密钥并核对账单）：

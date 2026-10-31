@@ -27,6 +27,8 @@ HELPER = ROOT / "bridge_models.py"
 def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
     if arguments and arguments[0] == "account":
         return "account", "", arguments[1:]
+    if arguments and arguments[0] == "quota":
+        return "quota", "", arguments[1:]
     if arguments and arguments[0] == "tools":
         return "tools", "", arguments[1:]
     if arguments and arguments[0] == "desktop":
@@ -522,6 +524,9 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         import rolling_runtime
         models = json.loads(helper_output("snapshot", environment=environment))
         managed = rolling_runtime.ensure(ROOT, runtime, state, models)
+    if route == "subscription":
+        import quota_recovery
+        quota_recovery.ensure_watch(ROOT)
     directory = Path(tempfile.mkdtemp(prefix="ui-", dir=runtime))
     if platform.system() == "Windows":
         import windows_acl
@@ -604,11 +609,16 @@ def main() -> int:
         print("Opt-in native V2 /compact: --native-compaction (reviewed subscription runtime required); --no-native-compaction disables it.")
         print("Opt-in scoped computer use: claude-codex desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
         print("Read-only metadata: claude-codex diagnostics [--hours 2] [--session UUID].")
+        print("Reconcile a stale local quota gate after an upstream reset: claude-codex quota recover.")
         return 0
     if mode == "diagnostics":
         import diagnostics
         return diagnostics.main(claude_args, root=ROOT, route=route)
     helper_output("verify")
+    if mode == "quota":
+        if route != "subscription": raise ValueError("Quota recovery uses the Codex subscription profile")
+        import quota_recovery
+        return quota_recovery.main(claude_args, root=ROOT)
     if mode == "account":
         if route != "subscription": raise ValueError("Account selection uses the Codex subscription profile")
         import accounts
@@ -641,10 +651,15 @@ def main() -> int:
         environment = service_environment(state, runtime, route)
         models = json.loads(helper_output("snapshot", environment=environment))
         managed = rolling_runtime.ensure(ROOT, runtime, state, models, force=mode == "bridge-reload")
+        import quota_recovery
+        quota_recovery.ensure_watch(ROOT)
         print(f"Managed TLS endpoint ready: https://127.0.0.1:{managed['port']}; legacy sessions retain their original service")
         return 0
     if mode == "bridge-start":
         runtime, state, _ = ensure_service(route=route)
+        if route == "subscription":
+            import quota_recovery
+            quota_recovery.ensure_watch(ROOT)
         if route == "subscription" and (ROOT / "runtime-selected.json").exists():
             import rolling_runtime
             environment = service_environment(state, runtime, route)

@@ -32,6 +32,7 @@ SPEC = {"context_window": 872000, "input_modalities": ["text", "image"], "suppor
 
 class Upstream(BaseHTTPRequestHandler):
     requests = []
+    quota_mode = False
     admitted = threading.Event()
     release = threading.Event()
 
@@ -48,6 +49,14 @@ class Upstream(BaseHTTPRequestHandler):
         if self.headers.get("Authorization") != "Bearer " + "a" * 64:
             self.send_error(401); return
         index = len(self.requests); self.requests.append(body)
+        if self.quota_mode:
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Retry-After", "604800")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": {"type": "usage_limit_reached",
+                "code": "usage_limit_reached", "message": "Synthetic origin quota"}}).encode())
+            return
         output = {"type": "message", "role": "assistant", "id": "msg_fixture", "phase": "final_answer",
                   "content": [{"type": "output_text", "text": "FIXTURE", "annotations": []}]}
         events = [{"type": "response.created", "response": {"id": "resp_fixture", "model": MODEL}},
@@ -272,10 +281,25 @@ def main():
                     assert len(Upstream.requests) == count
                     rolling_runtime.write(runtime / "origin.json", origin)
                     stream(value["port"], key, request, ca_file=ca)
+                    # A relay must not retain a second weekly gate after its
+                    # authenticated origin has already recovered or changed account.
+                    Upstream.quota_mode = True
+                    try:
+                        stream(value["port"], key, request, ca_file=ca)
+                    except RuntimeError as error:
+                        assert "HTTP 429" in str(error), "Origin 429 was not preserved"
+                    else:
+                        raise AssertionError("Origin quota was ignored")
+                    count = len(Upstream.requests)
+                    Upstream.quota_mode = False
+                    content, _ = stream(value["port"], key, request, ca_file=ca)
+                    assert len(Upstream.requests) == count + 1, "Relay retained an obsolete origin cooldown"
+                    assert "FIXTURE" == "".join(block.get("text", "") for block in content)
                     if args.claude_client: persistent_claude(root, updated, base_runtime, base, background=args.background_client)
                     print(json.dumps({"mock_only": True, "stable_tls_endpoint": "pass",
                         "old_stream_drained": "pass", "active_stop_refused": "pass", "legacy_service_preserved": "pass",
                         "legacy_key_not_given_to_translator": "pass", "origin_pid_checked_before_credentials": "pass",
+                        "origin_quota_preserved_and_early_reset_retried": "pass",
                         "same_claude_process_after_backend_reload": "pass" if args.claude_client else "not-run",
                         "background_tls_with_warm_wrong_supervisor": "pass" if args.background_client else "not-run"}))
                 finally:

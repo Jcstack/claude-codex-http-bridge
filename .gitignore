@@ -16,6 +16,7 @@
 !NATIVE_TOOLS.md
 !NATIVE_COMPACTION.md
 !ACCOUNTS.md
+!QUOTA_RECOVERY.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -26,6 +27,7 @@
 !statusline_adapter.py
 !session_models.py
 !codex_usage.py
+!quota_recovery.py
 !webfetch_pdf_guard.py
 !run-claude-codex.sh
 !bridge_models.py
