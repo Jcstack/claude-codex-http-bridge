@@ -1,6 +1,7 @@
 # Source-only allowlist. Runtime data and credentials must never enter Git.
 *
 !.gitignore
+!.gitattributes
 !README.md
 !COMPATIBILITY.md
 !CAPABILITY_AUDIT.md
