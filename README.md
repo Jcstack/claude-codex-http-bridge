@@ -64,7 +64,7 @@ API 路由与订阅 OAuth、服务端口及配额缓存分开。`api key set` �
 
 - macOS, Linux, or native Windows on ARM64/aarch64 or x64
 - On Windows: Windows 10 1809+ or Windows Server 2019+ and an NTFS installation directory. Windows Subsystem for Linux uses the Linux instructions.
-- Claude Code installed and on `PATH` (verified with Claude Code 2.1.312–2.1.314)
+- Claude Code installed and on `PATH` (verified with Claude Code 2.1.312–2.1.316)
 - Python 3.10+; on macOS/Linux/WSL, `bash` and `lsof`
 - A ChatGPT account with Codex model access
 - Or, for `claude-codex api`, an OpenAI API project key with access to supported GPT models

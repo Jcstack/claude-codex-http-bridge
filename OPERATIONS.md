@@ -132,6 +132,23 @@ invented and no OAuth material entered the translator.
 
 Both cache successes and misses are retained here; no guaranteed hit rate or coding-quality advantage is inferred. Exact source quotations and remaining citation types, slow compaction, upstream transport failures, authenticated Windows inference and broader model/harness evaluations remain open. The original direct listener and the TLS ingress itself have not been seamlessly replaced; the verified reload target is the translator behind the fixed ingress.
 
+## Claude Code 2.1.316 client gate, 2026-10-31
+
+The client fixture is now integrity-locked to 2.1.316. Local macOS checks passed
+real Claude compact/resume, changed model and max effort on resume, explicit Read
+hooks, denied Write, compaction hint headers, and attribution omission. The
+separate MCP check passed image/PDF/Realtime results and coexistence with another
+MCP server. These checks use synthetic model responses and no user credentials.
+The capability-environment unit suite passed 70 tests with one platform skip.
+
+The [official release](https://github.com/anthropics/claude-code/releases/tag/v2.1.316)
+includes fixes for corrupted compressed-response hangs, restricted file reads,
+PowerShell hook blocking and inherited subagent models. This release note is not
+evidence that every reported gateway failure has been fixed. Existing processes
+remain on their loaded version; updating the client executable does not restart
+them. The three-platform source and patched-translator gates must pass before
+selecting this version for new local launches.
+
 ## Read-only diagnostics
 
 ```text
