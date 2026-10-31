@@ -334,7 +334,7 @@ def client_settings(base: Path, environment: dict, directory: Path) -> Path:
     settings_env = value.get("env", {})
     if not isinstance(settings_env, dict): raise RuntimeError("Invalid per-session environment settings")
     value["env"] = {**settings_env, **{name: environment[name] for name in environment if
-        name.startswith("ANTHROPIC_DEFAULT_") or name in ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
+        name.startswith("ANTHROPIC_DEFAULT_") or name in ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS",
         "NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED", "NO_PROXY", "no_proxy", "ENABLE_TOOL_SEARCH",
         "CLAUDE_CODE_ATTRIBUTION_HEADER", "CLAUDE_CODE_GATEWAY_HINT_HEADERS", "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING")}}
     path = directory / "managed-settings.json"

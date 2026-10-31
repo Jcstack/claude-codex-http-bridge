@@ -45,6 +45,16 @@ endpoint and returned the expected HTTP 401. Durations were 0.221–1.300 second
 This small probe did not reproduce the authenticated stream's TLS/EOF failure,
 so it does not establish its cause or justify changing the live proxy settings.
 
+On 2026-10-31 a later read-only inspection found another brief cluster of
+upstream `utls: TLS handshake: EOF` failures and five completed HTTP 500
+requests. Anonymous standard/environment, direct uTLS and explicitly proxied
+uTLS catalog checks all reached 401 twice; a subsequent synthetic authenticated
+Astra request completed in 2.441 s. This identifies a preconnection failure
+phase but does not establish a root cause or a permanent fix. No proxy, TLS or
+credential setting was changed on that evidence. Diagnostics now separately
+count upstream handshake attempt mentions and distinct tagged requests;
+downstream EOF mentions are not classified as upstream handshakes.
+
 The installed discovery/launcher/diagnostic helpers were updated without stopping the service. Existing HUD profiles now reflect the discovered maximum. The status-line adapter suppresses Anthropic-specific cache-expiry and price fields; it retains actual cached-token usage. Arbitrary upper limits on future HUD context windows have been removed. Existing client compaction settings still require a later corrected launch/resume.
 
 ## Search state and isolated live handoff

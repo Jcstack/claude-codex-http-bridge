@@ -209,12 +209,8 @@ def native_compaction_options(environment: dict[str, str], arguments: list[str],
     name = "X-Codex-Bridge-Native-Compaction"
     headers = [line for line in environment.get("ANTHROPIC_CUSTOM_HEADERS", "").splitlines()
                if line.partition(":")[0].strip().lower() != name.lower()]
-    if enabled:
-        headers.append(name + ": 1")
-    if headers:
-        environment["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(headers)
-    else:
-        environment.pop("ANTHROPIC_CUSTOM_HEADERS", None)
+    headers.append(name + (": 1" if enabled else ": 0"))
+    environment["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(headers)
     return forwarded
 
 
@@ -539,12 +535,13 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
                                                   model, route)
     if managed:
         claude_environment_values = rolling_runtime.client_environment(ROOT, managed, claude_environment_values, directory)
-        settings_path = rolling_runtime.client_settings(settings_path, claude_environment_values, directory)
     manifest = None
     if managed:
         import runtime_bundle
         manifest = runtime_bundle.selected(ROOT)[1]
     claude_args = native_compaction_options(claude_environment_values, claude_args, route, manifest)
+    if managed:
+        settings_path = rolling_runtime.client_settings(settings_path, claude_environment_values, directory)
     label = "OpenAI API" if route == "api" else "Codex"
     print(
         f"{label} bridge active on {claude_environment_values['ANTHROPIC_BASE_URL']}: "

@@ -16,6 +16,8 @@ same documented request-class hint. `CLAUDE_CODEX_NATIVE_COMPACTION=1` opts in
 future launches; the explicit disable flag wins. Missing gateway hints,
 unsupported runtimes and the project-API route are rejected. Default launches
 retain ordinary Claude summaries. Already-running clients retain their options.
+The selected header is also saved in private managed settings so background
+tasks keep the same choice, including an explicit disable.
 
 ## Protocol and fallback
 

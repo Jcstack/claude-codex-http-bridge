@@ -13,6 +13,22 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_upstream_handshake_attempts_are_separate_from_user_requests_and_disconnects(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            path.write_text(
+                '[2026-01-02 12:00:00] [aabbccdd] upstream execution failed: err=utls: TLS handshake: EOF PRIVATE_SECRET\n'
+                '[2026-01-02 12:00:01] [aabbccdd] upstream execution failed: err=utls: TLS handshake: EOF PRIVATE_SECRET\n'
+                '[2026-01-02 12:00:02] [00112233] upstream execution failed: err=utls: TLS handshake: EOF PRIVATE_SECRET\n'
+                '[2026-01-02 12:00:03] [44556677] downstream closed: EOF PRIVATE_SECRET\n')
+            result = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            detail = result["upstream_preconnection_failures"]["tls_handshake_eof"]
+            self.assertEqual(detail["attempt_mentions"], 3)
+            self.assertEqual(detail["tagged_requests"], 2)
+            self.assertEqual(result["transport_error_mentions"]["eof"], 4)
+            for private in ("PRIVATE_SECRET", "aabbccdd", "00112233", "44556677"):
+                self.assertNotIn(private, json.dumps(result))
+
     def test_metadata_allowlist_drops_bodies_paths_and_untrusted_values(self):
         since = datetime(2026, 1, 1, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as temporary:

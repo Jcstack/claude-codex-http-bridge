@@ -46,7 +46,7 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(args, ["--effort", "max"])
             self.assertEqual(env["ANTHROPIC_CUSTOM_HEADERS"], "X-Local-Trace: fixture\nX-Codex-Bridge-Native-Compaction: 1")
             launcher.native_compaction_options(env, ["--no-native-compaction"], "subscription", manifest)
-            self.assertEqual(env["ANTHROPIC_CUSTOM_HEADERS"], "X-Local-Trace: fixture")
+            self.assertEqual(env["ANTHROPIC_CUSTOM_HEADERS"], "X-Local-Trace: fixture\nX-Codex-Bridge-Native-Compaction: 0")
             for route, bundle in (("api", manifest), ("subscription", None), ("subscription", {})):
                 with self.assertRaisesRegex(RuntimeError, "reviewed subscription runtime"):
                     launcher.native_compaction_options({}, ["--native-compaction"], route, bundle)

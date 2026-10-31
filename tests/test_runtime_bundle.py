@@ -11,6 +11,16 @@ import runtime_bundle
 
 
 class BundleTests(unittest.TestCase):
+    def test_native_compaction_headers_are_retained_in_background_settings(self):
+        import rolling_runtime
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "settings.json"
+            rolling_runtime.write(base, {"env": {"UNCHANGED_FIXTURE": "kept"}})
+            env = {"ANTHROPIC_CUSTOM_HEADERS": "X-Codex-Bridge-Native-Compaction: 1"}
+            saved = rolling_runtime.client_settings(base, env, root)
+            self.assertEqual(json.loads(saved.read_text())["env"], {**env, "UNCHANGED_FIXTURE": "kept"})
+
     def fixture(self, root):
         proxy, ingress = root / "proxy-input", root / "ingress-input"
         proxy.write_bytes(b"synthetic-proxy-fixture"); ingress.write_bytes(b"synthetic-ingress-fixture")

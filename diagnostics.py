@@ -65,6 +65,9 @@ def duration(value: str) -> float | None:
 
 def proxy_summary(path: Path, since: datetime) -> dict:
     counts, errors = Counter(), Counter()
+    preconnect = Counter()
+    preconnect_requests = {}
+    preconnect_last = {}
     latencies, slow, failed = [], [], []
     for line in lines(path):
         date = re.match(r"^\[([^]]+)\]", line)
@@ -87,11 +90,22 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                     slow.append({"at": at.isoformat(), "status": status,
                                  "seconds": round(seconds, 3), "endpoint": endpoint})
         else:
+            lower = line.lower()
+            if "upstream execution failed:" in lower and "tls handshake:" in lower:
+                category = "tls_handshake_eof" if re.search(r'\beof\b', lower) else "tls_handshake_other"
+                preconnect[category] += 1
+                request = re.match(r'^\[[^]]+\]\s+\[([a-f0-9]{8})\]', line)
+                if request:
+                    preconnect_requests.setdefault(category, set()).add(request[1])
+                preconnect_last[category] = at.isoformat()
             for label, fragment in ERRORS.items():
-                if fragment in line.lower():
+                if fragment in lower:
                     errors[label] += 1
     ordered = sorted(latencies)
     return {"completed_http_statuses": dict(counts), "transport_error_mentions": dict(errors),
+            "upstream_preconnection_failures": {category: {
+                "attempt_mentions": count, "tagged_requests": len(preconnect_requests.get(category, set())),
+                "last_at": preconnect_last[category]} for category, count in preconnect.items()},
             "inference_requests": len(ordered),
             "latency_seconds": {"median": round(statistics.median(ordered), 3) if ordered else None,
                                 "p95": round(ordered[math.ceil(len(ordered) * .95) - 1], 3) if ordered else None,
