@@ -138,6 +138,12 @@ audio arrived, and the matching sideband returned 404. A public primary
 WebSocket upgrade also failed to initialize a usable session. No microphone,
 speaker, camera or user content was used. Full-duplex terminal voice,
 video/screen streaming and mid-turn steering remain unverified.
+An independent isolated Chromium check used a synthetic silent track, with no
+microphone, playback, everyday profile or browser-held credential. The native
+answer accepted both audio and data sections and advertised UDP/TCP candidates,
+but the peer failed before a working data channel or audio. Its final ICE stats
+do not identify the network or account cause. This is retained as another failed
+transport check, not a working browser fallback.
 The [upstream sideband report](https://github.com/openai/codex/issues/35094)
 describes a similar 201/404 sequence; it does not prove the cause of this
 installation's separate ICE failure. Other native voice

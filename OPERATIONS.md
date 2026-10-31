@@ -170,6 +170,10 @@ Native media creation, primary/sideband connections and hangup failures now have
 separate endpoint labels. Opaque call/session identifiers and query values are
 replaced or removed. A failed voice-cleanup request is therefore distinguishable
 from `/v1/messages` and `/v1/responses` failures; none is silently discarded.
+The follow-up suite passed 71 local tests with one platform skip, and the
+[three-platform source/install run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41161289097)
+passed all 11 jobs. The installed read-only helper matches that reviewed source;
+no service, endpoint, signing key or active Claude process was replaced.
 
 ## Open sessions and service replacement
 
@@ -190,7 +194,8 @@ Remaining work, updated 2026-10-31:
   verified; it does not provide file-descriptor handoff for those processes.
 - Validate native compaction on diverse large real tasks and summary-dependent
   plugins. Small/64k fixtures, repeated boundaries, installed resume/fork and
-  normal max effort pass; ordinary summaries remain the default.
+  normal max effort and the 16-case coding workflow pass; ordinary summaries
+  remain the default.
 - Resolve Claude's internal `/context`, `/usage` and budget alias figures and
   live startup-setting changes. HUD uses discovered provider context and actual
   quota; file edits do not hot-update existing client startup settings.
