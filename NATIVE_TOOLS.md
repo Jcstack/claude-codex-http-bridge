@@ -130,17 +130,30 @@ not every subscription/model variant or included quota pricing. The tool uses
 the [Realtime conversation protocol](https://developers.openai.com/api/docs/guides/realtime-conversations).
 GPT-Live uses [different events](https://developers.openai.com/api/docs/guides/voice-websockets).
 
-A native GPT-Live WebRTC bootstrap returned 400. Full-duplex terminal voice,
-video/screen streaming and mid-turn steering are not certified.
+An initial native GPT-Live request returned 400 because it used the wrong
+session schema. The source-matched Codex 0.166 V3 request subsequently returned
+201 with an SDP answer. This is signaling success only: the tested ICE-TCP
+tunnels connected but received no return bytes; ICE failed, no data channel or
+audio arrived, and the matching sideband returned 404. A public primary
+WebSocket upgrade also failed to initialize a usable session. No microphone,
+speaker, camera or user content was used. Full-duplex terminal voice,
+video/screen streaming and mid-turn steering remain unverified.
+The [upstream sideband report](https://github.com/openai/codex/issues/35094)
+describes a similar 201/404 sequence; it does not prove the cause of this
+installation's separate ICE failure. Other native voice
+[service errors](https://github.com/openai/codex/issues/55531) also require
+their own evidence rather than a generic transport diagnosis.
 [Claude channels require Anthropic authentication](https://code.claude.com/docs/en/channels).
 An audio MCP exchange does not remove that host gate or create a full-duplex
 terminal UI. No PTY keystroke injection or client binary patch is used.
 
-Native `/v1/responses/compact` returned 404 for synthetic state and a validation
-control. No unverified opaque compaction state is inserted into Claude history.
-Claude `/compact` remains responsible, with requested effort preserved. The
-repeatable probe reports unavailability. Slow compaction and old client startup
-windows remain tracked in [OPERATIONS.md](OPERATIONS.md).
+Legacy `/v1/responses/compact` returned 404. The later
+[native V2 implementation](NATIVE_COMPACTION.md) uses the ordinary Responses
+stream, passed real Claude compact/resume/fork checks, and is available with
+`--native-compaction` on the reviewed subscription runtime. Claude still owns
+the boundary. Default launches use ordinary summaries, and normal task effort
+is preserved. Large real-task latency and old client startup windows remain
+tracked in [OPERATIONS.md](OPERATIONS.md).
 
 ## Repeatable checks
 

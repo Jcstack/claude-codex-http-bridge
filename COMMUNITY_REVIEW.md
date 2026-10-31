@@ -2,6 +2,20 @@
 
 Checked 2026-10-30. This project keeps Claude Code as the harness. The current authenticated localhost service runs the reviewed CLIProxyAPI v8.0.46 release. No candidate below was given an OAuth credential in this review, and the live service was not replaced.
 
+Follow-up native Live review, 2026-10-31: the source-matched V3 call now returns
+201 locally, while media and sideband remain incomplete. OpenAI's
+[201/404 issue](https://github.com/openai/codex/issues/35094) and
+[service-error issue](https://github.com/openai/codex/issues/55531) distinguish
+signaling, media, account checks and sideband failure. Neither report establishes
+this machine's cause. The small MIT-licensed
+[codex-backend-sdk](https://github.com/B4PT0R/codex-backend-sdk/blob/main/docs/backend-api.md)
+documents useful native protocol observations and a silent-track data-channel
+check. At review it was unarchived, last pushed Oct 22, with 10 stars and no
+open issues. That is a useful implementation reference, not enough evidence for
+a production dependency or universal account support. It was not installed,
+given credentials, or allowed to own refresh tokens. Our bounded transport
+fixtures use synthetic state; no third-party service receives credentials.
+
 ## Protocol finding
 
 Route clarification: this installation uses the Codex backend with `use_siwc=false`. The public SIWC limitations below apply to `api.openai.com/v1`; they alone do not prove native-tool availability or exclusion on the Codex backend. [Operational correction and tests](OPERATIONS.md).

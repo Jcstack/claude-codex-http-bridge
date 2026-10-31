@@ -23,7 +23,24 @@ GIN = re.compile(r'^\[([^]]+)\].*?\]\s+(\d{3})\s*\|\s*([^|]+)\|.*?\|\s*(GET|POST
 ERRORS = {"tls_handshake": "tls handshake", "eof": "eof",
           "timeout": "timeout", "cancelled": "context canceled"}
 ENDPOINTS = {"/v1/messages", "/v1/responses", "/v1/models", "/v1/messages/count_tokens",
-             "/v1/responses/compact", "/v1/images/generations", "/v1/images/edits"}
+             "/v1/responses/compact", "/v1/images/generations", "/v1/images/edits",
+             "/v1/live", "/v1/live/sessions", "/v1/realtime", "/v1/realtime/calls",
+             "/v1/realtime/client_secrets"}
+
+
+def endpoint_label(raw: str) -> str:
+    """Keep native media phases distinct without exporting opaque call IDs."""
+    path = raw.split("?", 1)[0]
+    if path in ENDPOINTS:
+        return path
+    for pattern, label in (
+            (r"/v1/live/[A-Za-z0-9_-]{1,128}", "/v1/live/:call_id"),
+            (r"/v1/live/sessions/[A-Za-z0-9_-]{1,128}", "/v1/live/sessions/:session_id"),
+            (r"/v1/realtime/calls/[A-Za-z0-9_-]{1,128}/hangup", "/v1/realtime/calls/:call_id/hangup"),
+            (r"/v1/realtime/calls/[A-Za-z0-9_-]{1,128}", "/v1/realtime/calls/:call_id")):
+        if re.fullmatch(pattern, path):
+            return label
+    return "other"
 
 
 def lines(path: Path):
@@ -76,8 +93,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             continue
         match = GIN.search(line)
         if match:
-            endpoint = match[5].split("?", 1)[0]
-            endpoint = endpoint if endpoint in ENDPOINTS else "other"
+            endpoint = endpoint_label(match[5])
             status = int(match[2])
             counts[str(status)] += 1
             seconds = duration(match[3].strip())

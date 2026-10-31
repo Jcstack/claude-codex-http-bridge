@@ -82,6 +82,15 @@ the HUD continues using actual reported usage.
 - The installed launcher then passed actual `/compact`, resume and fork, with
   12/12 fields after each continuation and unchanged origin/ingress. Its compact
   request took 46.210 s. [Reproduction](tests/live_installed_compaction.py).
+- A real coding fixture on Claude Code 2.1.316 inspected with Sol, added
+  conversation-only copying/validation/clock requirements, compacted natively,
+  then requested Terra to implement the repair. Claude used Read, Write and
+  Bash; all 16 independent TTL/LRU/copying/Unicode/validation tests passed. The
+  original public test and README were unchanged. Compact took 83.425 s and
+  coding 230.102 s. This exercises tools after an opaque boundary, not only text
+  recall; it is not a model-quality leaderboard or a latency guarantee.
+  [Reproduction](tests/live_coding_compaction.py). Model names are requested
+  routes, not independent backend attestation.
 - Separate native capsule recall passed on Sol, Terra, Astra and the two locally
   authorized accounts. This does not certify arbitrary future models/items.
 - Fake upstream tests cover SSE, repeated compaction, process/model replacement,
@@ -101,6 +110,7 @@ Synthetic live gate (consumes quota):
 
 ```text
 python tests/live_compaction.py /path/to/reviewed-proxy --root /private/installation --native --efforts max --samples 3000 --repeat 2 --recall-model terra
+python tests/live_coding_compaction.py --root /private/installation --model sol --recall-model terra
 ```
 
 These tests do not establish equivalent quality on a 367k-token investigation

@@ -13,6 +13,24 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_native_media_failures_are_distinct_without_leaking_call_ids(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            requests = [("201", "POST", "/v1/live"),
+                        ("404", "GET", "/v1/live/rtc_PRIVATE_CALL?token=PRIVATE_SECRET"),
+                        ("502", "POST", "/v1/realtime/calls/rtc_PRIVATE_CALL/hangup"),
+                        ("400", "GET", "/v1/live/sessions/PRIVATE_SESSION?key=PRIVATE_SECRET"),
+                        ("400", "POST", "/v1/realtime/client_secrets"),
+                        ("404", "GET", "/v1/live/sessions")]
+            path.write_text("".join(f'[2026-01-02 12:00:00] [fixture] [info] [gin.go:1] {status} | 2ms | 127.0.0.1 | {method} "{url}"\n'
+                                    for status, method, url in requests), encoding="utf-8")
+            result = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            self.assertEqual([row["endpoint"] for row in result["failed_requests"]],
+                ["/v1/live/:call_id", "/v1/realtime/calls/:call_id/hangup",
+                 "/v1/live/sessions/:session_id", "/v1/realtime/client_secrets", "/v1/live/sessions"])
+            self.assertEqual(result["inference_requests"], 0)
+            self.assertNotIn("PRIVATE", json.dumps(result))
+
     def test_upstream_handshake_attempts_are_separate_from_user_requests_and_disconnects(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "proxy.log"

@@ -146,8 +146,16 @@ includes fixes for corrupted compressed-response hangs, restricted file reads,
 PowerShell hook blocking and inherited subagent models. This release note is not
 evidence that every reported gateway failure has been fixed. Existing processes
 remain on their loaded version; updating the client executable does not restart
-them. The three-platform source and patched-translator gates must pass before
-selecting this version for new local launches.
+them. Both the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41159711919)
+and [patched-translator gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41159754573)
+passed. The official pinned installer then selected 2.1.316 locally; both
+already-running Claude processes survived, with the origin/ingress metadata,
+TLS CA and local keys unchanged. New launches use the updated executable.
+
+The separate [live coding fixture](tests/live_coding_compaction.py) also passed
+16 independent acceptance tests after native compaction and a requested model
+change. It uses a disposable source tree and verifies real Read/Write/Bash
+activity; no production project, transcript or credential is stored in Git.
 
 ## Read-only diagnostics
 
@@ -157,6 +165,11 @@ claude-codex diagnostics --hours 24 --session SESSION_UUID
 ```
 
 This command makes no network/model call, never reads a key, and never starts/stops a service. It reads local logs and recent main-session metadata, then emits an allowlisted JSON report. No prompts, credentials, project paths or raw session IDs are printed; tags are hashes. Cache counters deduplicate repeated assistant stream blocks by response ID and separate fresh input, reads and writes. The report includes recent failed requests without raw error bodies. Origin and managed backend logs are reported separately; the same inference can appear in both and their counts must not be added. At most the 32 most recent managed backend logs are inspected. Error mentions are not retry counts, in-flight requests are absent, and the last main turn's effort does not establish compaction effort. Commands, subagents and oversized skipped records may not appear in cache totals.
+
+Native media creation, primary/sideband connections and hangup failures now have
+separate endpoint labels. Opaque call/session identifiers and query values are
+replaced or removed. A failed voice-cleanup request is therefore distinguishable
+from `/v1/messages` and `/v1/responses` failures; none is silently discarded.
 
 ## Open sessions and service replacement
 
@@ -212,8 +225,12 @@ documented host setting; user overrides remain possible. WebFetch safety checks
 and user-requested plugin/tool networking remain separate.
 
 Native Realtime speech worked with existing authorization and no project key.
-Native GPT-Live WebRTC returned 400, and the legacy compact endpoint returned
-404. The subsequent [V2 implementation](NATIVE_COMPACTION.md) uses the ordinary
+The first native GPT-Live WebRTC request returned 400; a source-matched V3
+request later created a call with 201 but did not establish media, and its
+sideband returned 404. TCP connection success, WebSocket upgrade and call
+creation are not counted as audio success. [Current detail](NATIVE_TOOLS.md).
+The legacy compact endpoint returned 404. The subsequent
+[V2 implementation](NATIVE_COMPACTION.md) uses the ordinary
 Responses stream and passed actual Claude compact/resume tests; the old 404
 did not establish that native compaction was unavailable. The new mode is
 opt-in and leaves normal task effort unchanged. No active user session,
