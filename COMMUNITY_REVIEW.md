@@ -26,6 +26,19 @@ OpenAI's [API Tool Search guide](https://developers.openai.com/api/docs/guides/t
 
 Stars and release frequency are screening signals. The decision above rests on source paths, reproducible issues, credential boundaries, Windows distribution and the explicit protocol gates. No alternative candidate reviewed here was given this user's credentials; the active pinned CLIProxyAPI remains the only authenticated proxy.
 
+An Oct 31 follow-up still finds CLIProxyAPI's latest release at v8.0.48.
+Raine's [state-loss issue #163](https://github.com/raine/claude-code-proxy/issues/163)
+and [persistence proposal #164](https://github.com/raine/claude-code-proxy/pull/164)
+remain open. Their author explicitly identifies them as an autonomous-agent
+proposal pending maintainer review. The report names TTL/restart loss, a second
+compaction boundary and parent/subagent identity collisions; the proposal also
+retains readable backup summaries. These are useful acceptance scenarios, not
+proof of a merged production fix. Our [opt-in V2 path](NATIVE_COMPACTION.md)
+tests repeated boundaries, process/model replacement and unrelated requests
+using self-contained authenticated state instead of a session-ID state table.
+Its opaque summary has a different plugin/readability tradeoff and is not
+presented as universal superiority or full model-quality parity.
+
 None of these projects publishes a representative coding benchmark showing GPT served through Claude Code reaches **Opus 5.5 + Claude Code**. A feature checklist and a successful text/tool demo establish transport behavior, not model quality. See [the controlled harness and model comparisons](MODEL_HARNESS_EVIDENCE.md).
 
 ## Isolated implementation candidate
