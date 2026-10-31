@@ -156,9 +156,12 @@ documented host setting; user overrides remain possible. WebFetch safety checks
 and user-requested plugin/tool networking remain separate.
 
 Native Realtime speech worked with existing authorization and no project key.
-Native GPT-Live WebRTC returned 400, and native compact returned 404. Neither
-failed path is advertised as supported. Claude still owns its tool loop and
-compaction effort. No active user session, original origin, ingress or unrelated
+Native GPT-Live WebRTC returned 400, and the legacy compact endpoint returned
+404. The subsequent [V2 implementation](NATIVE_COMPACTION.md) uses the ordinary
+Responses stream and passed actual Claude compact/resume tests; the old 404
+did not establish that native compaction was unavailable. The new mode is
+opt-in and leaves normal task effort unchanged. No active user session,
+original origin, ingress or unrelated
 service was restarted for this pack. Read-only production diagnostics still
 contain upstream TLS/EOF and slow-compaction incidents; these new capability
 checks do not resolve their root cause or certify Opus parity.

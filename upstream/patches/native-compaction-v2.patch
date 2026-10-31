@@ -1,0 +1,603 @@
+diff --git a/internal/runtime/executor/codex_bridge_compaction.go b/internal/runtime/executor/codex_bridge_compaction.go
+new file mode 100644
+index 0000000..71b54a3
+--- /dev/null
++++ b/internal/runtime/executor/codex_bridge_compaction.go
+@@ -0,0 +1,132 @@
++package executor
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/hex"
++	"encoding/json"
++	"fmt"
++	"net/http"
++	"strings"
++
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
++	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
++	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
++	"github.com/tidwall/gjson"
++	"github.com/tidwall/sjson"
++)
++
++func bridgeCompactRequested(opts cliproxyexecutor.Options, baseURL, key string) bool {
++	return opts.SourceFormat == sdktranslator.FormatClaude && helps.BridgeCompactLocal(baseURL, key) &&
++		opts.Headers.Get(helps.BridgeCompactHeader) == "1" &&
++		strings.EqualFold(opts.Headers.Get("X-Claude-Code-Request-Class"), "compaction")
++}
++
++// executeBridgeCompact uses the same typed V2 trigger as Codex 0.166. Normal
++// Claude reasoning settings are untouched. This dedicated native operation
++// leaves its own effort unset, as the native compaction service requires.
++func (e *CodexExecutor) executeBridgeCompact(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, key string) (cliproxyexecutor.Response, error) {
++	baseModel := thinking.ParseSuffix(req.Model).ModelName
++	to := sdktranslator.FromString("codex")
++	body := sdktranslator.TranslateRequest(opts.SourceFormat, to, baseModel, req.Payload, false)
++	finalize := helps.NewPayloadFinalizer(e.cfg, e.Identifier(), baseModel, to.String(), "", body, req, opts)
++	var err error
++	body, _, err = helps.ReplayBridgeCompact(body, key)
++	if err != nil {
++		return cliproxyexecutor.Response{}, statusErr{code: http.StatusBadRequest, msg: err.Error()}
++	}
++	input := gjson.GetBytes(body, "input")
++	if !input.IsArray() {
++		return cliproxyexecutor.Response{}, statusErr{code: http.StatusBadRequest, msg: "native compaction requires conversation input"}
++	}
++	items := make([]json.RawMessage, 0, len(input.Array())+1)
++	for _, item := range input.Array() {
++		items = append(items, json.RawMessage(item.Raw))
++	}
++	items = append(items, json.RawMessage(`{"type":"compaction_trigger"}`))
++	body, err = sjson.SetBytes(body, "input", items)
++	if err != nil {
++		return cliproxyexecutor.Response{}, err
++	}
++	for _, field := range []string{"reasoning", "output_config", "max_output_tokens", "max_tokens", "stop", "stop_sequences", "previous_response_id", "context_management", "compaction"} {
++		body, _ = sjson.DeleteBytes(body, field)
++	}
++	body, _ = sjson.SetBytes(body, "store", false)
++	body, _ = sjson.SetBytes(body, "model", baseModel)
++	nativeOpts := opts
++	nativeOpts.SourceFormat, nativeOpts.ResponseFormat = to, to
++	nativeOpts.OriginalRequest = body
++	nativeOpts.Alt = ""
++	nativeOpts.Stream = false
++	native := req
++	native.Model, native.Payload, native.Format = baseModel, body, to
++	response, err := e.Execute(helps.WithBridgeCompactFinalizer(ctx, finalize), auth, native, nativeOpts)
++	if err != nil {
++		return cliproxyexecutor.Response{}, err
++	}
++	result := gjson.ParseBytes(response.Payload)
++	if result.Get("type").String() == "response.completed" {
++		result = result.Get("response")
++	}
++	if state := result.Get("status").String(); state != "" && state != "completed" {
++		return cliproxyexecutor.Response{}, statusErr{code: http.StatusBadGateway, msg: "native compaction did not complete"}
++	}
++	output := result.Get("output")
++	summary, err := helps.BridgeCompactSummary([]byte(output.Raw), baseModel, key)
++	if err != nil {
++		return cliproxyexecutor.Response{}, statusErr{code: http.StatusBadGateway, msg: err.Error()}
++	}
++	var nonce [12]byte
++	if _, err = rand.Read(nonce[:]); err != nil {
++		return cliproxyexecutor.Response{}, err
++	}
++	total := result.Get("usage.input_tokens").Int()
++	cached := result.Get("usage.input_tokens_details.cached_tokens").Int()
++	if cached < 0 || cached > total {
++		cached = 0
++	}
++	model := gjson.GetBytes(opts.OriginalRequest, "model").String()
++	if model == "" {
++		model = req.Model
++	}
++	message := map[string]any{"id": "msg_native_compact_" + hex.EncodeToString(nonce[:]), "type": "message", "role": "assistant", "model": model,
++		"content": []any{map[string]any{"type": "text", "text": summary}}, "stop_reason": "end_turn", "stop_sequence": nil,
++		"usage": map[string]any{"input_tokens": total - cached, "cache_read_input_tokens": cached,
++			"cache_creation_input_tokens": 0, "output_tokens": result.Get("usage.output_tokens").Int()}}
++	payload, err := json.Marshal(message)
++	return cliproxyexecutor.Response{Payload: payload, Headers: response.Headers}, err
++}
++
++func (e *CodexExecutor) executeBridgeCompactStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, key string) (*cliproxyexecutor.StreamResult, error) {
++	response, err := e.executeBridgeCompact(ctx, auth, req, opts, key)
++	if err != nil {
++		return nil, err
++	}
++	var message map[string]any
++	if err = json.Unmarshal(response.Payload, &message); err != nil {
++		return nil, err
++	}
++	text := gjson.GetBytes(response.Payload, "content.0.text").String()
++	message["content"], message["stop_reason"] = []any{}, nil
++	events := []map[string]any{
++		{"type": "message_start", "message": message},
++		{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}},
++		{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": text}},
++		{"type": "content_block_stop", "index": 0},
++		{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil},
++			"usage": map[string]any{"output_tokens": gjson.GetBytes(response.Payload, "usage.output_tokens").Int()}},
++		{"type": "message_stop"},
++	}
++	chunks := make(chan cliproxyexecutor.StreamChunk, len(events))
++	for _, event := range events {
++		data, errMarshal := json.Marshal(event)
++		if errMarshal != nil {
++			return nil, errMarshal
++		}
++		chunks <- cliproxyexecutor.StreamChunk{Payload: []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event["type"], data))}
++	}
++	close(chunks)
++	return &cliproxyexecutor.StreamResult{Chunks: chunks, Headers: http.Header{"Content-Type": {"text/event-stream"}}}, nil
++}
+diff --git a/internal/runtime/executor/codex_bridge_compaction_test.go b/internal/runtime/executor/codex_bridge_compaction_test.go
+new file mode 100644
+index 0000000..ea72223
+--- /dev/null
++++ b/internal/runtime/executor/codex_bridge_compaction_test.go
+@@ -0,0 +1,120 @@
++package executor
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
++	_ "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/codex/claude"
++	auth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
++	ex "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
++	tr "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
++	"github.com/tidwall/gjson"
++)
++
++func TestCodexBridgeNativeCompactUsesV2WithoutLoweringNormalEffort(t *testing.T) {
++	requests := make(chan []byte, 3)
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		b, _ := io.ReadAll(r.Body)
++		requests <- b
++		w.Header().Set("Content-Type", "text/event-stream")
++		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"model\":\"gpt-6.1-sol\",\"output\":[{\"type\":\"compaction\",\"encrypted_content\":\"synthetic-capsule\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":10}}}\n\n")
++	}))
++	defer server.Close()
++	e := NewCodexExecutor(&config.Config{})
++	a := &auth.Auth{Provider: "codex", Attributes: map[string]string{"base_url": server.URL, "api_key": strings.Repeat("k", 64)}}
++	raw := []byte(`{"model":"gpt-6.1-sol","max_tokens":1000,"output_config":{"effort":"max"},"messages":[{"role":"user","content":"Retain the marker."}]}`)
++	opts := ex.Options{SourceFormat: tr.FormatClaude, OriginalRequest: raw, Headers: http.Header{helps.BridgeCompactHeader: []string{"1"}, "X-Claude-Code-Request-Class": []string{"compaction"}}}
++	response, err := e.Execute(context.Background(), a, ex.Request{Model: "gpt-6.1-sol", Payload: raw}, opts)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !strings.Contains(string(response.Payload), "codex-native-context-v1:") {
++		t.Fatal("native context was not returned through the text boundary")
++	}
++	request := <-requests
++	if gjson.GetBytes(request, "reasoning.effort").Exists() {
++		t.Fatal("main effort leaked into a native maintenance operation")
++	}
++	items := gjson.GetBytes(request, "input").Array()
++	if len(items) == 0 || items[len(items)-1].Get("type").String() != "compaction_trigger" {
++		t.Fatal("V2 trigger was absent")
++	}
++	opts.Headers.Del(helps.BridgeCompactHeader)
++	_, _ = e.Execute(context.Background(), a, ex.Request{Model: "gpt-6.1-sol", Payload: raw}, opts)
++	if gjson.GetBytes(<-requests, "reasoning.effort").String() != "max" {
++		t.Fatal("normal compaction effort was changed")
++	}
++}
++
++func TestCodexBridgeCompactFinalPayloadRulesWinOnce(t *testing.T) {
++	for _, compact := range []bool{false, true} {
++		for _, stream := range []bool{false, true} {
++			t.Run(fmt.Sprintf("compact=%v/stream=%v", compact, stream), func(t *testing.T) {
++				bodies := make(chan []byte, 1)
++				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++					body, _ := io.ReadAll(r.Body)
++					bodies <- body
++					w.Header().Set("Content-Type", "text/event-stream")
++					_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"compaction\",\"encrypted_content\":\"fixture\"}]}}\n\n")
++				}))
++				defer server.Close()
++				models := []config.PayloadModelRule{{Name: "*", Protocol: "codex", FromProtocol: "claude"}}
++				e := NewCodexExecutor(&config.Config{Payload: config.PayloadConfig{
++					Override: []config.PayloadRule{{Models: models, Params: map[string]any{"audit.-1": "once", "instructions": "operator instructions"}}},
++					Filter:   []config.PayloadFilterRule{{Models: models, Params: []string{"input.0", "reasoning", "store"}}},
++				}})
++				key := strings.Repeat("k", 64)
++				a := &auth.Auth{Provider: "codex", Attributes: map[string]string{"base_url": server.URL, "api_key": key}}
++				summary, _ := helps.BridgeCompactSummary([]byte(`[{"type":"compaction","encrypted_content":"previous"}]`), "gpt-6.1-sol", key)
++				raw, _ := json.Marshal(map[string]any{"model": "gpt-6.1-sol", "max_tokens": 1000,
++					"messages":      []any{map[string]any{"role": "user", "content": summary}, map[string]any{"role": "user", "content": "new turn"}},
++					"output_config": map[string]any{"effort": "max"}})
++				opts := ex.Options{SourceFormat: tr.FormatClaude, OriginalRequest: raw, Stream: stream, Headers: make(http.Header)}
++				if compact {
++					opts.Headers.Set(helps.BridgeCompactHeader, "1")
++					opts.Headers.Set("X-Claude-Code-Request-Class", "compaction")
++				}
++				if stream {
++					result, err := e.ExecuteStream(t.Context(), a, ex.Request{Model: "gpt-6.1-sol", Payload: raw}, opts)
++					if err != nil {
++						t.Fatal(err)
++					}
++					for chunk := range result.Chunks {
++						if chunk.Err != nil {
++							t.Fatal(chunk.Err)
++						}
++					}
++				} else if _, err := e.Execute(t.Context(), a, ex.Request{Model: "gpt-6.1-sol", Payload: raw}, opts); err != nil {
++					t.Fatal(err)
++				}
++				body := <-bodies
++				if gjson.GetBytes(body, "audit").Raw != `["once"]` || gjson.GetBytes(body, "instructions").String() != "operator instructions" {
++					t.Fatal("original source rules did not apply exactly once")
++				}
++				if gjson.GetBytes(body, "reasoning").Exists() || gjson.GetBytes(body, "store").Exists() || strings.Contains(string(body), `"type":"compaction"`) {
++					t.Fatal("built-in replay or defaults undid the final filter")
++				}
++			})
++		}
++	}
++}
++
++func TestCodexBridgeCompactCountRejectsForeignCapsules(t *testing.T) {
++	key := strings.Repeat("k", 64)
++	summary, _ := helps.BridgeCompactSummary([]byte(`[{"type":"compaction","encrypted_content":"fixture"}]`), "gpt-6.1-sol", key)
++	raw, _ := json.Marshal(map[string]any{"model": "gpt-6.1-sol", "messages": []any{map[string]any{"role": "user", "content": summary}}})
++	e := NewCodexExecutor(&config.Config{})
++	a := &auth.Auth{Provider: "codex", Attributes: map[string]string{"base_url": "http://127.0.0.1:1/v1", "api_key": "foreign-key"}}
++	_, err := e.CountTokens(t.Context(), a, ex.Request{Model: "gpt-6.1-sol", Payload: raw}, ex.Options{SourceFormat: tr.FormatClaude})
++	if err == nil {
++		t.Fatal("token count accepted a foreign context capsule")
++	}
++}
+diff --git a/internal/runtime/executor/codex_executor_execute.go b/internal/runtime/executor/codex_executor_execute.go
+index cbaf2c9..316edb9 100644
+--- a/internal/runtime/executor/codex_executor_execute.go
++++ b/internal/runtime/executor/codex_executor_execute.go
+@@ -35,6 +35,12 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 	if baseURL == "" {
+ 		baseURL = "https://chatgpt.com/backend-api/codex"
+ 	}
++	if bridgeCompactRequested(opts, baseURL, apiKey) {
++		if compacted, errCompact := e.executeBridgeCompact(ctx, auth, req, opts, apiKey); errCompact == nil {
++			return compacted, nil
++		}
++		log.Warn("native compaction unavailable; preserving the original client summary request")
++	}
+ 
+ 	reporter := helps.NewExecutorUsageReporter(ctx, e, baseModel, auth)
+ 	defer reporter.TrackFailure(ctx, &err)
+@@ -61,7 +67,8 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 		return resp, err
+ 	}
+ 
+-	ctx = helps.WithPayloadFinalizer(ctx, helps.NewPayloadFinalizer(e.cfg, e.Identifier(), baseModel, to.String(), "", originalTranslated, req, opts))
++	ctx = helps.WithPayloadFinalizer(ctx, helps.BridgeCompactFinalizer(ctx,
++		helps.NewPayloadFinalizer(e.cfg, e.Identifier(), baseModel, to.String(), "", originalTranslated, req, opts)))
+ 	body = helps.SetStringIfDifferent(body, "model", baseModel)
+ 	body = helps.SetBoolIfDifferent(body, "stream", true)
+ 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
+@@ -83,6 +90,13 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 	body = normalizeCodexParallelToolCalls(body, opts.Headers)
+ 	body = helps.NormalizeCodexToolSchemas(body)
+ 	body, optimizeMultiAgentV2 := helps.OptimizeCodexMultiAgentV2RequestForAuth(ctx, opts.Headers, body, e.cfg, auth, isCompat)
++	if from == sdktranslator.FormatClaude && helps.BridgeCompactLocal(baseURL, apiKey) {
++		var errCompact error
++		body, _, errCompact = helps.ReplayBridgeCompact(body, apiKey)
++		if errCompact != nil {
++			return resp, statusErr{code: http.StatusBadRequest, msg: errCompact.Error()}
++		}
++	}
+ 	body, replayScope, errReplay := applyCodexReasoningReplayCacheRequired(ctx, from, req, opts, body)
+ 	if errReplay != nil {
+ 		return resp, errReplay
+diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runtime/executor/codex_executor_stream.go
+index 5b70845..ba21463 100644
+--- a/internal/runtime/executor/codex_executor_stream.go
++++ b/internal/runtime/executor/codex_executor_stream.go
+@@ -37,6 +37,12 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+ 	if baseURL == "" {
+ 		baseURL = "https://chatgpt.com/backend-api/codex"
+ 	}
++	if bridgeCompactRequested(opts, baseURL, apiKey) {
++		if compacted, errCompact := e.executeBridgeCompactStream(ctx, auth, req, opts, apiKey); errCompact == nil {
++			return compacted, nil
++		}
++		log.Warn("native compaction unavailable; preserving the original client summary request")
++	}
+ 
+ 	reporter := helps.NewExecutorUsageReporter(ctx, e, baseModel, auth)
+ 	defer reporter.TrackFailure(ctx, &err)
+@@ -90,6 +96,13 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+ 	body = normalizeCodexParallelToolCalls(body, opts.Headers)
+ 	body = helps.NormalizeCodexToolSchemas(body)
+ 	body, optimizeMultiAgentV2 := helps.OptimizeCodexMultiAgentV2RequestForAuth(ctx, opts.Headers, body, e.cfg, auth, isCompat)
++	if from == sdktranslator.FormatClaude && helps.BridgeCompactLocal(baseURL, apiKey) {
++		var errCompact error
++		body, _, errCompact = helps.ReplayBridgeCompact(body, apiKey)
++		if errCompact != nil {
++			return nil, statusErr{code: http.StatusBadRequest, msg: errCompact.Error()}
++		}
++	}
+ 	body, replayScope, errReplay := applyCodexReasoningReplayCacheRequired(ctx, from, req, opts, body)
+ 	if errReplay != nil {
+ 		return nil, errReplay
+diff --git a/internal/runtime/executor/codex_executor_tokens.go b/internal/runtime/executor/codex_executor_tokens.go
+index 5d8f70b..543d94c 100644
+--- a/internal/runtime/executor/codex_executor_tokens.go
++++ b/internal/runtime/executor/codex_executor_tokens.go
+@@ -3,6 +3,7 @@ package executor
+ import (
+ 	"context"
+ 	"fmt"
++	"net/http"
+ 	"strings"
+ 
+ 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
+@@ -43,6 +44,13 @@ func (e *CodexExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth
+ 	body, _ = sjson.DeleteBytes(body, "stream_options")
+ 	body = helps.SetBoolIfDifferent(body, "stream", false)
+ 	body = normalizeCodexInstructions(body, helps.IsNativeCodexRequest(req.Payload, opts))
++	apiKey, baseURL := codexCredsForRequest(ctx, auth, opts.Headers)
++	if from == sdktranslator.FormatClaude && helps.BridgeCompactLocal(baseURL, apiKey) {
++		body, _, err = helps.ReplayBridgeCompact(body, apiKey)
++		if err != nil {
++			return cliproxyexecutor.Response{}, statusErr{code: http.StatusBadRequest, msg: err.Error()}
++		}
++	}
+ 
+ 	body = helps.NewPayloadFinalizer(e.cfg, e.Identifier(), baseModel, to.String(), "", originalTranslatedForPayload, req, opts)(body)
+ 	enc, err := tokenizerForCodexModel(baseModel)
+diff --git a/internal/runtime/executor/helps/bridge_compaction.go b/internal/runtime/executor/helps/bridge_compaction.go
+new file mode 100644
+index 0000000..4538cac
+--- /dev/null
++++ b/internal/runtime/executor/helps/bridge_compaction.go
+@@ -0,0 +1,172 @@
++package helps
++
++import (
++	"context"
++	"crypto/hmac"
++	"crypto/sha256"
++	"encoding/base64"
++	"encoding/hex"
++	"encoding/json"
++	"errors"
++	"net"
++	"net/url"
++	"strconv"
++	"strings"
++
++	"github.com/tidwall/gjson"
++	"github.com/tidwall/sjson"
++)
++
++const BridgeCompactHeader = "X-Codex-Bridge-Native-Compaction"
++const bridgeCompactPrefix = "<!-- codex-native-context-v1:"
++const bridgeCompactSuffix = " -->"
++const bridgeCompactLimit = 1 << 20
++
++type bridgeCompactFinalizerKey struct{}
++
++// WithBridgeCompactFinalizer retains the original Claude rule-matching context
++// when the internal maintenance request uses the native wire representation.
++func WithBridgeCompactFinalizer(ctx context.Context, finalize PayloadFinalizer) context.Context {
++	return context.WithValue(ctx, bridgeCompactFinalizerKey{}, finalize)
++}
++
++func BridgeCompactFinalizer(ctx context.Context, otherwise PayloadFinalizer) PayloadFinalizer {
++	if finalize, ok := ctx.Value(bridgeCompactFinalizerKey{}).(PayloadFinalizer); ok && finalize != nil {
++		return finalize
++	}
++	return otherwise
++}
++
++// BridgeCompactLocal restricts this extension to a guarded local inference hop.
++// The local upstream key is stable across model/account/backend changes and is
++// never a rotating OAuth token or a public API project key.
++func BridgeCompactLocal(baseURL, key string) bool {
++	u, err := url.Parse(baseURL)
++	if err != nil || key == "" || (u.Scheme != "http" && u.Scheme != "https") {
++		return false
++	}
++	ip := net.ParseIP(u.Hostname())
++	return ip != nil && ip.IsLoopback()
++}
++
++func bridgeCompactMAC(raw []byte, key string) []byte {
++	h := hmac.New(sha256.New, []byte(key))
++	_, _ = h.Write([]byte("claude-codex-native-context-v1\x00"))
++	_, _ = h.Write(raw)
++	return h.Sum(nil)
++}
++
++func validBridgeCompactItems(items gjson.Result) bool {
++	rows := items.Array()
++	return items.IsArray() && len(rows) == 1 && rows[0].Get("type").String() == "compaction" &&
++		rows[0].Get("encrypted_content").Type == gjson.String && rows[0].Get("encrypted_content").String() != ""
++}
++
++// BridgeCompactSummary is self-contained. It survives Claude's text-only
++// /compact boundary and a later process/backend restart without a state table.
++// Authentication prevents page/tool text from inventing a privileged capsule.
++func BridgeCompactSummary(items []byte, model, key string) (string, error) {
++	if len(items) > bridgeCompactLimit || !json.Valid(items) || !validBridgeCompactItems(gjson.ParseBytes(items)) {
++		return "", errors.New("native compaction returned no canonical capsule")
++	}
++	raw, err := json.Marshal(map[string]any{"v": 1, "model": model, "output": json.RawMessage(items)})
++	if err != nil || len(raw) > bridgeCompactLimit {
++		return "", errors.New("native compaction capsule exceeds its limit")
++	}
++	token := base64.RawURLEncoding.EncodeToString(raw) + "." + hex.EncodeToString(bridgeCompactMAC(raw, key))
++	return "<summary>Context snapshot retained. Continue the existing task using the preserved conversation state.\n" +
++		bridgeCompactPrefix + token + bridgeCompactSuffix + "\n</summary>", nil
++}
++
++func decodeBridgeCompact(token, key string) ([]byte, error) {
++	if len(token) > base64.RawURLEncoding.EncodedLen(bridgeCompactLimit)+65 {
++		return nil, errors.New("native context capsule exceeds its limit")
++	}
++	parts := strings.Split(token, ".")
++	if len(parts) != 2 {
++		return nil, errors.New("native context capsule is truncated")
++	}
++	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
++	if err != nil || len(raw) > bridgeCompactLimit || !json.Valid(raw) {
++		return nil, errors.New("native context capsule is invalid")
++	}
++	signature, err := hex.DecodeString(parts[1])
++	if err != nil || !hmac.Equal(signature, bridgeCompactMAC(raw, key)) {
++		return nil, errors.New("native context signature is not trusted by this bridge")
++	}
++	value := gjson.ParseBytes(raw)
++	if value.Get("v").Int() != 1 || !validBridgeCompactItems(value.Get("output")) {
++		return nil, errors.New("native context capsule version or type is unsupported")
++	}
++	return []byte(value.Get("output").Raw), nil
++}
++
++// ReplayBridgeCompact runs before the final operator payload rules. It never
++// scans tool results. Claude owns history pruning; this only substitutes its
++// authenticated summary carrier. Every other current instruction/image/tool
++// item and every later turn survives unchanged.
++func ReplayBridgeCompact(body []byte, key string) ([]byte, bool, error) {
++	input := gjson.GetBytes(body, "input")
++	if !input.IsArray() {
++		return body, false, nil
++	}
++	rows := input.Array()
++	var capsule []byte
++	foundAt, foundPart := -1, -1
++	var cleaned string
++	for i, item := range rows {
++		role := item.Get("role").String()
++		if role != "user" && role != "assistant" {
++			continue
++		}
++		for j, part := range item.Get("content").Array() {
++			if part.Get("type").String() != "input_text" && part.Get("type").String() != "output_text" {
++				continue
++			}
++			text := part.Get("text").String()
++			start := strings.Index(text, bridgeCompactPrefix)
++			if start < 0 {
++				continue
++			}
++			end := strings.Index(text[start+len(bridgeCompactPrefix):], bridgeCompactSuffix)
++			if end < 0 || foundAt >= 0 {
++				return nil, false, errors.New("native context capsule is truncated or duplicated")
++			}
++			end += start + len(bridgeCompactPrefix)
++			var err error
++			capsule, err = decodeBridgeCompact(text[start+len(bridgeCompactPrefix):end], key)
++			if err != nil {
++				return nil, false, err
++			}
++			cleaned = text[:start] + text[end+len(bridgeCompactSuffix):]
++			if strings.Contains(cleaned, bridgeCompactPrefix) {
++				return nil, false, errors.New("native context capsule is duplicated")
++			}
++			foundAt, foundPart = i, j
++		}
++	}
++	if foundAt < 0 {
++		return body, false, nil
++	}
++	output := make([]json.RawMessage, 0, len(rows)+1)
++	for _, item := range gjson.ParseBytes(capsule).Array() {
++		output = append(output, json.RawMessage(item.Raw))
++	}
++	for _, item := range rows[:foundAt] {
++		output = append(output, json.RawMessage(item.Raw))
++	}
++	updated, err := sjson.SetBytes([]byte(rows[foundAt].Raw), "content."+strconv.Itoa(foundPart)+".text", cleaned)
++	if err != nil {
++		return nil, false, errors.New("native context continuation could not be rebuilt")
++	}
++	output = append(output, updated)
++	for _, item := range rows[foundAt+1:] {
++		output = append(output, json.RawMessage(item.Raw))
++	}
++	encoded, err := json.Marshal(output)
++	if err != nil {
++		return nil, false, errors.New("native context continuation could not be serialized")
++	}
++	result, err := sjson.SetRawBytes(body, "input", encoded)
++	return result, err == nil, err
++}
+diff --git a/internal/runtime/executor/helps/bridge_compaction_test.go b/internal/runtime/executor/helps/bridge_compaction_test.go
+new file mode 100644
+index 0000000..195fa06
+--- /dev/null
++++ b/internal/runtime/executor/helps/bridge_compaction_test.go
+@@ -0,0 +1,57 @@
++package helps
++
++import (
++	"encoding/json"
++	"strings"
++	"testing"
++
++	"github.com/tidwall/gjson"
++)
++
++func TestBridgeCompactRoundTripKeepsNewTurnsAndDefinitions(t *testing.T) {
++	key := strings.Repeat("k", 64)
++	items := []byte(`[{"type":"compaction","encrypted_content":"synthetic-capsule"}]`)
++	summary, err := BridgeCompactSummary(items, "gpt-6.1-sol", key)
++	if err != nil {
++		t.Fatal(err)
++	}
++	body, _ := json.Marshal(map[string]any{"model": "gpt-6-astra", "input": []any{
++		map[string]any{"type": "message", "role": "developer", "content": []any{map[string]any{"type": "input_text", "text": "current system"}}},
++		map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "old history"}}},
++		map[string]any{"type": "additional_tools", "tools": []any{}},
++		map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Continue. " + summary + " Keep this suffix."}}},
++		map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "new user request"}}},
++	}})
++	out, changed, err := ReplayBridgeCompact(body, key)
++	if err != nil || !changed {
++		t.Fatalf("replay: %v", err)
++	}
++	rows := gjson.GetBytes(out, "input").Array()
++	if len(rows) != 6 || rows[0].Get("type").String() != "compaction" || rows[1].Get("role").String() != "developer" || rows[3].Get("type").String() != "additional_tools" {
++		t.Fatal("canonical prefix mismatch")
++	}
++	if !strings.Contains(string(out), "old history") || strings.Contains(string(out), bridgeCompactPrefix) || !strings.Contains(string(out), "Keep this suffix") || !strings.Contains(string(out), "new user request") {
++		t.Fatal("old history/new turns changed incorrectly")
++	}
++	if gjson.GetBytes(out, "model").String() != "gpt-6-astra" {
++		t.Fatal("replay changed the selected model")
++	}
++	if _, _, err = ReplayBridgeCompact(body, "different-root-key"); err == nil {
++		t.Fatal("foreign signing root accepted")
++	}
++}
++
++func TestBridgeCompactNeverTrustsToolOutputOrUnexpectedNativeTypes(t *testing.T) {
++	key := strings.Repeat("k", 64)
++	summary, _ := BridgeCompactSummary([]byte(`[{"type":"compaction","encrypted_content":"fixture"}]`), "model", key)
++	body, _ := json.Marshal(map[string]any{"input": []any{map[string]any{"type": "function_call_output", "call_id": "fixture", "output": summary}}})
++	_, changed, err := ReplayBridgeCompact(body, key)
++	if err != nil || changed {
++		t.Fatal("tool output was treated as a trusted context boundary")
++	}
++	for _, raw := range []string{`[{"type":"function_call","name":"Bash"}]`, `[{"type":"compaction","encrypted_content":""}]`, `[{"type":"compaction","encrypted_content":"fixture"},{"type":"message"}]`} {
++		if _, err := BridgeCompactSummary([]byte(raw), "model", key); err == nil {
++			t.Fatal("unexpected native result was signed")
++		}
++	}
++}

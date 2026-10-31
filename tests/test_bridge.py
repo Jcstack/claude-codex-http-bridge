@@ -38,6 +38,27 @@ def model(context: int, search: bool = True) -> dict:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_native_compaction_requires_reviewed_runtime_and_keeps_other_headers(self):
+        manifest = {"source": {"files": {"upstream/patches/native-compaction-v2.patch": "fixture"}}}
+        with patch.dict(os.environ, {}, clear=True):
+            env = {"CLAUDE_CODE_GATEWAY_HINT_HEADERS": "1", "ANTHROPIC_CUSTOM_HEADERS": "X-Local-Trace: fixture\nx-codex-bridge-native-compaction: 0"}
+            args = launcher.native_compaction_options(env, ["--native-compaction", "--effort", "max"], "subscription", manifest)
+            self.assertEqual(args, ["--effort", "max"])
+            self.assertEqual(env["ANTHROPIC_CUSTOM_HEADERS"], "X-Local-Trace: fixture\nX-Codex-Bridge-Native-Compaction: 1")
+            launcher.native_compaction_options(env, ["--no-native-compaction"], "subscription", manifest)
+            self.assertEqual(env["ANTHROPIC_CUSTOM_HEADERS"], "X-Local-Trace: fixture")
+            for route, bundle in (("api", manifest), ("subscription", None), ("subscription", {})):
+                with self.assertRaisesRegex(RuntimeError, "reviewed subscription runtime"):
+                    launcher.native_compaction_options({}, ["--native-compaction"], route, bundle)
+            args = launcher.native_compaction_options({}, ["--", "--native-compaction"], "subscription", None)
+            self.assertEqual(args, ["--", "--native-compaction"])
+            with self.assertRaisesRegex(RuntimeError, "HINT_HEADERS"):
+                launcher.native_compaction_options({}, ["--native-compaction"], "subscription", manifest)
+        with patch.dict(os.environ, {"CLAUDE_CODEX_NATIVE_COMPACTION": "1"}):
+            env = {"CLAUDE_CODE_GATEWAY_HINT_HEADERS": "1"}
+            launcher.native_compaction_options(env, [], "subscription", manifest)
+            self.assertIn("Compaction: 1", env["ANTHROPIC_CUSTOM_HEADERS"])
+
     def test_default_context_is_not_the_advertised_maximum(self) -> None:
         row = {**model(272_000), "max_context_window": 872_000, "auto_compact_token_limit": None}
         selected = bridge_models.context_metadata(row)

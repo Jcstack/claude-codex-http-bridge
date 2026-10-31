@@ -184,6 +184,40 @@ def claude_environment(port: int, key: str, model: str,
     return environment
 
 
+def native_compaction_options(environment: dict[str, str], arguments: list[str],
+                              route: str, manifest: dict | None) -> list[str]:
+    """Opt in only with the reviewed implementation, preserving unrelated headers."""
+    setting = os.environ.get("CLAUDE_CODEX_NATIVE_COMPACTION", "0")
+    if setting not in ("0", "1"):
+        raise ValueError("CLAUDE_CODEX_NATIVE_COMPACTION must be 0 or 1")
+    enabled = setting == "1"
+    forwarded = []
+    for index, argument in enumerate(arguments):
+        if argument == "--":
+            forwarded.extend(arguments[index:])
+            break
+        if argument in ("--native-compaction", "--no-native-compaction"):
+            enabled = argument == "--native-compaction"
+        else:
+            forwarded.append(argument)
+    if enabled:
+        files = manifest.get("source", {}).get("files", {}) if manifest else {}
+        if route != "subscription" or "upstream/patches/native-compaction-v2.patch" not in files:
+            raise RuntimeError("Native compaction requires the reviewed subscription runtime with its V2 patch; upgrade the runtime first")
+        if environment.get("CLAUDE_CODE_GATEWAY_HINT_HEADERS") != "1":
+            raise RuntimeError("Native compaction requires CLAUDE_CODE_GATEWAY_HINT_HEADERS=1")
+    name = "X-Codex-Bridge-Native-Compaction"
+    headers = [line for line in environment.get("ANTHROPIC_CUSTOM_HEADERS", "").splitlines()
+               if line.partition(":")[0].strip().lower() != name.lower()]
+    if enabled:
+        headers.append(name + ": 1")
+    if headers:
+        environment["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(headers)
+    else:
+        environment.pop("ANTHROPIC_CUSTOM_HEADERS", None)
+    return forwarded
+
+
 def configured_status_line() -> dict | None:
     if os.environ.get("CLAUDE_CODEX_STATUSLINE_ADAPTER") == "0":
         return None
@@ -506,6 +540,11 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
     if managed:
         claude_environment_values = rolling_runtime.client_environment(ROOT, managed, claude_environment_values, directory)
         settings_path = rolling_runtime.client_settings(settings_path, claude_environment_values, directory)
+    manifest = None
+    if managed:
+        import runtime_bundle
+        manifest = runtime_bundle.selected(ROOT)[1]
+    claude_args = native_compaction_options(claude_environment_values, claude_args, route, manifest)
     label = "OpenAI API" if route == "api" else "Codex"
     print(
         f"{label} bridge active on {claude_environment_values['ANTHROPIC_BASE_URL']}: "
@@ -565,6 +604,7 @@ def main() -> int:
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
         print("Optional native capabilities: claude-codex tools install | status | enable | disable (Python 3.11+).")
         print("Use --no-native-tools to omit them for one launch; --native-tools explicitly enables them with strict MCP config.")
+        print("Opt-in native V2 /compact: --native-compaction (reviewed subscription runtime required); --no-native-compaction disables it.")
         print("Opt-in scoped computer use: claude-codex desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
         print("Read-only metadata: claude-codex diagnostics [--hours 2] [--session UUID].")
         return 0

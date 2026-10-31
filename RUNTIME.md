@@ -69,6 +69,12 @@ manifest and state. Pending drain work can be completed by another reload.
 service, wait for background tasks before stopping; a task can be between model
 requests even when the instantaneous request count is zero.
 
+The reviewed stack also includes [native V2 compaction](NATIVE_COMPACTION.md).
+Enable it per launch with `--native-compaction`; older selected bundles remain
+usable but cannot accept that option without the reviewed patch. Replay uses
+the stable private origin-guard key, preserving signed state across translator
+replacement without copying rotating OAuth credentials.
+
 ## Native URL citations
 
 The [URL annotation patch](upstream/patches/url-citations.patch) maps OpenAI

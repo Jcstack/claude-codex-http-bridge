@@ -27,13 +27,13 @@ def existing_subscription(installed: Path) -> dict:
 
 
 @contextmanager
-def temporary_translator(binary: Path, upstream: dict, model: str):
+def temporary_translator(binary: Path, upstream: dict, model: str, *, models: dict | None = None):
     with tempfile.TemporaryDirectory(prefix="bridge-live-fixture-") as temporary:
         root = Path(temporary)
         runtime = root / "runtime-api"
         runtime.mkdir(mode=0o700)
         api_profile.set_key(root, upstream["key"])
-        with patch.object(api_profile, "discover_models", return_value={model: upstream["models"][model]}):
+        with patch.object(api_profile, "discover_models", return_value=models or {model: upstream["models"][model]}):
             port, _, config, key, _ = api_profile.make_session(root, runtime)
         source = config.read_text()
         target = 'base-url: "https://api.openai.com/v1"'

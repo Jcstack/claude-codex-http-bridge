@@ -13,6 +13,7 @@
 !OPERATIONS.md
 !RUNTIME.md
 !NATIVE_TOOLS.md
+!NATIVE_COMPACTION.md
 !ACCOUNTS.md
 !SECURITY.md
 !LICENSE
@@ -58,6 +59,7 @@
 !upstream/patches/web-search-replay.patch
 !upstream/patches/loopback-tls.patch
 !upstream/patches/url-citations.patch
+!upstream/patches/native-compaction-v2.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml

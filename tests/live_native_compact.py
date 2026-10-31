@@ -22,6 +22,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--model", default="sol")
+    parser.add_argument("--protocol", choices=("v2", "legacy"), default="v2")
+    parser.add_argument("--native-default-effort", action="store_true", help="Leave only the compaction request's effort unset; recall still uses max")
     args = parser.parse_args()
     upstream = existing_subscription(args.root)
     model = bridge_models.aliases(upstream["models"]).get(args.model, args.model)
@@ -37,11 +39,32 @@ def main():
     key = str(uuid.uuid4())
     started = time.monotonic()
     try:
-        result = client.json("/v1/responses/compact", {"model": model, "input": original,
+        payload = {"model": model, "input": original,
             "instructions": "Preserve the exact latest configuration, restrictions, unresolved issue and next action. Omit historical observations.",
-            "reasoning": {"effort": "max"}, "prompt_cache_key": key})
+            "reasoning": {"effort": "max"}, "prompt_cache_key": key}
+        if args.native_default_effort:
+            payload.pop("reasoning")
+        if args.protocol == "legacy":
+            result = client.json("/v1/responses/compact", payload)
+        else:
+            # Codex rust-v0.166.0 compact_remote_v2_attempt appends this typed
+            # item and streams an ordinary Responses request. The obsolete
+            # standalone path returning 404 does not establish unavailability.
+            payload.update(store=False, input=[*original, {"type": "compaction_trigger"}])
+            result, completed_items = None, []
+            for event in client.events("/v1/responses", payload):
+                if event.get("type") in ("error", "response.failed", "response.incomplete"):
+                    raise RuntimeError("Native compaction stream failed; raw state withheld")
+                if event.get("type") == "response.output_item.done":
+                    completed_items.append(event.get("item", {}))
+                if event.get("type") == "response.completed":
+                    result = event.get("response", {})
+            if result is None:
+                raise RuntimeError("Native compaction stream ended without completion")
+            if not result.get("output"):
+                result["output"] = completed_items
     except NativeRouteError as error:
-        print(json.dumps({"stage": "native_compact", "available": False, "status": error.status,
+        print(json.dumps({"stage": "native_compact", "protocol": args.protocol, "available": False, "status": error.status,
                           "category": error.category, "seconds": round(time.monotonic()-started, 3)}))
         raise SystemExit(3) from None
     output = result.get("output", [])
@@ -49,7 +72,8 @@ def main():
     if not compactions:
         raise RuntimeError("Native compaction did not return continuation state")
     numeric = lambda usage: {k: value for k, value in usage.items() if k in ("input_tokens", "output_tokens", "total_tokens") and type(value) is int}
-    print(json.dumps({"stage": "native_compact", "model": model, "effort": "max",
+    print(json.dumps({"stage": "native_compact", "model": model, "effort": "native_default" if args.native_default_effort else "max",
+                      "protocol": args.protocol,
                       "seconds": round(time.monotonic()-started, 3), "compaction_items": len(compactions),
                       "usage": numeric(result.get("usage", {}))}), flush=True)
     started = time.monotonic()

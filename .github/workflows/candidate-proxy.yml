@@ -51,10 +51,12 @@ jobs:
           git -C upstream-source apply ../upstream/patches/web-search-replay.patch
           git -C upstream-source apply ../upstream/patches/loopback-tls.patch
           git -C upstream-source apply ../upstream/patches/url-citations.patch
+          git -C upstream-source apply ../upstream/patches/native-compaction-v2.patch
           cd upstream-source
           go mod verify
           go test ./internal/translator/codex/claude
           go test ./internal/runtime/executor/helps
+          go test -timeout 90s -run 'TestCodex|TestBridgeCompact' ./internal/runtime/executor
           cp ../tests/auth_handoff_fixture.go sdk/cliproxy/auth/bridge_handoff_local_test.go
           go test -timeout 60s -run '^TestBridgeAccountHandoffKeepsAdmittedStream$' ./sdk/cliproxy/auth
           go build -o "../${{ matrix.binary }}" ./cmd/server
@@ -71,6 +73,7 @@ jobs:
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
           python tests/smoke_transport.py "${{ matrix.binary }}"
           python tests/smoke_model_state.py "${{ matrix.binary }}"
+          python tests/smoke_native_compaction.py "${{ matrix.binary }}"
           python tests/smoke_web_state.py "${{ matrix.binary }}" --claude-client
           python tests/smoke_managed_runtime.py runtime-bundle --claude-client --background-client
       - uses: actions/upload-artifact@v4

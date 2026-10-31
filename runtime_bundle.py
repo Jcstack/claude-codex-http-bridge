@@ -13,7 +13,7 @@ import secrets
 
 SOURCE = Path(__file__).resolve().parent
 UPSTREAM = "9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5"
-PATCHES = ("12d97cf-inline-tools-backport.patch", "12d97cf-deferred-tools.patch", "web-search-replay.patch", "loopback-tls.patch", "url-citations.patch")
+PATCHES = ("12d97cf-inline-tools-backport.patch", "12d97cf-deferred-tools.patch", "web-search-replay.patch", "loopback-tls.patch", "url-citations.patch", "native-compaction-v2.patch")
 
 
 def canonical(value: dict) -> bytes:
