@@ -101,3 +101,10 @@ native hosted-search state items passed. Separate encrypted reasoning blocks
 were not observed in those trials; their cross-account replay is unverified.
 These live checks used synthetic content. Account files, response bodies and
 private logs are not published, and CI receives no real account credentials.
+
+A later live check of the retained inactive account completed inference in
+3.354 seconds with no outer or nested refresh grant supplied to its validator.
+The currently selected account and origin service stayed unchanged. The
+access-only rule follows the pinned upstream's
+[disabled-credential refresh tests](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/cliproxy/auth/conductor_refresh_disabled_test.go),
+not an assumption that disabled credentials cannot refresh.
