@@ -20,6 +20,12 @@ credentials privately; current requests keep their original account. `check`
 uses a disposable private validator for staged/inactive credentials and a small
 synthetic inference request. Checking the already-selected account reuses its
 existing route so there is no second refresh owner for those credentials.
+An installed inactive account also retains its original refresh owner:
+CLIProxyAPI continues refreshing disabled credentials. Its validator receives
+only an access-token snapshot, with outer and nested refresh grants excluded,
+and cannot write changed credentials back. Only a new, uninstalled staged grant
+can refresh inside the validator. An expired/revoked access snapshot can fail
+validation; it is not repaired by racing another refresh owner.
 `use` repeats that check if no recent successful check exists. It enables and
 publishes the validated target before disabling other Codex credentials.
 It never deletes credentials, stops a proxy, or restarts a Claude process.
@@ -40,12 +46,12 @@ private transaction journal remains; run:
 claude-codex account recover
 ```
 
-Validation can rotate an inactive account's refresh token. The helper saves
-that generation back to its disabled record before a later switch can reuse
-it. An interrupted save leaves a private refresh checkpoint and blocks using
-that alias until `account recover` succeeds. Recovery preserves the current
-enabled/disabled selection and refuses to overwrite a newer refresh generation.
-Checks, switches and recovery share the same local lock.
+Earlier validators could rotate an inactive record's refresh token. Recovery
+support for those private refresh checkpoints remains: an alias with a pending
+checkpoint is blocked until `account recover` succeeds. Recovery preserves
+enabled/disabled selection and refuses to overwrite a newer generation. New
+installed-account checks avoid this competing refresh path entirely. Checks,
+switches and recovery share the same local lock.
 
 ## Security and quota
 

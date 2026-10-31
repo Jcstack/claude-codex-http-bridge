@@ -12,10 +12,12 @@ Optional HUD quota telemetry follows exactly one enabled bridge account and excl
 
 [Account authorization and switching](ACCOUNTS.md) use a loopback-only OAuth callback and fixed OpenAI endpoints. Switching uses the already-enabled, PID-verified loopback management interface and its retained private credential, restricted in this helper to auth-file listing, model publication, upload and status changes. No LAN binding or management-panel access is enabled. Validated target credentials are enabled before old credentials are disabled; existing credentials are retained, never deleted. An account-only recovery journal stays private until the selection is verified. An isolated validator may copy an account record into a temporary private directory; it never copies it into this source repository or the native Codex directory.
 
-Inactive-account validation persists rotated refresh credentials while keeping
-that account disabled. Interrupted writes retain a private checkpoint outside
-the repository. Recovery never enables the account implicitly and refuses to
-overwrite a newer refresh generation; checks and account changes share a lock.
+Installed inactive-account validation receives only an access-token snapshot;
+outer and nested refresh grants are excluded because the origin still refreshes
+disabled credentials. A new staged grant may refresh privately before it is
+installed. Older interrupted refresh writes retain private checkpoints outside
+the repository; recovery never enables an account implicitly or overwrites a
+newer generation. Checks and account changes share a lock.
 
 Model restoration keeps only a model ID, a workspace-path hash and a timestamp in the private runtime, separated by Claude configuration root and provider route. Session IDs name the files. The transcript fallback reads a bounded tail and extracts parent-message model metadata; it never prints or copies message/tool content, titles, or raw workspace paths into that ledger. Unknown models and sidechain replies do not become a parent-model selection. The status-line fast path writes nothing when the model is unchanged.
 

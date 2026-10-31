@@ -30,6 +30,51 @@ def tokens(account="synthetic-account-b", user=None):
 
 
 class AccountTests(unittest.TestCase):
+    def test_installed_inactive_validation_cannot_become_a_second_refresh_owner(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            accounts.private_directory(root / "auth")
+            inactive = {**accounts.token_record(tokens("synthetic-inactive")),
+                        "siwc": {"refresh_token": "synthetic-nested-refresh"}}
+            active = {**accounts.token_record(tokens("synthetic-active")), "disabled": False}
+            for name, row in (("inactive", inactive), ("active", active)):
+                accounts.api_profile.write_private(root / "auth" / (name + ".json"), json.dumps(row))
+            original = json.dumps(inactive, sort_keys=True)
+
+            @contextmanager
+            def isolated(_root, candidate):
+                self.assertIsNot(candidate, inactive)
+                self.assertNotIn("refresh_token", candidate)
+                self.assertNotIn("siwc", candidate)
+                self.assertEqual(candidate["access_token"], inactive["access_token"])
+                candidate["access_token"] = "synthetic-validator-change"
+                yield {"models": {}}
+
+            with patch.object(accounts, "isolated_account", side_effect=isolated), \
+                    patch.object(accounts, "Management", side_effect=AssertionError("selection must not change")):
+                with accounts.validation_route(root, inactive):
+                    pass
+            self.assertEqual(json.dumps(inactive, sort_keys=True), original)
+            self.assertEqual(json.dumps(accounts.private_json(root / "auth/inactive.json"), sort_keys=True), original)
+
+    def test_new_staged_grant_can_refresh_without_an_installed_owner(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            accounts.private_directory(root / "auth")
+            staged = accounts.token_record(tokens())
+
+            @contextmanager
+            def isolated(_root, candidate):
+                self.assertIs(candidate, staged)
+                self.assertEqual(candidate["refresh_token"], "synthetic-refresh")
+                yield {"models": {}}
+                candidate["refresh_token"] = "synthetic-new-generation"
+
+            with patch.object(accounts, "isolated_account", side_effect=isolated):
+                with accounts.validation_route(root, staged):
+                    pass
+            self.assertEqual(staged["refresh_token"], "synthetic-new-generation")
+
     def test_rotated_refresh_checkpoint_recovers_without_changing_selection(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

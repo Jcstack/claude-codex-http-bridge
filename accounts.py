@@ -487,9 +487,18 @@ def select_record(root: Path, alias: str) -> dict:
 
 @contextmanager
 def validation_route(root: Path, record: dict):
-    active = [row for row in local_accounts(root) if not row["record"].get("disabled")]
+    installed = local_accounts(root)
+    active = [row for row in installed if not row["record"].get("disabled")]
     if len(active) != 1 or active[0]["fingerprint"] != fingerprint(record):
-        with isolated_account(root, record) as probe:
+        # Disabled credentials are still refreshed by CLIProxyAPI. An installed
+        # account therefore already has a refresh owner even while inactive.
+        # Validate it with an access-only snapshot, never a second refresh token
+        # (including any nested SIWC refresh grant). New staged grants have no
+        # installed owner and may refresh in their isolated validator as before.
+        owned = any(row["fingerprint"] == fingerprint(record) for row in installed)
+        candidate = ({key: record[key] for key in ("type", "id_token", "access_token", "account_id", "email", "plan_type", "expired")
+                      if key in record} if owned else record)
+        with isolated_account(root, candidate) as probe:
             yield probe
         return
     # A selected account already has a refresh owner. Reuse its route rather
