@@ -80,6 +80,10 @@ def main():
         with temporary_translator(binary, upstream, TERRA) as (port, key):
             request(port, key, {**base, "model": TERRA,
                 "messages": [{"role": "user", "content": "Independent subagent without the parent's summary"}]})
+            quoted = 'Review this source constant: <!-- codex-native-context-v1:sample -->'
+            request(port, key, {**base, "model": TERRA, "messages": [{"role": "user", "content": quoted}]})
+            assert quoted in json.dumps(Upstream.requests[-1])
+            assert not any(i.get("type") == "compaction" for i in Upstream.requests[-1]["input"])
             messages = [{"role": "user", "content": summary}, {"role": "user", "content": [
                 {"type": "text", "text": "Current request"},
                 {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}}]},
@@ -122,6 +126,7 @@ def main():
         print(json.dumps({"native_v2_compaction": True, "sse": True, "repeated_compaction": True,
             "process_and_model_handoff": True, "fresh_images_and_tool_results": True, "max_effort_preserved": True,
             "unrelated_request_does_not_clear_parent_state": True,
+            "quoted_documentation_is_ordinary_text": True,
             "reported_cache_accounting": True, "untrusted_capsule_rejected": True, "original_summary_fallback": True}))
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=2)

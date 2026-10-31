@@ -362,10 +362,10 @@ index 5d8f70b..543d94c 100644
  	enc, err := tokenizerForCodexModel(baseModel)
 diff --git a/internal/runtime/executor/helps/bridge_compaction.go b/internal/runtime/executor/helps/bridge_compaction.go
 new file mode 100644
-index 0000000..4538cac
+index 0000000..d99201c
 --- /dev/null
 +++ b/internal/runtime/executor/helps/bridge_compaction.go
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,189 @@
 +package helps
 +
 +import (
@@ -388,6 +388,7 @@ index 0000000..4538cac
 +const BridgeCompactHeader = "X-Codex-Bridge-Native-Compaction"
 +const bridgeCompactPrefix = "<!-- codex-native-context-v1:"
 +const bridgeCompactSuffix = " -->"
++const bridgeCompactLead = "Context snapshot retained. Continue the existing task using the preserved conversation state."
 +const bridgeCompactLimit = 1 << 20
 +
 +type bridgeCompactFinalizerKey struct{}
@@ -442,8 +443,24 @@ index 0000000..4538cac
 +		return "", errors.New("native compaction capsule exceeds its limit")
 +	}
 +	token := base64.RawURLEncoding.EncodeToString(raw) + "." + hex.EncodeToString(bridgeCompactMAC(raw, key))
-+	return "<summary>Context snapshot retained. Continue the existing task using the preserved conversation state.\n" +
++	return "<summary>" + bridgeCompactLead + "\n" +
 +		bridgeCompactPrefix + token + bridgeCompactSuffix + "\n</summary>", nil
++}
++
++func bridgeCompactMarker(text string) int {
++	for offset := 0; offset < len(text); {
++		start := strings.Index(text[offset:], bridgeCompactPrefix)
++		if start < 0 {
++			return -1
++		}
++		start += offset
++		if strings.HasSuffix(strings.TrimRight(text[:start], " \t\r\n"), bridgeCompactLead) {
++			return start
++		}
++		// A quoted source constant or documentation example is ordinary text.
++		offset = start + len(bridgeCompactPrefix)
++	}
++	return -1
 +}
 +
 +func decodeBridgeCompact(token, key string) ([]byte, error) {
@@ -492,7 +509,7 @@ index 0000000..4538cac
 +				continue
 +			}
 +			text := part.Get("text").String()
-+			start := strings.Index(text, bridgeCompactPrefix)
++			start := bridgeCompactMarker(text)
 +			if start < 0 {
 +				continue
 +			}
@@ -507,7 +524,7 @@ index 0000000..4538cac
 +				return nil, false, err
 +			}
 +			cleaned = text[:start] + text[end+len(bridgeCompactSuffix):]
-+			if strings.Contains(cleaned, bridgeCompactPrefix) {
++			if bridgeCompactMarker(cleaned) >= 0 {
 +				return nil, false, errors.New("native context capsule is duplicated")
 +			}
 +			foundAt, foundPart = i, j
@@ -540,10 +557,10 @@ index 0000000..4538cac
 +}
 diff --git a/internal/runtime/executor/helps/bridge_compaction_test.go b/internal/runtime/executor/helps/bridge_compaction_test.go
 new file mode 100644
-index 0000000..195fa06
+index 0000000..ac33dbf
 --- /dev/null
 +++ b/internal/runtime/executor/helps/bridge_compaction_test.go
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,71 @@
 +package helps
 +
 +import (
@@ -599,5 +616,19 @@ index 0000000..195fa06
 +		if _, err := BridgeCompactSummary([]byte(raw), "model", key); err == nil {
 +			t.Fatal("unexpected native result was signed")
 +		}
++	}
++}
++
++func TestBridgeCompactQuotedSourceIsNotAStateBoundary(t *testing.T) {
++	quoted := "Review this source constant: " + bridgeCompactPrefix + "sample" + bridgeCompactSuffix
++	body, _ := json.Marshal(map[string]any{"input": []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": quoted}}}}})
++	out, changed, err := ReplayBridgeCompact(body, "private-root")
++	if err != nil || changed || string(out) != string(body) {
++		t.Fatal("ordinary source/documentation text was interpreted as native state")
++	}
++	broken := bridgeCompactLead + "\n" + bridgeCompactPrefix + "broken" + bridgeCompactSuffix
++	body, _ = json.Marshal(map[string]any{"input": []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": broken}}}}})
++	if _, _, err := ReplayBridgeCompact(body, "private-root"); err == nil {
++		t.Fatal("corrupted native summary was silently ignored")
 +	}
 +}

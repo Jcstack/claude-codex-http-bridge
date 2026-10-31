@@ -55,6 +55,9 @@ prefix, never OAuth or project credentials. Only guarded numeric-loopback
 upstreams enable the extension. Invalid, truncated, duplicate and foreign
 carriers fail closed; tool outputs cannot create a context boundary. The
 envelope has a 1 MiB defensive bound; larger output falls back to the summary.
+Recognition also requires the generated summary's exact lead-in. A quoted
+source constant or documentation example remains ordinary text; it cannot
+accidentally trigger a corrupt-context error while reviewing this bridge.
 
 The carrier is private conversation data even though native state is encrypted.
 Never publish it, enable body logging, or add transcripts to Git. Resume/fork,
