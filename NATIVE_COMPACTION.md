@@ -76,6 +76,9 @@ the HUD continues using actual reported usage.
 - Larger real Claude: 64,413 provider input tokens; the update read 64,256 cached
   tokens. Two compactions took 39.492 s and 46.765 s, each followed by a Terra
   max-effort continuation retaining 12/12 fields from the Sol conversation.
+- The installed launcher then passed actual `/compact`, resume and fork, with
+  12/12 fields after each continuation and unchanged origin/ingress. Its compact
+  request took 46.210 s. [Reproduction](tests/live_installed_compaction.py).
 - Separate native capsule recall passed on Sol, Terra, Astra and the two locally
   authorized accounts. This does not certify arbitrary future models/items.
 - Fake upstream tests cover SSE, repeated compaction, process/model replacement,
@@ -99,3 +102,9 @@ python tests/live_compaction.py /path/to/reviewed-proxy --root /private/installa
 
 These tests do not establish equivalent quality on a 367k-token investigation
 or bounded upstream latency. No current user session was compacted or restarted.
+
+The installed translator rollout also preserved a 50.599-second synthetic
+stream (1,608 events) that remained active after cutover. Origin, TLS endpoint,
+local signing key and native Codex login stayed unchanged. Any retired
+generation with other admitted requests is preserved until its count reaches
+zero; it is not killed merely because the synthetic request finished.

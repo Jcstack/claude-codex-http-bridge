@@ -151,7 +151,30 @@ A safe upgrade needs a stable authenticated listener, a ready replacement backen
 
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
-Remaining work: replacement of the legacy origin and TLS ingress itself; stronger cache consistency evidence; source excerpts, file/container citations and complete citation UI fidelity; transport failures and slow compaction; diverse repeated repository evaluations; authenticated Windows inference/HUD/browser/resume; Codex-native context retrieval, full-duplex Live/steering and broader app coverage; native-provider image-size fidelity (explicit local delivery resizing is now available). Native `/context`, `/usage` and budget UI still have Claude-alias limitations. API-key pilots stay disabled by user preference and Opus lacks an account. These checks do not certify every feature or Opus parity.
+Remaining work, updated 2026-10-31:
+
+- Establish the cause of intermittent upstream TLS/EOF failures. The observed
+  cluster recovered; a permanent transport fix has not been demonstrated.
+- Migrate/replace the original listener and TLS ingress process themselves
+  without disturbing dependent sessions. Translator-only replacement is
+  verified; it does not provide file-descriptor handoff for those processes.
+- Validate native compaction on diverse large real tasks and summary-dependent
+  plugins. Small/64k fixtures, repeated boundaries, installed resume/fork and
+  normal max effort pass; ordinary summaries remain the default.
+- Resolve Claude's internal `/context`, `/usage` and budget alias figures and
+  live startup-setting changes. HUD uses discovered provider context and actual
+  quota; file edits do not hot-update existing client startup settings.
+- Complete exact source excerpts, file/container citations, full citation UI
+  fidelity, broader file/app workflows and native image-size fidelity.
+- Integrate primary GPT-Live/full-duplex voice and mid-turn steering into the
+  harness. Realtime media and partial text/tool streams are already exercised;
+  they do not establish those separate protocol/UI capabilities.
+- Run authenticated Windows model/HUD/browser/resume scenarios in a private
+  Windows environment and representative repeated model/harness evaluations.
+  CI uses no real credentials. Project-API pilots stay disabled by user choice;
+  Opus comparison lacks an authorized account and is not fabricated.
+
+No claim of complete future-plugin compatibility or Opus quality parity is made.
 
 ## Optional native pack, 2026-10-31
 

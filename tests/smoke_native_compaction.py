@@ -67,6 +67,7 @@ def main():
             "supported_reasoning_levels": [{"effort": e} for e in ("low", "medium", "high", "xhigh", "max")]}
     upstream = {"state": {"port": server.server_port}, "key": "synthetic-bridge-signing-key", "models": {SOL: spec, TERRA: spec}}
     base = {"model": SOL, "max_tokens": 1000, "output_config": {"effort": "max"},
+            "metadata": {"user_id": json.dumps({"session_id": "aabbccdd-1111-4222-8333-001122334455"})},
             "messages": [{"role": "user", "content": "Retain the fixture."}]}
     try:
         with temporary_translator(binary, upstream, SOL) as (port, key):
