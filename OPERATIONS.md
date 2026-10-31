@@ -55,6 +55,12 @@ credential setting was changed on that evidence. Diagnostics now separately
 count upstream handshake attempt mentions and distinct tagged requests;
 downstream EOF mentions are not classified as upstream handshakes.
 
+After that cluster, a follow-up window contained four completed inference
+requests and no further TLS/EOF mentions. A separately cancelled 499 and the
+deliberate GPT-Live route probe's 404 remain in the diagnostics; they are not
+silently counted as successful model calls. Recovery during this window is
+an observation, not evidence of a permanent transport fix.
+
 The installed discovery/launcher/diagnostic helpers were updated without stopping the service. Existing HUD profiles now reflect the discovered maximum. The status-line adapter suppresses Anthropic-specific cache-expiry and price fields; it retains actual cached-token usage. Arbitrary upper limits on future HUD context windows have been removed. Existing client compaction settings still require a later corrected launch/resume.
 
 ## Search state and isolated live handoff

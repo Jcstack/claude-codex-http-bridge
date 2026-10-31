@@ -10,6 +10,15 @@ Checked 2026-10-30 with Claude Code 2.1.314 and CLIProxyAPI 8.0.46. Claude Code 
 
 For the existing terminal workflow, launch `claude-codex` normally. Its interactive UI already renders the streamed response. To inspect machine-readable partial events in a headless task, pass Claude Code's `--output-format stream-json --include-partial-messages --verbose` flags; the wrapper forwards them. This is useful for measuring time to first visible output and detecting broken SSE framing without logging prompt bodies or credentials.
 
+The official primary GPT-Live WebSocket uses `/v1/live/sessions` without a
+model query, then `session.start` and `session.started`. It is distinct from
+Realtime `/v1/realtime` and an existing Live call's sideband. A 2026-10-31
+[local route probe](tests/probe_live_route.py) returned 404 before session start.
+The pinned server registers `/v1/live/:call_id`, which does not provide that
+primary-session entry point. This establishes a local protocol gap, not a
+denied account entitlement; the earlier WebRTC 400 does not test the primary
+WebSocket either. No microphone, playback or public project API was enabled.
+
 Claude Code disables fine-grained tool-input streaming by default behind a custom `ANTHROPIC_BASE_URL`. On the subscription route, this launcher sets `CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1` unless you explicitly set it to `0`. In an isolated Claude Code 2.1.314 request capture, `1` added `eager_input_streaming: true` to all 21 built-in tool definitions; `0` added it to none. A small live GPT-6.1 Sol subscription-route run completed a Bash tool call and emitted 18 `input_json_delta` events in 32 stream events. This improves the chance of seeing a long tool input progressively; it does not mean Claude Code executes incomplete JSON. [Claude Code gateway behavior](https://code.claude.com/docs/en/llm-gateway-protocol#feature-pass-through), [fine-grained tool streaming](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming).
 
 The optional direct API route leaves the flag off. The pinned translator forwards `eager_input_streaming` into the OpenAI Responses function-tool schema, where its acceptance has not been established by a live API call. A strict fake API rejects extra function-tool fields; a credential-free contract test still confirms that upstream function-argument deltas can reach Claude Code progressively when the fake API emits them. Explicitly forcing the flag on the API route fails before inference. Do not infer from the fake stream that the real API grants fine-grained tool-input generation.
