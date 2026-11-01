@@ -92,6 +92,16 @@ absence of a cross-layer request identity; it cannot distinguish model work
 from network or other upstream waiting. Main-request effort is not proof of
 the maintenance request's effort.
 
+As a separate local-only control on 2026-11-02, a disposable TLS ingress,
+candidate translator and fake origin relayed synthetic messages of 100,000,
+1,000,000 and 4,000,000 bytes in 0.058, 0.130 and 0.407 seconds respectively;
+all three preserved the synthetic content. These are single samples of highly
+repetitive text on one machine, measured in bytes rather than tokens. They do
+not include real Claude compaction, the native Codex origin, network waiting or
+provider inference, and cannot establish the cause of a real slow compaction.
+The reproducible `tests/probe_large_payload_latency.py` checks preservation
+without setting a hardware-dependent latency threshold.
+
 An [open report in the official Codex repository](https://github.com/openai/codex/issues/51886)
 describes similar long-stream cuts, including near 900 seconds. This is an
 independent user report, not proof that every local failure has that cause.
