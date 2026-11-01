@@ -52,7 +52,10 @@ PowerShell 中可先设置 `$env:ANTHROPIC_DEFAULT_SONNET_MODEL` 和
 `$env:CLAUDE_CODE_SUBAGENT_MODEL`，再运行上述启动命令。模型 ID 必须出现在当前
 `claude-codex models` 的可选目录中；不符合时启动器会报错，不会静默替换。调用时
 指定的别名或代理定义可以覆盖子代理默认值；`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`
-可按 Claude Code 规则强制使用默认值。分叉等例外与优先级见
+可按 Claude Code 规则强制使用默认值。若请求的别名与主模型被识别为同族，
+Claude Code 可能让子代理继续使用主模型，即使该别名另有映射。自定义子代理定义可用
+`model: gpt-6.1-terra` 指定完整模型 ID；Agent 调用自身的 `model` 参数接受的是别名。
+分叉等例外与优先级见
 [Claude Code 子代理文档](https://code.claude.com/docs/en/sub-agents)。已打开的会话不受新启动设置影响。
 
 安装包含 V2 补丁的审查运行包后，可用 `claude-codex --native-compaction`
