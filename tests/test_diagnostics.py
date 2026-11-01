@@ -51,8 +51,24 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertEqual(report["completed_http_statuses"], {"200": 1})
             self.assertEqual(report["failed_requests"], [])
             self.assertEqual(report["stream_failure_mentions"]["incomplete_native_stream"]["tagged_requests"], 1)
+            self.assertEqual(report["recent_stream_failure_http"][0]["same_log_match"], "unique")
+            self.assertEqual(report["recent_stream_failure_http"][0]["http_status"], 200)
+            self.assertEqual(report["recent_stream_failure_http"][0]["http_seconds"], 59)
             for private in ("PRIVATE_SECRET", "aabbccdd", str(path)):
                 self.assertNotIn(private, json.dumps(report))
+
+    def test_stream_matching_stays_ambiguous_when_a_local_tag_is_reused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            path.write_text(
+                '[2026-01-02 12:00:00] [aabbccdd] upstream stream failed: stream disconnected before completion\n'
+                '[2026-01-02 12:00:00] [aabbccdd] [info] [gin.go:1] 200 | 47s | 127.0.0.1 | POST "/v1/messages"\n'
+                '[2026-01-02 12:00:01] [aabbccdd] [info] [gin.go:1] 200 | 215s | 127.0.0.1 | POST "/v1/messages"\n')
+            row, = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))["recent_stream_failure_http"]
+            self.assertEqual(row["same_log_match"], "ambiguous")
+            self.assertIsNone(row["http_status"])
+            self.assertIsNone(row["http_seconds"])
+            self.assertNotIn("aabbccdd", json.dumps(row))
 
     def test_native_media_failures_are_distinct_without_leaking_call_ids(self):
         with tempfile.TemporaryDirectory() as temporary:

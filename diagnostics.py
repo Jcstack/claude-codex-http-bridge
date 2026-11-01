@@ -7,7 +7,7 @@ Only an explicit output allowlist leaves this module; raw log lines never do.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -118,6 +118,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     preconnect_last = {}
     inband, inband_requests, inband_last = Counter(), {}, {}
     shapes, shape_requests, shape_last = Counter(), {}, {}
+    recent_inband = deque(maxlen=12)
     latencies, slow, failed = [], [], []
     coverage = {}
     for line in lines(path, coverage):
@@ -153,6 +154,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                 if request:
                     shape_requests.setdefault(shape, set()).add(request[1])
                 shape_last[shape] = at.isoformat()
+                recent_inband.append((request[1] if request else None, at, shape))
             if "upstream execution failed:" in lower and "tls handshake:" in lower:
                 category = "tls_handshake_eof" if re.search(r'\beof\b', lower) else "tls_handshake_other"
                 preconnect[category] += 1
@@ -163,6 +165,34 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             for label, fragment in ERRORS.items():
                 if fragment in lower:
                     errors[label] += 1
+    # Match only within this one log, using the short local request tag and a
+    # close timestamp. Never return tags; collisions or multiple matches stay
+    # ambiguous, and this is not a cross-layer or transcript correlation.
+    matches = [[] for _ in recent_inband]
+    if recent_inband:
+        try:
+            for line in lines(path):
+                tag = re.match(r'^\[([^]]+)\]\s+\[([a-f0-9]{8})\]', line)
+                row = GIN.search(line) if tag else None
+                if not row or row[4] != "POST" or endpoint_label(row[5]) not in ("/v1/messages", "/v1/responses"):
+                    continue
+                at = timestamp(tag[1])
+                if at is None or at < since:
+                    continue
+                for index, (failure_tag, failure_at, _shape) in enumerate(recent_inband):
+                    if (failure_tag == tag[2] and abs((failure_at - at).total_seconds()) <= 5
+                            and len(matches[index]) < 2):
+                        matches[index].append({"at": at.isoformat(), "http_status": int(row[2]),
+                            "seconds": duration(row[3].strip())})
+        except OSError:
+            matches = [[] for _ in recent_inband]
+    observations = []
+    for (failure_tag, at, shape), rows in zip(recent_inband, matches):
+        unique = len(rows) == 1
+        observations.append({"at": at.isoformat(), "shape": shape,
+            "same_log_match": "unique" if unique else "ambiguous" if rows else "unmatched" if failure_tag else "untagged",
+            "http_status": rows[0]["http_status"] if unique else None,
+            "http_seconds": round(rows[0]["seconds"], 3) if unique and rows[0]["seconds"] is not None else None})
     ordered = sorted(latencies)
     return {"completed_http_statuses": dict(counts), "transport_error_mentions": dict(errors),
             "upstream_preconnection_failures": {category: {
@@ -174,6 +204,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "stream_failure_shapes": {category: {
                 "mentions": count, "tagged_requests": len(shape_requests.get(category, set())),
                 "last_at": shape_last[category]} for category, count in shapes.items()},
+            "recent_stream_failure_http": observations,
             "inference_requests": len(ordered),
             "latency_seconds": {"median": round(statistics.median(ordered), 3) if ordered else None,
                                 "p95": round(ordered[math.ceil(len(ordered) * .95) - 1], 3) if ordered else None,
@@ -181,7 +212,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "slow_requests": slow[-12:],
             "failed_requests": failed[-12:],
             "coverage": coverage,
-            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error mentions are not retry counts. Logged error shapes do not establish which upstream component generated them."}
+            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error mentions are not retry counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them."}
 
 
 def session_summary(path: Path, since: datetime) -> dict:

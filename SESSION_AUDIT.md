@@ -70,6 +70,21 @@ local service or a more distant upstream component generated the error. The
 durations vary substantially, and the historical provider-side terminal event
 sequence was not retained.
 
+A later read-only audit on 2026-11-02 observed one incomplete-stream error in
+the tracked main conversation. Within the shared managed-backend log, two
+separate short local request tags reported the same incomplete-stream sentinel
+around 02:42 China time. Their respective same-log HTTP records reported 200
+and approximately 215 and 46.8 seconds. The tracked error timestamp is close
+to the latter, and another main-session model request was recorded afterward;
+neither fact identifies the corresponding request across layers or proves the
+task recovered. Shared backend counts must not be attributed wholesale to this
+conversation.
+
+The diagnostics report now pairs a recent failure with an HTTP completion
+only when one same-log local tag and a nearby timestamp give a unique match;
+ambiguous and missing matches stay explicit. It does not expose the tag, log
+line, request body, or private path. The local tag is not a cross-layer ID.
+
 The sampled timeout messages exactly match the pinned origin's incomplete
 stream sentinel. The running origin is the installed pinned release and its
 binary contains that sentinel. The matching [executor code](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/runtime/executor/codex_executor_terminal.go)
