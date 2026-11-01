@@ -248,6 +248,7 @@ def main():
                                 for label in ("unknown authority", "certificate", "tls handshake", "connection refused", "unsupported protocol"):
                                     if label in text: classifications.add(label)
                             raise AssertionError("Origin never admitted request: " + ", ".join(sorted(classifications)))
+                        admitted_at = time.monotonic()
                         try: rolling_runtime.stop(root)
                         except RuntimeError as error: assert "active" in str(error)
                         else: raise AssertionError("Stopped an active stream")
@@ -262,7 +263,28 @@ def main():
                         updated = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC}, force=True)
                         assert updated["pid"] == value["pid"] and updated["port"] == value["port"]
                         assert len(updated["generations"]) == 2
-                        content, _ = stream(value["port"], key, request, ca_file=ca)
+                        started_followup = time.monotonic()
+                        try:
+                            content, _ = stream(value["port"], key, request, ca_file=ca)
+                        except Exception:
+                            # Only allowlisted fixture metadata leaves this test.
+                            # Raw proxy logs can contain request data and keys.
+                            labels = {}
+                            for generation, row in updated["generations"].items():
+                                log = runtime / generation / "proxy.log"
+                                text = log.read_text(errors="replace").lower() if log.is_file() else ""
+                                labels["current" if generation == updated["current"] else "old"] = {
+                                    "listener_matches": launcher.listener_pids(row["port"]) == {row["pid"]},
+                                    "error_classes": [name for name in ("refused", "timeout", "deadline", "tls",
+                                        "certificate", "502", "503", "eof", "canceled") if name in text]}
+                            print(json.dumps({"fixture_followup_failed": True,
+                                "seconds_since_initial_admission": round(time.monotonic() - admitted_at, 3),
+                                "elapsed_seconds": round(time.monotonic() - started_followup, 3),
+                                "origin_request_count": len(Upstream.requests),
+                                "origin_listener_matches": launcher.listener_pids(base["port"]) == {base["pid"]},
+                                "backends": labels}), flush=True)
+                            Upstream.release.set()
+                            raise
                         assert "FIXTURE" == "".join(b.get("text", "") for b in content)
                         Upstream.release.set(); pending.result(timeout=20)
                     updated = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC})
