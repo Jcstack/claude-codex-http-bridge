@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -66,7 +67,8 @@ class Handler(BaseHTTPRequestHandler):
         delta = ({"type": "input_json_delta", "partial_json": json.dumps(block["input"])} if tool else
                  {"type": "text_delta", "text": block["text"]})
         first = count == 1
-        if first and self.server.mode == "partial_arguments":
+        mode = self.server.mode.removeprefix("eof_")
+        if first and mode == "partial_arguments":
             delta["partial_json"] = delta["partial_json"][:10]
         events = [
             {"type": "message_start", "message": message},
@@ -78,14 +80,16 @@ class Handler(BaseHTTPRequestHandler):
              "usage": {"output_tokens": 10}},
             {"type": "message_stop"},
         ]
-        cutoff = {"denied_target": 6, "healthy": 6, "partial_arguments": 3, "tool_block": 4, "stop_reason": 5, "message_stop": 6}[self.server.mode] if first else len(events)
+        cutoff = {"denied_target": 6, "healthy": 6, "partial_arguments": 3, "tool_block": 4, "stop_reason": 5, "message_stop": 6}[mode] if first else len(events)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         try:
             for event in events[:cutoff]:
                 self.emit(event)
-            if first and self.server.mode not in ("healthy", "denied_target"):
+            if first and self.server.mode.startswith("eof_"):
+                self.connection.shutdown(socket.SHUT_WR)
+            elif first and mode not in ("healthy", "denied_target"):
                 self.emit({"type": "error", "error": {"type": "api_error", "message": "Synthetic incomplete-stream fixture"}})
         except OSError:
             pass
@@ -100,6 +104,7 @@ class Handler(BaseHTTPRequestHandler):
         self.server.requests.append({"has_tool_result": bool(results), "tool_result_hints": result_hints(results)})
         count = len(self.server.requests)
         first = count == 1
+        mode = self.server.mode.removeprefix("eof_").removeprefix("failed_")
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
         if not results or not (self.server.work / "owned.txt").is_file():
             arguments = json.dumps({"file_path": (self.server.work / self.server.target_name).as_posix(), "content": "SYNTHETIC"})
@@ -110,11 +115,11 @@ class Handler(BaseHTTPRequestHandler):
                 {"type": "response.output_item.added", "output_index": 0,
                  "item": {**item, "arguments": "", "status": "in_progress"}},
                 {"type": "response.function_call_arguments.delta", "output_index": 0, "item_id": item["id"],
-                 "delta": arguments[:10] if first and self.server.mode == "partial_arguments" else arguments},
+                 "delta": arguments[:10] if first and mode == "partial_arguments" else arguments},
                 {"type": "response.function_call_arguments.done", "output_index": 0, "item_id": item["id"], "arguments": arguments},
                 {"type": "response.output_item.done", "output_index": 0, "item": item},
             ]
-            cutoff = {"denied_target": 6, "healthy": 6, "partial_arguments": 3, "arguments_done": 4, "tool_item_done": 5, "response_completed": 6}[self.server.mode] if first else 6
+            cutoff = {"denied_target": 6, "healthy": 6, "partial_arguments": 3, "arguments_done": 4, "tool_item_done": 5, "response_completed": 6}[mode] if first else 6
         else:
             item = {"id": f"msg_fixture_{count}", "type": "message", "role": "assistant", "status": "completed",
                     "content": [{"type": "output_text", "text": "DONE", "annotations": []}]}
@@ -137,8 +142,13 @@ class Handler(BaseHTTPRequestHandler):
             for event in events[:cutoff]:
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
-            if first and self.server.mode not in ("healthy", "denied_target"):
-                self.wfile.write(b'data: {"type":"error","error":{"type":"server_error","code":"request_timeout","message":"Synthetic incomplete-stream fixture"}}\n\n')
+            if first and self.server.mode.startswith("eof_"):
+                self.connection.shutdown(socket.SHUT_WR)
+            elif first and mode not in ("healthy", "denied_target"):
+                error = {"type": "server_error", "code": "request_timeout", "message": "Synthetic incomplete-stream fixture"}
+                failure = ({"type": "response.failed", "response": {"status": "failed", "error": error}} if
+                           self.server.mode.startswith("failed_") else {"type": "error", "error": error})
+                self.wfile.write(("data: " + json.dumps(failure) + "\n\n").encode())
                 self.wfile.flush()
         except OSError:
             pass
@@ -152,8 +162,11 @@ def main():
     if claude is None:
         raise RuntimeError("Install the pinned Claude fixture before running the safety gate")
     metrics = []
-    modes = (("denied_target", "healthy", "partial_arguments", "arguments_done", "tool_item_done", "response_completed") if args.proxy_binary else
-             ("denied_target", "healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop"))
+    modes = (("denied_target", "healthy", "partial_arguments", "arguments_done", "tool_item_done", "response_completed",
+              "eof_partial_arguments", "eof_arguments_done", "eof_tool_item_done", "eof_response_completed",
+              "failed_partial_arguments", "failed_tool_item_done") if args.proxy_binary else
+             ("denied_target", "healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop",
+              "eof_partial_arguments", "eof_tool_block", "eof_stop_reason", "eof_message_stop"))
     for mode in modes:
         with tempfile.TemporaryDirectory(prefix="bridge-stream-safety-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
             root = Path(temporary)

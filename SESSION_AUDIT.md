@@ -34,10 +34,12 @@ before sharing. It is not automatically saved or committed.
 - Each file is read only up to its initial byte extent. Concurrent appends,
   truncation, unterminated tails, malformed data and skipped oversized lines
   appear in coverage. Undated metadata is included only in lifetime scans.
-- Lines are bounded at 16 MiB. Usage/tool identities and compaction details
-  have explicit limits; up to 256 child logs per main log are inspected.
-  Omitted records/files and parser limits are reported. Symlinked paths below
-  a configured Claude root are skipped.
+- Lifecycle session lines are bounded at 16 MiB. Lightweight session and proxy
+  scans use a separate two-million-character line limit. Usage/tool identities
+  and compaction details have explicit limits; up to 256 child logs per main log
+  are inspected. Each scan reports its limits and skipped large lines; lifecycle
+  reports also include malformed records. Symlinked paths below a configured
+  Claude root are skipped.
 - Cache usage is deduplicated by response identity, including across children.
   Each counter keeps the maximum valid reported value for that identity;
   smaller repeated output counters do not erase an earlier observation. These
@@ -61,11 +63,19 @@ and separate connection/stream failures. See [CACHE_AUDIT.md](CACHE_AUDIT.md)
 for synthetic cache controls and [PLAN.md](PLAN.md) for acceptance gates.
 
 The target session also contains incomplete native streams whose corresponding
-HTTP access records say 200. The associated durations vary substantially;
-they do not establish one fixed local timeout. The original response body and
-terminal event sequence were not retained, so those historical logs cannot
-prove whether the provider emitted an error, ended without a terminal event,
-or suffered a transport interruption.
+HTTP access records say 200. Relay logs include structured `server_error` /
+`request_timeout` payloads for these symptoms. Their shape is now reported
+without returning the payload; it does not establish whether the original
+local service or a more distant upstream component generated the error. The
+durations vary substantially, and the historical provider-side terminal event
+sequence was not retained.
+
+For several long compactions, an origin-service request in shared access logs
+ended at nearly the same time and ran for nearly the entire measured compact
+duration. This points to waiting inside the origin request path, subject to the
+absence of a cross-layer request identity; it cannot distinguish model work
+from network or other upstream waiting. Main-request effort is not proof of
+the maintenance request's effort.
 
 An [open report in the official Codex repository](https://github.com/openai/codex/issues/51886)
 describes similar long-stream cuts, including near 900 seconds. This is an
@@ -115,6 +125,16 @@ defines file-edit rules and PreToolUse authorization; production permissions
 were not changed to make the fixture pass.
 
 Both checks are CI gates on Linux, macOS and Windows. These fixtures cover the
-specified error events and Write/hook interaction, not all socket failures,
-parallel tools or the exact upstream failure in the user's historical session.
+specified error events and Write/hook interaction; other socket failure types,
+parallel-tool combinations and the exact upstream failure in the historical
+session remain separately scoped.
 Provider cause and general safe stream recovery remain open work.
+
+The expanded gate also covers clean socket EOF and `response.failed` at several
+single-tool boundaries. `tests/probe_parallel_stream.py` uses two interleaved
+tool calls, unique hook markers and tool-result IDs to exercise EOF, error and
+terminal-event boundaries. It also terminates its own isolated client before
+the first completed item and after both tool effects are acknowledged. Those
+cases check the observed effects and follow-up history, while leaving actual
+Ctrl-C behavior, arbitrary tools and unobserved provider failures for further
+verification. The parallel test is part of the three-platform candidate gate.

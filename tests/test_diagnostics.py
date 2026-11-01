@@ -13,6 +13,29 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_stream_failure_error_shapes_are_allowlisted_and_not_a_cause_claim(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            message = "stream disconnected before completion PRIVATE_SECRET"
+            timeout = json.dumps({"error": {"type": "server_error", "code": "request_timeout", "message": message},
+                                  "request_id": "PRIVATE_RESPONSE_ID"})
+            other = json.dumps({"error": {"type": "server_error", "code": "PRIVATE_CODE", "message": message}})
+            path.write_text(
+                f'[2026-01-02 12:00:00] [aabbccdd] upstream stream failed: err={timeout}\n'
+                f'[2026-01-02 12:00:01] [aabbccdd] upstream stream failed: err={timeout}\n'
+                f'[2026-01-02 12:00:02] [11223344] upstream stream failed: err={other}\n'
+                '[2026-01-02 12:00:03] [55667788] upstream stream failed: err=stream error: stream disconnected before completion PRIVATE_SECRET\n'
+                '[2026-01-02 12:00:04] [99887766] upstream stream failed: stream disconnected before completion PRIVATE_SECRET\n', encoding="utf-8")
+            report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            shapes = report["stream_failure_shapes"]
+            self.assertEqual(shapes["reported_server_request_timeout"]["mentions"], 2)
+            self.assertEqual(shapes["reported_server_request_timeout"]["tagged_requests"], 1)
+            self.assertEqual(shapes["other_error_payload"]["mentions"], 1)
+            self.assertEqual(shapes["plain_or_redacted_incomplete"]["mentions"], 1)
+            self.assertEqual(shapes["unclassified"]["mentions"], 1)
+            for secret in ("PRIVATE_SECRET", "PRIVATE_RESPONSE_ID", "PRIVATE_CODE", "aabbccdd", str(path)):
+                self.assertNotIn(secret, json.dumps(report))
+
     def test_http_200_does_not_hide_a_reported_native_stream_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "proxy.log"
@@ -151,6 +174,12 @@ class DiagnosticsTests(unittest.TestCase):
             path.write_text("x" * 1000 + "\n" + '{"type":"safe"}\n', encoding="utf-8")
             with patch.object(diagnostics, "LINE_LIMIT", 64):
                 self.assertEqual(list(diagnostics.lines(path)), ['{"type":"safe"}\n'])
+                report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+                session = diagnostics.session_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            self.assertEqual(report["coverage"]["oversized_lines"], 1)
+            self.assertEqual(report["coverage"]["lines_seen"], 2)
+            self.assertEqual(session["coverage"]["oversized_lines"], 1)
+            self.assertEqual(session["coverage"]["records_missing_timestamp"], 1)
         self.assertEqual(diagnostics.duration("1h2m3.5s"), 3723.5)
         self.assertAlmostEqual(diagnostics.duration("800µs"), .0008)
         self.assertIsNone(diagnostics.duration("private-input"))
