@@ -49,6 +49,22 @@ class BundleTests(unittest.TestCase):
             self.assertEqual(environment["CLAUDE_CODEX_LOOPBACK_CA"], str(ca))
             self.assertEqual(environment["CLAUDE_CODEX_LOOPBACK_AUTHORITY"], "127.0.0.1:12345")
 
+    def test_real_managed_child_does_not_receive_shell_credentials(self):
+        child = ("import json,os; print(json.dumps({"
+                 "'secret_present': 'OPENAI_API_KEY' in os.environ, "
+                 "'proxy_present': 'HTTPS_PROXY' in os.environ, "
+                 "'loopback_only': os.environ.get('NO_PROXY') == '127.0.0.1,localhost'}))")
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {"OPENAI_API_KEY": "PRIVATE_FIXTURE_SENTINEL",
+                                        "HTTPS_PROXY": "http://fixture:private@proxy.invalid"}), \
+                patch.object(runtime_bundle, "safe_file"):
+            root = Path(temporary)
+            log = root / "child.log"
+            process = rolling_runtime.start(Path(sys.executable), ["-c", child], log)
+            self.assertEqual(process.wait(timeout=15), 0)
+            self.assertEqual(json.loads(log.read_text()),
+                             {"secret_present": False, "proxy_present": False, "loopback_only": True})
+
     def test_native_compaction_headers_are_retained_in_background_settings(self):
         import rolling_runtime
         with tempfile.TemporaryDirectory() as temporary:
