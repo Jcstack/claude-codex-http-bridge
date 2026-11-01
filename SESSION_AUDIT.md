@@ -150,16 +150,19 @@ single-tool boundaries. `tests/probe_parallel_stream.py` uses two interleaved
 tool calls, unique hook markers and tool-result IDs to exercise EOF, error and
 terminal-event boundaries. It also terminates its own isolated client before
 the first completed item and after both tool effects are acknowledged. Those
-cases check the observed effects and follow-up history. On POSIX, three further
+cases check the observed effects and follow-up history. On POSIX, four further
 cases run the locked Claude client in `-p` mode with a private controlling
 pseudoterminal, then send the terminal's Ctrl-C character before either tool
-item completes, after the synthetic origin emits the first item, or after both
-effects and results are acknowledged. The local fixture observed no write in
-the first two cases and exactly one write per target afterwards. The middle
-case synchronizes with the origin sending an item, not with proof that Claude
-has consumed it. It controls only its own process session and temporary targets.
+item completes, after the synthetic origin emits the first item, between the
+two effects, or after both effects and results are acknowledged. A scoped
+synthetic PreToolUse gate holds the second effect during the between-effects
+case. Locally, neither early case wrote a target; the gated case retained one
+effect and did not execute the other; the final case retained one per target.
+The case that pauses after the first item synchronizes with the origin sending
+it, not with proof that Claude has consumed it. The fixture controls only its
+own process session and temporary targets.
 
 The candidate gate runs across Linux, macOS and Windows; terminal Ctrl-C is
 exercised only on POSIX. Windows console events, interactive TUI behavior,
-interrupting between the two completed effects, arbitrary tools, resume after
-interruption and unobserved provider failures remain separate checks.
+arbitrary tools, resume after interruption and unobserved provider failures
+remain separate checks.

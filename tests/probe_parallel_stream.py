@@ -49,6 +49,29 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        gate_prefix = "/fixture-gate/"
+        if self.path.startswith(gate_prefix):
+            label = self.path.removeprefix(gate_prefix)
+            if label not in TARGETS or self.server.mode != "ctrl_c_between_effects":
+                self.send_response(404)
+                self.end_headers()
+                return
+            with self.server.gate_lock:
+                if self.server.gate_first is None:
+                    self.server.gate_first = label
+                blocked = label != self.server.gate_first
+            if blocked:
+                self.server.phase_ready.set()
+                self.server.release.wait(60)
+            try:
+                self.send_response(204)
+                self.end_headers()
+            except OSError:
+                pass
+            finally:
+                if blocked:
+                    self.server.gate_returned.set()
+            return
         prefix = "/fixture-effect/"
         label = self.path.removeprefix(prefix) if self.path.startswith(prefix) else ""
         if label not in TARGETS:
@@ -110,7 +133,8 @@ class Handler(BaseHTTPRequestHandler):
         cuts = {"healthy": 10, "eof_before_first": 7, "eof_after_first": 8,
                 "eof_after_both": 9, "error_after_first": 8, "failed_after_both": 9,
                 "error_after_completed": 10, "cancel_before_items": 7, "cancel_after_both": 9,
-                "ctrl_c_before_items": 7, "ctrl_c_after_first_item": 8, "ctrl_c_after_both": 9}
+                "ctrl_c_before_items": 7, "ctrl_c_after_first_item": 8,
+                "ctrl_c_between_effects": 10, "ctrl_c_after_both": 9}
         cutoff = cuts[self.server.mode] if first else len(events)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -128,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.release.wait(30)
             elif first and self.server.mode.startswith("eof_"):
                 self.connection.shutdown(socket.SHUT_WR)
-            elif first and self.server.mode not in ("healthy",):
+            elif first and self.server.mode not in ("healthy", "ctrl_c_between_effects"):
                 err = {"type": "server_error", "code": "request_timeout", "message": "Synthetic parallel-stream failure"}
                 failure = ({"type": "response.failed", "response": {"status": "failed", "error": err}}
                            if self.server.mode.startswith("failed_") else {"type": "error", "error": err})
@@ -149,7 +173,7 @@ def main():
              "error_after_first", "failed_after_both", "error_after_completed",
              "cancel_before_items", "cancel_after_both")
     if os.name != "nt":
-        modes += ("ctrl_c_before_items", "ctrl_c_after_first_item", "ctrl_c_after_both")
+        modes += ("ctrl_c_before_items", "ctrl_c_after_first_item", "ctrl_c_between_effects", "ctrl_c_after_both")
     metrics = []
     for mode in modes:
         with tempfile.TemporaryDirectory(prefix="bridge-parallel-stream-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
@@ -173,6 +197,12 @@ allowed={os.path.normcase(str(pathlib.Path(sys.argv[2],name).resolve())):label f
 label=allowed.get(path)
 if event.get("hook_event_name")=="PreToolUse":
     permitted=event.get("tool_name")=="Write" and label is not None and data.get("content")=="SYNTHETIC"
+    if permitted and sys.argv[4]=="ctrl_c_between_effects":
+        try:
+            opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            opener.open("http://127.0.0.1:"+sys.argv[3]+"/fixture-gate/"+label,timeout=50).close()
+        except OSError:
+            permitted=False
     print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow" if permitted else "deny","permissionDecisionReason":"Owned synthetic fixture only"}}))
 elif label is not None:
     marker=pathlib.Path(sys.argv[1],secrets.token_hex(16))
@@ -192,13 +222,17 @@ elif label is not None:
             server.effects = {label: threading.Event() for label in TARGETS}
             server.phase_ready = threading.Event()
             server.release = threading.Event()
+            server.gate_lock = threading.Lock()
+            server.gate_first = None
+            server.gate_returned = threading.Event()
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             settings = root / "settings.json"
             settings.write_text(json.dumps({"modelPicker": {"options": [
                 {"model": MODEL, "label": "Fixture", "behavesAs": "claude-sonnet-5-5"}], "replaceBuiltInOptions": True},
                 "hooks": {event: [{"matcher": "Write", "hooks": [{"type": "command", "command": sys.executable,
-                    "args": [str(hook), str(markers), str(work), str(server.server_port)], "timeout": 7}]}]
+                    "args": [str(hook), str(markers), str(work), str(server.server_port), mode],
+                    "timeout": 45 if mode == "ctrl_c_between_effects" else 7}]}]
                     for event in ("PreToolUse", "PostToolUse")}}), encoding="utf-8")
             allowed = ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT",
                        "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP")
@@ -230,6 +264,10 @@ elif label is not None:
                     if mode.endswith("after_both"):
                         assert all(server.effects[label].wait(20) for label in TARGETS), "Parallel effects did not finish"
                     assert server.phase_ready.wait(20), "Cancellation boundary was not reached"
+                    if mode == "ctrl_c_between_effects":
+                        assert server.gate_first in TARGETS, "No first tool passed the fixture gate"
+                        assert server.effects[server.gate_first].wait(20), "First tool effect did not finish"
+                        assert not server.effects[next(label for label in TARGETS if label != server.gate_first)].is_set(), "Second effect escaped the fixture gate"
                     assert process.poll() is None, "Client exited before the cancellation boundary"
                     if terminal_interrupt:
                         import termios
@@ -243,6 +281,8 @@ elif label is not None:
                         process.terminate()
                     process.communicate(timeout=10)
                     server.release.set()
+                    if mode == "ctrl_c_between_effects":
+                        assert server.gate_returned.wait(10), "Fixture gate did not settle after cancellation"
                     final = None
                     returncode = process.returncode
                 else:
@@ -265,6 +305,12 @@ elif label is not None:
                         assert counts["B"] == 0 and not (work / TARGETS["B"]).exists(), "An incomplete tool ran after Ctrl-C"
                         if counts["A"] == 1:
                             assert (work / TARGETS["A"]).read_text(encoding="utf-8") == "SYNTHETIC", "First effect was corrupted"
+                    if mode == "ctrl_c_between_effects":
+                        first = server.gate_first
+                        second = next(label for label in TARGETS if label != first)
+                        assert counts[first] == 1 and counts[second] == 0, "Ctrl-C repeated or completed a blocked tool effect"
+                        assert (work / TARGETS[first]).read_text(encoding="utf-8") == "SYNTHETIC", "First effect was corrupted"
+                        assert not (work / TARGETS[second]).exists(), "Blocked target was created after Ctrl-C"
                     if mode.endswith("after_both") and cancelled:
                         assert counts == {"A": 1, "B": 1}, "Cancellation lost or repeated a completed effect"
                         assert acknowledged == set(TARGETS), "Cancellation follow-up omitted a completed tool result"
@@ -288,7 +334,10 @@ elif label is not None:
                 server.release.set()
                 if process is not None and process.poll() is None:
                     if terminal_master is not None:
-                        os.killpg(process.pid, signal.SIGKILL)
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
                     else:
                         process.kill()
                     process.communicate(timeout=10)
