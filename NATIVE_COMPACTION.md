@@ -42,6 +42,17 @@ summary request is used, with a fixed metadata warning and no lowered effort.
 Partial responses are not replayed. Account access and upstream failures can
 still make either path fail.
 
+In a [credential-free progress probe](tests/probe_native_compact_progress.py),
+the fake Responses origin emitted `response.compaction.compacting` and then
+waited before completing. The current native-compaction adapter produced no
+downstream body before the terminal response; afterward it returned a normal
+Claude `message_stop`. OpenAI documents that [progress event](https://developers.openai.com/api/reference/resources/responses/streaming-events)
+for a compaction trigger, but this synthetic test does not establish that the
+subscription backend emits it or that this buffering caused any particular
+slow real compaction. A future change needs to preserve fallback and error
+semantics: sending an early heartbeat can commit HTTP 200 before an upstream
+error is known. Ordinary Claude summary compaction is a separate path.
+
 ## State and privacy
 
 Claude Code 2.1.314 drops a structured compaction block across `/compact`, so the
