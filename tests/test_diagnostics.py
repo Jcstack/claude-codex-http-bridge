@@ -19,10 +19,13 @@ class DiagnosticsTests(unittest.TestCase):
             message = "stream disconnected before completion PRIVATE_SECRET"
             timeout = json.dumps({"error": {"type": "server_error", "code": "request_timeout", "message": message},
                                   "request_id": "PRIVATE_RESPONSE_ID"})
+            sentinel = json.dumps({"error": {"type": "server_error", "code": "request_timeout",
+                                             "message": diagnostics.INCOMPLETE_STREAM_SENTINEL}})
             other = json.dumps({"error": {"type": "server_error", "code": "PRIVATE_CODE", "message": message}})
             path.write_text(
                 f'[2026-01-02 12:00:00] [aabbccdd] upstream stream failed: err={timeout}\n'
                 f'[2026-01-02 12:00:01] [aabbccdd] upstream stream failed: err={timeout}\n'
+                f'[2026-01-02 12:00:01] [deadbeef] upstream stream failed: err={sentinel}\n'
                 f'[2026-01-02 12:00:02] [11223344] upstream stream failed: err={other}\n'
                 '[2026-01-02 12:00:03] [55667788] upstream stream failed: err=stream error: stream disconnected before completion PRIVATE_SECRET\n'
                 '[2026-01-02 12:00:04] [99887766] upstream stream failed: stream disconnected before completion PRIVATE_SECRET\n', encoding="utf-8")
@@ -30,10 +33,12 @@ class DiagnosticsTests(unittest.TestCase):
             shapes = report["stream_failure_shapes"]
             self.assertEqual(shapes["reported_server_request_timeout"]["mentions"], 2)
             self.assertEqual(shapes["reported_server_request_timeout"]["tagged_requests"], 1)
+            self.assertEqual(shapes["reported_incomplete_stream_sentinel"]["mentions"], 1)
+            self.assertEqual(shapes["reported_incomplete_stream_sentinel"]["tagged_requests"], 1)
             self.assertEqual(shapes["other_error_payload"]["mentions"], 1)
             self.assertEqual(shapes["plain_or_redacted_incomplete"]["mentions"], 1)
             self.assertEqual(shapes["unclassified"]["mentions"], 1)
-            for secret in ("PRIVATE_SECRET", "PRIVATE_RESPONSE_ID", "PRIVATE_CODE", "aabbccdd", str(path)):
+            for secret in ("PRIVATE_SECRET", "PRIVATE_RESPONSE_ID", "PRIVATE_CODE", "aabbccdd", "deadbeef", str(path)):
                 self.assertNotIn(secret, json.dumps(report))
 
     def test_http_200_does_not_hide_a_reported_native_stream_failure(self):

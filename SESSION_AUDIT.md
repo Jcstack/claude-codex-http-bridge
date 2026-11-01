@@ -70,6 +70,17 @@ local service or a more distant upstream component generated the error. The
 durations vary substantially, and the historical provider-side terminal event
 sequence was not retained.
 
+The sampled timeout messages exactly match the pinned origin's incomplete
+stream sentinel. The running origin is the installed pinned release and its
+binary contains that sentinel. The matching [executor code](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/runtime/executor/codex_executor_terminal.go)
+constructs a request-scoped timeout when a stream ends without a terminal
+completion, and its [Responses error mapper](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/api/handlers/openai_responses_stream_error.go)
+maps that status to `server_error` / `request_timeout`. This strongly suggests
+origin-side wrapping of an incomplete stream, rather than establishing a
+provider timeout. The exact string could also be forwarded; the retained logs
+cannot establish where or why the terminal event was lost. Diagnostics classify
+the exact sentinel separately without returning its text or payload.
+
 For several long compactions, an origin-service request in shared access logs
 ended at nearly the same time and ran for nearly the entire measured compact
 duration. This points to waiting inside the origin request path, subject to the

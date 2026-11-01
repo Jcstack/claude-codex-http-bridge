@@ -19,6 +19,7 @@ import statistics
 
 
 LINE_LIMIT = 2 * 1024 * 1024
+INCOMPLETE_STREAM_SENTINEL = "stream error: stream disconnected before completion: stream closed before response.completed"
 GIN = re.compile(r'^\[([^]]+)\].*?\]\s+(\d{3})\s*\|\s*([^|]+)\|.*?\|\s*(GET|POST|DELETE)\s+"([^"]+)"')
 ERRORS = {"tls_handshake": "tls handshake", "eof": "eof",
           "timeout": "timeout", "cancelled": "context canceled"}
@@ -104,6 +105,8 @@ def incomplete_stream_shape(line: str) -> str:
     if not isinstance(error, dict):
         return "unclassified"
     if error.get("type") == "server_error" and error.get("code") == "request_timeout":
+        if error.get("message") == INCOMPLETE_STREAM_SENTINEL:
+            return "reported_incomplete_stream_sentinel"
         return "reported_server_request_timeout"
     return "other_error_payload"
 
