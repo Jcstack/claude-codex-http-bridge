@@ -19,6 +19,7 @@
 !QUOTA_RECOVERY.md
 !PLAN.md
 !CACHE_AUDIT.md
+!SESSION_AUDIT.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -26,6 +27,7 @@
 !install.sh
 !launcher.py
 !diagnostics.py
+!session_audit.py
 !statusline_adapter.py
 !session_models.py
 !codex_usage.py

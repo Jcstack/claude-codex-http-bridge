@@ -608,7 +608,7 @@ def main() -> int:
         print("Use --no-native-tools to omit them for one launch; --native-tools explicitly enables them with strict MCP config.")
         print("Opt-in native V2 /compact: --native-compaction (reviewed subscription runtime required); --no-native-compaction disables it.")
         print("Opt-in scoped computer use: claude-codex desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
-        print("Read-only metadata: claude-codex diagnostics [--hours 2] [--session UUID].")
+        print("Read-only metadata: claude-codex diagnostics [--hours 2 | --lifetime] [--session UUID | --tracked] [--include-children].")
         print("Reconcile a stale local quota gate after an upstream reset: claude-codex quota recover.")
         return 0
     if mode == "diagnostics":

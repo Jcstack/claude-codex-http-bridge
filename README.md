@@ -98,6 +98,7 @@ claude-codex --model gpt-5.6-sol --effort max
 claude-codex bridge status            # localhost service state
 claude-codex bridge reload            # replace a managed backend and drain old requests
 claude-codex diagnostics --hours 2    # read-only cache, latency, failures and compaction
+claude-codex diagnostics --lifetime --tracked --include-children # audit a previously recorded private target
 claude-codex bridge stop              # after background work has finished
 ```
 
@@ -110,6 +111,8 @@ Inside Claude Code:
 The model list, context windows, compaction settings and HUD mapping come from the authenticated catalog at session start. Discovery uses a valid `max_context_window`, preserves `context_window` as the default, and otherwise uses the declared default. Model IDs and context sizes remain dynamic. New sessions refresh these values; running sessions retain their startup settings. The proxy release itself stays pinned until its checksum and compatibility have been reviewed.
 
 With an activated [reviewed runtime bundle](RUNTIME.md), new launches use the stable TLS endpoint automatically. Existing direct sessions retain their original service. `bridge reload` keeps the TLS listener and active model streams; replacing that listener or the legacy origin itself is a separate migration. `diagnostics` reports origin and managed backend logs separately, without reading keys or summing duplicate layer counts.
+
+[Longitudinal diagnostics](SESSION_AUDIT.md) adds explicit lifetime/child-log coverage and stream-failure categories. The [capability plan](PLAN.md) tracks verified work and remaining acceptance gates.
 
 Claude Code streams partial model output through the bridge. See [STREAMING.md](STREAMING.md) for what was measured and how ordinary SSE differs from GPT-6 mid-turn steering and GPT-Live voice.
 

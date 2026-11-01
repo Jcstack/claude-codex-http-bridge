@@ -13,6 +13,19 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_http_200_does_not_hide_a_reported_native_stream_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            path.write_text(
+                '[2026-01-02 12:00:00] [aabbccdd] upstream stream failed: stream error: stream disconnected before completion: stream closed before response.completed PRIVATE_SECRET\n'
+                '[2026-01-02 12:00:00] [aabbccdd] [info] [gin.go:1] 200 | 59s | 127.0.0.1 | POST "/v1/messages"\n')
+            report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            self.assertEqual(report["completed_http_statuses"], {"200": 1})
+            self.assertEqual(report["failed_requests"], [])
+            self.assertEqual(report["stream_failure_mentions"]["incomplete_native_stream"]["tagged_requests"], 1)
+            for private in ("PRIVATE_SECRET", "aabbccdd", str(path)):
+                self.assertNotIn(private, json.dumps(report))
+
     def test_native_media_failures_are_distinct_without_leaking_call_ids(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "proxy.log"

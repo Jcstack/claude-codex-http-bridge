@@ -85,6 +85,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     preconnect = Counter()
     preconnect_requests = {}
     preconnect_last = {}
+    inband, inband_requests, inband_last = Counter(), {}, {}
     latencies, slow, failed = [], [], []
     for line in lines(path):
         date = re.match(r"^\[([^]]+)\]", line)
@@ -107,6 +108,13 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                                  "seconds": round(seconds, 3), "endpoint": endpoint})
         else:
             lower = line.lower()
+            if "stream disconnected before completion" in lower or "stream closed before response.completed" in lower:
+                category = "incomplete_native_stream"
+                inband[category] += 1
+                request = re.match(r'^\[[^]]+\]\s+\[([a-f0-9]{8})\]', line)
+                if request:
+                    inband_requests.setdefault(category, set()).add(request[1])
+                inband_last[category] = at.isoformat()
             if "upstream execution failed:" in lower and "tls handshake:" in lower:
                 category = "tls_handshake_eof" if re.search(r'\beof\b', lower) else "tls_handshake_other"
                 preconnect[category] += 1
@@ -122,6 +130,9 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "upstream_preconnection_failures": {category: {
                 "attempt_mentions": count, "tagged_requests": len(preconnect_requests.get(category, set())),
                 "last_at": preconnect_last[category]} for category, count in preconnect.items()},
+            "stream_failure_mentions": {category: {
+                "mentions": count, "tagged_requests": len(inband_requests.get(category, set())),
+                "last_at": inband_last[category]} for category, count in inband.items()},
             "inference_requests": len(ordered),
             "latency_seconds": {"median": round(statistics.median(ordered), 3) if ordered else None,
                                 "p95": round(ordered[math.ceil(len(ordered) * .95) - 1], 3) if ordered else None,
@@ -199,7 +210,7 @@ def session_summary(path: Path, since: datetime) -> dict:
 
 
 def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
-            session: str | None = None) -> dict:
+            session: str | None = None, *, include_sessions: bool = True) -> dict:
     # Import lazily: no key file is opened and ensure_service is never called.
     import launcher
     runtime = root / ("runtime-api" if route == "api" else "runtime")
@@ -235,6 +246,8 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
                 result["managed"] = detail
         except (OSError, RuntimeError, ValueError, ImportError):
             result["managed"] = {"metadata_unavailable": True}
+    if not include_sessions:
+        return result
     paths = []
     for directory in claude_roots:
         projects = directory / "projects"
@@ -255,17 +268,34 @@ def main(arguments: list[str] | None = None, *, root: Path | None = None,
          route: str = "subscription") -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=root or Path(__file__).resolve().parent)
-    parser.add_argument("--session", help="Exact local session UUID; no transcript content is printed")
-    parser.add_argument("--hours", type=float, default=2)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--session", help="Exact local session UUID; no transcript content is printed")
+    selection.add_argument("--tracked", action="store_true", help="Use the previously recorded private audit target")
+    window = parser.add_mutually_exclusive_group()
+    window.add_argument("--hours", type=float)
+    window.add_argument("--lifetime", action="store_true", help="Inspect the full available session history")
+    parser.add_argument("--include-children", action="store_true", help="Include bounded child-session metadata")
     args = parser.parse_args(arguments)
-    if not math.isfinite(args.hours) or not 0 < args.hours <= 168:
+    if args.hours is not None and (not math.isfinite(args.hours) or not 0 < args.hours <= 168):
         parser.error("--hours must be greater than zero and at most 168")
     if args.session and not re.fullmatch(r"[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}", args.session):
         parser.error("--session must be a UUID")
     configured = os.environ.get("CLAUDE_CONFIG_DIR")
     roots = [Path(value) for value in configured.split(os.pathsep) if value] if configured else [Path.home() / ".claude"]
-    report = collect(args.root.expanduser(), route, roots,
-                     datetime.now(timezone.utc) - timedelta(hours=args.hours), args.session)
+    since = None if args.lifetime else datetime.now(timezone.utc) - timedelta(hours=args.hours or 2)
+    detailed = args.lifetime or args.include_children or args.tracked
+    root = args.root.expanduser()
+    report = collect(root, route, roots, since or datetime.min.replace(tzinfo=timezone.utc),
+                     args.session, include_sessions=not detailed)
+    if detailed:
+        import session_audit
+        try:
+            report["session_audit"] = session_audit.collect(roots, since=since, session=args.session,
+                session_tag=session_audit.tracked_tag(root) if args.tracked else None,
+                include_children=args.include_children)
+        except (OSError, RuntimeError, ValueError):
+            print(json.dumps({"read_only": True, "error": "Session audit unavailable; raw state withheld"}))
+            return 1
     print(json.dumps(report, indent=2, ensure_ascii=True))
     return 0
 
