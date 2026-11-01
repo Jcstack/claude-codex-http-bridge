@@ -84,6 +84,15 @@ model entitlement or change those startup settings. Long-lived native
 connections, every possible encrypted native item, and every future upstream
 protocol are not certified by the handoff tests.
 
+The managed translator's model list is a snapshot taken when its backend
+generation starts. `account use` changes the credential selection but does not
+itself reconcile that snapshot. If the next account has a different catalog,
+an existing managed endpoint and a running Claude model picker can therefore
+temporarily retain the earlier list. A later launcher start normally attempts
+to reconcile the managed backend using the catalog snapshot it fetched; it
+does not rewrite the model picker already loaded by an existing Claude process.
+A fully automatic, race-safe account/catalog handoff remains open work.
+
 ## Verification
 
 The credential-free account tests cover isolated OAuth staging, callback state,
