@@ -162,7 +162,17 @@ The case that pauses after the first item synchronizes with the origin sending
 it, not with proof that Claude has consumed it. The fixture controls only its
 own process session and temporary targets.
 
+An additional POSIX `--resume-interrupted` fixture resumes that same isolated
+session after the between-effects interruption. The history contained a
+successful result for the first tool and a rejected result for the gated tool.
+A synthetic model that distinguishes those outcomes retried only the rejected
+tool; both effects occurred exactly once and successful results appeared on the
+continuation. The initial harness fixture had incorrectly treated a rejected
+result as a success, so its synthetic model stopped too early; the revised
+fixture retains that distinction. This does not guarantee that an arbitrary
+real model will choose the same recovery action.
+
 The candidate gate runs across Linux, macOS and Windows; terminal Ctrl-C is
 exercised only on POSIX. Windows console events, interactive TUI behavior,
-arbitrary tools, resume after interruption and unobserved provider failures
+arbitrary tools, real-model recovery choices and unobserved provider failures
 remain separate checks.

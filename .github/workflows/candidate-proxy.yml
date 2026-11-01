@@ -76,6 +76,9 @@ jobs:
           python tests/smoke_transport.py "${{ matrix.binary }}"
           python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}"
           python tests/probe_parallel_stream.py "${{ matrix.binary }}"
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            python tests/probe_parallel_stream.py "${{ matrix.binary }}" --resume-interrupted
+          fi
           python tests/smoke_model_state.py "${{ matrix.binary }}"
           python tests/smoke_native_compaction.py "${{ matrix.binary }}"
           python tests/smoke_web_state.py "${{ matrix.binary }}" --claude-client

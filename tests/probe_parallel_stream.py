@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import uuid
 
 from live_support import temporary_translator
 
@@ -87,7 +88,23 @@ class Handler(BaseHTTPRequestHandler):
                    if isinstance(item, dict) and item.get("type") == "function_call_output"]
         observed = {self.server.calls.get(item.get("call_id")) for item in outputs}
         observed &= set(TARGETS)
-        self.server.requests.append({"acknowledged": sorted(observed)})
+        hints = {}
+        succeeded_results = set()
+        for item in outputs:
+            label = self.server.calls.get(item.get("call_id"))
+            if label not in TARGETS:
+                continue
+            text = json.dumps(item.get("output")).lower()
+            if "success" in text and "reject" not in text and "error" not in text:
+                succeeded_results.add(label)
+            hints[label] = {"kind": type(item.get("output")).__name__, "characters": len(text),
+                            "labels": [word for word in ("success", "creat", "cancel", "interrupt", "error", "denied", "fail",
+                                                          "abort", "reject", "stop", "deny", "user", "tool", "no result", "timeout")
+                                       if word in text]}
+        self.server.requests.append({"acknowledged": sorted(observed), "successful_results": sorted(succeeded_results),
+                                     "synthetic_result_hints": hints})
+        if self.server.resume_interrupted:
+            observed = succeeded_results
         count = len(self.server.requests)
         first = count == 1
         missing = [name for name in TARGETS if name not in observed]
@@ -165,6 +182,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("proxy_binary", type=Path)
+    parser.add_argument("--resume-interrupted", action="store_true",
+                        help="Probe resuming the interrupted between-effects session")
     args = parser.parse_args()
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
@@ -174,6 +193,10 @@ def main():
              "cancel_before_items", "cancel_after_both")
     if os.name != "nt":
         modes += ("ctrl_c_before_items", "ctrl_c_after_first_item", "ctrl_c_between_effects", "ctrl_c_after_both")
+    if args.resume_interrupted:
+        if os.name == "nt":
+            raise RuntimeError("This terminal Ctrl-C fixture requires POSIX")
+        modes = ("ctrl_c_between_effects",)
     metrics = []
     for mode in modes:
         with tempfile.TemporaryDirectory(prefix="bridge-parallel-stream-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
@@ -218,6 +241,7 @@ elif label is not None:
             server.requests = []
             server.calls = {}
             server.mode = mode
+            server.resume_interrupted = args.resume_interrupted
             server.work = work
             server.effects = {label: threading.Event() for label in TARGETS}
             server.phase_ready = threading.Event()
@@ -252,8 +276,11 @@ elif label is not None:
                     "--settings", str(settings), "--permission-mode", "dontAsk", "--output-format", "json",
                     "--model", MODEL, "--tools", "Write", "--add-dir", work.as_posix(), "--max-turns", "6",
                     "-p", "Write SYNTHETIC to owned-a.txt and owned-b.txt once each."]
+                if args.resume_interrupted:
+                    command[-2:-2] = ["--session-id", str(uuid.uuid4())]
                 terminal_interrupt = mode.startswith("ctrl_c_")
                 terminal_isig = None
+                resume_success = None
                 cancelled = mode.startswith("cancel_") or terminal_interrupt
                 if cancelled:
                     if terminal_interrupt:
@@ -283,6 +310,18 @@ elif label is not None:
                     server.release.set()
                     if mode == "ctrl_c_between_effects":
                         assert server.gate_returned.wait(10), "Fixture gate did not settle after cancellation"
+                    if args.resume_interrupted:
+                        initial_labels = [path.read_text(encoding="utf-8") for path in markers.iterdir() if path.is_file()]
+                        first = server.gate_first
+                        second = next(label for label in TARGETS if label != first)
+                        assert initial_labels.count(first) == 1 and initial_labels.count(second) == 0, "Unexpected effects before resume"
+                        resumed = command.copy()
+                        resumed[resumed.index("--session-id")] = "--resume"
+                        resumed[-1] = "Continue the synthetic task, using the existing tool history."
+                        result = subprocess.run(resumed, cwd=work, env=env, stdin=subprocess.DEVNULL,
+                                                capture_output=True, text=True, timeout=60)
+                        reply = json.loads(result.stdout)
+                        resume_success = result.returncode == 0 and reply.get("is_error") is False
                     final = None
                     returncode = process.returncode
                 else:
@@ -292,6 +331,7 @@ elif label is not None:
                 labels = [path.read_text(encoding="utf-8") for path in markers.iterdir() if path.is_file()]
                 counts = {label: labels.count(label) for label in TARGETS}
                 acknowledged = set().union(*(set(row["acknowledged"]) for row in server.requests))
+                successful_acks = set().union(*(set(row["successful_results"]) for row in server.requests))
                 succeeded = None if cancelled else returncode == 0 and final.get("is_error") is False
                 try:
                     assert server.requests, "Client never reached the synthetic endpoint"
@@ -308,9 +348,13 @@ elif label is not None:
                     if mode == "ctrl_c_between_effects":
                         first = server.gate_first
                         second = next(label for label in TARGETS if label != first)
-                        assert counts[first] == 1 and counts[second] == 0, "Ctrl-C repeated or completed a blocked tool effect"
+                        assert counts[first] == 1, "Ctrl-C or resume repeated the first tool effect"
                         assert (work / TARGETS[first]).read_text(encoding="utf-8") == "SYNTHETIC", "First effect was corrupted"
-                        assert not (work / TARGETS[second]).exists(), "Blocked target was created after Ctrl-C"
+                        if args.resume_interrupted:
+                            assert resume_success and counts[second] == 1, "Resume did not complete the remaining effect"
+                            assert successful_acks == set(TARGETS), "Resume omitted successful tool results"
+                        else:
+                            assert counts[second] == 0 and not (work / TARGETS[second]).exists(), "Blocked target was created after Ctrl-C"
                     if mode.endswith("after_both") and cancelled:
                         assert counts == {"A": 1, "B": 1}, "Cancellation lost or repeated a completed effect"
                         assert acknowledged == set(TARGETS), "Cancellation follow-up omitted a completed tool result"
@@ -323,11 +367,13 @@ elif label is not None:
                 except (AssertionError, OSError) as error:
                     print(json.dumps({"failed_case": mode, "reason": str(error) if isinstance(error, AssertionError) else "target_unavailable",
                         "reported_success": succeeded, "requests": len(server.requests), "effects": counts,
-                        "acknowledged": sorted(acknowledged)}), flush=True)
+                        "acknowledged": sorted(acknowledged),
+                        "synthetic_result_hints": [row["synthetic_result_hints"] for row in server.requests]}), flush=True)
                     raise
                 metrics.append({"case": mode, "reported_success": succeeded, "client_terminated_by_fixture": cancelled,
                                 "terminal_ctrl_c": terminal_interrupt,
                                 "terminal_isig_enabled": terminal_isig,
+                                "resume_success": resume_success,
                                 "requests": len(server.requests),
                                 "effects": counts, "acknowledged": sorted(acknowledged), "at_most_once": True})
             finally:
