@@ -52,6 +52,7 @@
 !tests/
 !tests/*.py
 !tests/auth_handoff_fixture.go
+!tests/native_cache_fixture.go
 !tests/claude-client/
 !tests/claude-client/package.json
 !tests/claude-client/package-lock.json

@@ -52,6 +52,17 @@ The checked prefix follows the general guidance in
 and [Claude's tool-caching documentation](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching),
 but public API behavior is not assigned to the subscription route by inference.
 
+A second gate, `tests/native_cache_fixture.go`, exercises the pinned Codex
+executor itself with synthetic OAuth-shaped metadata and a loopback origin.
+It verifies deferred-tool reveal/removal semantics and stable tool, system and
+history prefixes. For this fixture, the key stays stable across tool changes
+and effort changes, and differs across synthetic sessions, agent headers and
+resolved models. The selected `max` and `high` effort values are also retained.
+The upstream executor tests separately cover model aliases and matching HTTP
+and WebSocket key derivation. These in-process tests do not verify forwarding
+of every real Claude client's agent headers, actual provider cache hits, or
+isolation between real accounts.
+
 ## Why acceptance is insufficient
 
 The reviewed upstream request converter explicitly removes top-level
