@@ -190,6 +190,15 @@ describes a different tool/history contract. Route-specific translation and
 backend acceptance must be checked before enabling a control. Public API
 retention and pricing are not assigned to the subscription route by inference.
 
+After the 2026-11-02 safety-backend handoff, a read-only audit of the tracked
+main session and its children used a window beginning when the new generation
+directory was created, shortly before publication. Four deduplicated responses
+reported 2,527,636 total input tokens, including 2,524,032 cache-read tokens
+(99.8574% of reported input); none of those four omitted the cache-read counter.
+The aggregate is not a request hit rate, a single context size or a billing
+measure. Since there is no cross-layer request ID, the window alone cannot
+attribute every response to the new backend or establish causality for a hit.
+
 ## Next gates
 
 - Trace control fields across each hop using a fake origin, without enabling
