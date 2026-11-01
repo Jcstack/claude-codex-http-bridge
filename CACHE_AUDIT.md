@@ -199,6 +199,14 @@ The aggregate is not a request hit rate, a single context size or a billing
 measure. Since there is no cross-layer request ID, the window alone cannot
 attribute every response to the new backend or establish causality for a hit.
 
+A later one-hour read-only snapshot of the same tracked session and children
+contained 50 deduplicated responses with usage. Their reported input included
+32,784,512 cache-read tokens out of 32,861,312 total (99.7663%); none omitted
+the cache-read counter. This is a token share for the observed window, not a
+request hit rate, billing measure or guarantee about other sessions or accounts.
+No API-error records appeared in that tracked snapshot; it does not establish
+that every response completed or that no error was hidden by a retry.
+
 ## Next gates
 
 - Trace control fields across each hop using a fake origin, without enabling

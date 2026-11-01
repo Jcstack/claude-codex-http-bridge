@@ -63,7 +63,7 @@ jobs:
           cp ../tests/native_incomplete_fixture.go internal/runtime/executor/bridge_incomplete_local_test.go
           go test -timeout 90s -run 'TestCodex|TestBridgeCompact' ./internal/runtime/executor
           cp ../tests/auth_handoff_fixture.go sdk/cliproxy/auth/bridge_handoff_local_test.go
-          go test -timeout 60s -run '^TestBridgeAccountHandoffKeepsAdmittedStream$' ./sdk/cliproxy/auth
+          go test -timeout 60s -run '^TestBridgeAccountHandoff' ./sdk/cliproxy/auth
           go build -o "../${{ matrix.binary }}" ./cmd/server
           git apply ../upstream/patches/08437a67-gateway-tool-names.patch
           git apply ../upstream/patches/gateway-instance-identity.patch

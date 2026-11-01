@@ -33,6 +33,16 @@ are retained. This does not sandbox them from files accessible to the user, and
 does not change the environment of Claude Code, the original origin or any
 already-running process.
 
+On 2026-11-02, after the [three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41352045323)
+passed, the installed helper was updated and the managed translator was
+replaced through the rolling reload. The selected account, original service,
+TLS ingress and selected binary bundle retained their identities; one old
+stream was still draining when the reload returned. The new translator has the
+restricted environment. The existing TLS ingress and original service were not
+restarted, so their earlier process environments are unaffected. Historical
+sessions connected directly to the original service also remain on its older
+translator, outside the new incomplete-tool guard.
+
 An isolated Claude Code 2.1.316 probe found a possible future migration path:
 when its user settings file changed, an ordinary long-running client completed
 an already-started fake HTTP stream, then used a new authenticated fake HTTPS
@@ -78,7 +88,11 @@ accepts a specific `AuthID` for both stream and non-stream calls. Its own
 credential-free tests verify propagation in both modes and, for non-stream
 execution, selection of the requested active credential without falling back
 when an ID is missing or disabled. Those targeted tests also passed against a
-clean copy of the pinned source. This is an internal Go interface, not a
+clean copy of the pinned source. A separate synthetic manager test establishes
+an old account's session affinity, then verifies that an explicit streaming
+pin selects the other active account despite lower priority. Missing or
+disabled pins and a synthetic rate limit with retries do not fall back to a
+different account in that test. These are internal Go interfaces, not a
 verified client-controlled HTTP route or an implemented account handoff.
 Turning on two credentials in the existing origin could change selection for
 direct sessions, and duplicating a rotating refresh token across processes is
