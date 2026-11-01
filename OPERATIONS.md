@@ -185,8 +185,24 @@ A safe upgrade needs a stable authenticated listener, a ready replacement backen
 
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
-Remaining work, updated 2026-10-31:
+Remaining work, updated 2026-11-01; execution order and acceptance gates are in [PLAN.md](PLAN.md):
 
+- Audit resumed by the operator on 2026-11-01: verify end-to-end Prompt Caching
+  and the full combined best-practice/capability matrix, keeping Claude Code as
+  the harness. Check stable prompt/tool prefixes, deferred tools, cache keys,
+  reasoning replay, compaction/resume/fork, model/account changes, retention,
+  privacy isolation and actual usage/latency/quota/cost evidence. Assess Claude
+  Code commands, permissions, hooks, skills, MCP/plugins, planning and background
+  work together with OpenAI/Codex model reasoning, native tools, search,
+  browser/computer use, multimodal and streaming/Live capabilities; these are
+  examples, not the audit boundary. Use current official sources and maintained
+  community evidence, then validate applicable practices and interactions with
+  reproducible cases. Record supported, adapted, unsupported and unverified
+  items separately, including tradeoffs, so complementary strengths are
+  maximized without sacrificing security, privacy, correctness or harness
+  capabilities merely to improve cache hits. Keep subscription and project-API
+  findings distinct; the latter remains disabled. Follow the staged plan and
+  read-only longitudinal evidence without disturbing the active conversations.
 - Establish the cause of intermittent upstream TLS/EOF failures. The observed
   cluster recovered; a permanent transport fix has not been demonstrated.
 - Migrate/replace the original listener and TLS ingress process themselves

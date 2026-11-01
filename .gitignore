@@ -17,6 +17,8 @@
 !NATIVE_COMPACTION.md
 !ACCOUNTS.md
 !QUOTA_RECOVERY.md
+!PLAN.md
+!CACHE_AUDIT.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
