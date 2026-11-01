@@ -58,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
         count = len(self.server.requests)
         tool = not tool_results or not (self.server.work / "owned.txt").is_file()
         block = ({"type": "tool_use", "id": f"call_fixture_{count}", "name": "Write",
-                  "input": {"file_path": (self.server.work / "owned.txt").as_posix(), "content": "SYNTHETIC"}}
+                  "input": {"file_path": (self.server.work / self.server.target_name).as_posix(), "content": "SYNTHETIC"}}
                  if tool else {"type": "text", "text": "DONE"})
         message = {"id": f"msg_fixture_{count}", "type": "message", "role": "assistant",
                    "model": body.get("model"), "content": [], "stop_reason": None, "stop_sequence": None,
@@ -78,14 +78,14 @@ class Handler(BaseHTTPRequestHandler):
              "usage": {"output_tokens": 10}},
             {"type": "message_stop"},
         ]
-        cutoff = {"healthy": 6, "partial_arguments": 3, "tool_block": 4, "stop_reason": 5, "message_stop": 6}[self.server.mode] if first else len(events)
+        cutoff = {"denied_target": 6, "healthy": 6, "partial_arguments": 3, "tool_block": 4, "stop_reason": 5, "message_stop": 6}[self.server.mode] if first else len(events)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         try:
             for event in events[:cutoff]:
                 self.emit(event)
-            if first and self.server.mode != "healthy":
+            if first and self.server.mode not in ("healthy", "denied_target"):
                 self.emit({"type": "error", "error": {"type": "api_error", "message": "Synthetic incomplete-stream fixture"}})
         except OSError:
             pass
@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         first = count == 1
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
         if not results or not (self.server.work / "owned.txt").is_file():
-            arguments = json.dumps({"file_path": (self.server.work / "owned.txt").as_posix(), "content": "SYNTHETIC"})
+            arguments = json.dumps({"file_path": (self.server.work / self.server.target_name).as_posix(), "content": "SYNTHETIC"})
             item = {"id": f"fc_fixture_{count}", "type": "function_call", "call_id": f"call_fixture_{count}",
                     "name": "Write", "arguments": arguments, "status": "completed"}
             events = [
@@ -114,7 +114,7 @@ class Handler(BaseHTTPRequestHandler):
                 {"type": "response.function_call_arguments.done", "output_index": 0, "item_id": item["id"], "arguments": arguments},
                 {"type": "response.output_item.done", "output_index": 0, "item": item},
             ]
-            cutoff = {"healthy": 6, "partial_arguments": 3, "arguments_done": 4, "tool_item_done": 5, "response_completed": 6}[self.server.mode] if first else 6
+            cutoff = {"denied_target": 6, "healthy": 6, "partial_arguments": 3, "arguments_done": 4, "tool_item_done": 5, "response_completed": 6}[self.server.mode] if first else 6
         else:
             item = {"id": f"msg_fixture_{count}", "type": "message", "role": "assistant", "status": "completed",
                     "content": [{"type": "output_text", "text": "DONE", "annotations": []}]}
@@ -137,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
             for event in events[:cutoff]:
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
-            if first and self.server.mode != "healthy":
+            if first and self.server.mode not in ("healthy", "denied_target"):
                 self.wfile.write(b'data: {"type":"error","error":{"type":"server_error","code":"request_timeout","message":"Synthetic incomplete-stream fixture"}}\n\n')
                 self.wfile.flush()
         except OSError:
@@ -152,8 +152,8 @@ def main():
     if claude is None:
         raise RuntimeError("Install the pinned Claude fixture before running the safety gate")
     metrics = []
-    modes = (("healthy", "partial_arguments", "arguments_done", "tool_item_done", "response_completed") if args.proxy_binary else
-             ("healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop"))
+    modes = (("denied_target", "healthy", "partial_arguments", "arguments_done", "tool_item_done", "response_completed") if args.proxy_binary else
+             ("denied_target", "healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop"))
     for mode in modes:
         with tempfile.TemporaryDirectory(prefix="bridge-stream-safety-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
             root = Path(temporary)
@@ -164,17 +164,32 @@ def main():
             config.mkdir(mode=0o700)
             marker = root / "hooks"
             hook = root / "hook.py"
-            hook.write_text('import json,pathlib,sys\njson.load(sys.stdin)\nwith pathlib.Path(sys.argv[1]).open("a") as f: f.write("write\\n")\n', encoding="utf-8")
+            hook.write_text('''import json,os,pathlib,sys
+event=json.load(sys.stdin)
+if event.get("hook_event_name")=="PreToolUse":
+    data=event.get("tool_input",{})
+    try:
+        same=os.path.normcase(str(pathlib.Path(data["file_path"]).resolve()))==os.path.normcase(str(pathlib.Path(sys.argv[2]).resolve()))
+    except (KeyError,TypeError,ValueError,OSError):
+        same=False
+    allowed=event.get("tool_name")=="Write" and same and data.get("content")=="SYNTHETIC"
+    print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow" if allowed else "deny","permissionDecisionReason":"Owned synthetic fixture only"}}))
+else:
+    with pathlib.Path(sys.argv[1]).open("a") as handle:
+        handle.write("write\\n")
+''', encoding="utf-8")
             settings = root / "settings.json"
             settings.write_text(json.dumps({"modelPicker": {"options": [
                 {"model": "gpt-6.1-sol", "label": "Fixture", "behavesAs": "claude-sonnet-5-5"}],
-                "replaceBuiltInOptions": True}, "hooks": {"PostToolUse": [{"matcher": "Write", "hooks": [
-                    {"type": "command", "command": sys.executable, "args": [str(hook), str(marker)], "timeout": 5}]}]}}), encoding="utf-8")
+                "replaceBuiltInOptions": True}, "hooks": {event: [{"matcher": "Write", "hooks": [
+                    {"type": "command", "command": sys.executable, "args": [str(hook), str(marker), str(work / "owned.txt")], "timeout": 5}]}]
+                    for event in ("PreToolUse", "PostToolUse")}}), encoding="utf-8")
             server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             server.requests = []
             server.mode = mode
             server.responses = bool(args.proxy_binary)
             server.work = work
+            server.target_name = "blocked.txt" if mode == "denied_target" else "owned.txt"
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             allowed = ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT",
@@ -186,7 +201,7 @@ def main():
                 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
             command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                 "--settings", str(settings), "--permission-mode", "dontAsk", "--output-format", "json",
-                "--model", "gpt-6.1-sol", "--tools", "Write", "--allowedTools", "Edit(./owned.txt)",
+                "--model", "gpt-6.1-sol", "--tools", "Write",
                 "--add-dir", work.as_posix(), "--max-turns", "4",
                 "-p", "Write SYNTHETIC to owned.txt exactly once."]
             stack = ExitStack()
@@ -212,6 +227,8 @@ def main():
                     assert server.requests, "Client never reached the synthetic endpoint"
                     if mode == "healthy":
                         assert succeeded, "Healthy fixture did not complete successfully"
+                    if mode == "denied_target":
+                        assert not succeeded and not target.exists() and not (work / "blocked.txt").exists() and not hooks, "Scoped handler did not deny the other target"
                     assert len(hooks) <= 1, "A stream interruption executed the same logical write twice"
                     if succeeded:
                         assert len(hooks) == 1 and target.read_text(encoding="utf-8") == "SYNTHETIC", "Client reported success without completing the owned write"

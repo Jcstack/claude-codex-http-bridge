@@ -97,6 +97,20 @@ terminal is insufficient evidence that replay is safe. Partial arguments can
 instead abort without an effect; the gate permits that safe outcome and rejects
 false success. It always requires the healthy control to succeed.
 
+The current fixture uses `dontAsk` and a configured PreToolUse handler that
+permits only its exact owned target and synthetic content. A separate target
+must be denied with no write and no PostToolUse effect. Approval does not
+deduplicate calls; the independent hook counter still detects repeated effects.
+This handler exists only in the disposable fixture configuration.
+
+The original Windows healthy control produced permission denials before any
+stream fault was injected; a scoped CLI-rule variant also failed locally.
+Those CLI-rule/configuration differences remain a separate permission-matrix
+investigation. They are not diagnosed as a model or translator fault. The
+[official permission documentation](https://code.claude.com/docs/en/permissions)
+defines file-edit rules and PreToolUse authorization; production permissions
+were not changed to make the fixture pass.
+
 Both checks are CI gates on Linux, macOS and Windows. These fixtures cover the
 specified error events and Write/hook interaction, not all socket failures,
 parallel tools or the exact upstream failure in the user's historical session.
