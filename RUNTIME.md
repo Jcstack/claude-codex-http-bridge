@@ -60,8 +60,23 @@ but not when its source is the changed `--settings` file used at startup. This
 suggests a future per-session settings design, but a shared user settings file
 would affect other sessions, including plain Claude. Preserving the user's
 plugins, hooks, trust decisions, session history and private configuration in
-an isolated per-session design remains unverified. The fixture does not cover
-the Windows interactive console.
+an isolated per-session design remains unverified. Moreover, Claude documents
+[`modelSettings` as startup-only](https://code.claude.com/docs/en/settings#when-edits-take-effect):
+adding a picker row alone does not safely update that model's configured
+compaction window. The fixture does not cover the Windows interactive console.
+
+The pinned origin's [internal execution API](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/api/handlers/model_execution.go)
+accepts a specific `AuthID` for both stream and non-stream calls. Its own
+credential-free tests verify propagation in both modes and, for non-stream
+execution, selection of the requested active credential without falling back
+when an ID is missing or disabled. Those targeted tests also passed against a
+clean copy of the pinned source. This is an internal Go interface, not a
+verified client-controlled HTTP route or an implemented account handoff.
+Turning on two credentials in the existing origin could change selection for
+direct sessions, and duplicating a rotating refresh token across processes is
+unsafe. Any use of pinned dispatch still needs authenticated scope, account
+and model-catalog consistency, single-owner refresh, streaming/cancellation,
+crash recovery, cache isolation and a safe migration for the existing origin.
 
 ## Build and install
 
