@@ -53,6 +53,16 @@ cannot on its own keep existing GPT model pickers current. This launcher builds
 its picker from the selected account's discovered catalog at session launch;
 updating existing sessions safely remains open.
 
+A separate [POSIX interactive fixture](tests/probe_picker_reload.py) reopens
+`/model` in the same Claude Code 2.1.316 process after adding a synthetic model.
+The new row appears when the picker comes from the disposable user settings,
+but not when its source is the changed `--settings` file used at startup. This
+suggests a future per-session settings design, but a shared user settings file
+would affect other sessions, including plain Claude. Preserving the user's
+plugins, hooks, trust decisions, session history and private configuration in
+an isolated per-session design remains unverified. The fixture does not cover
+the Windows interactive console.
+
 ## Build and install
 
 Use a trusted build from the candidate workflow, or reproduce its pinned source,
