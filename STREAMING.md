@@ -10,6 +10,17 @@ Checked 2026-10-30 with Claude Code 2.1.314 and CLIProxyAPI 8.0.46. Claude Code 
 
 For the existing terminal workflow, launch `claude-codex` normally. Its interactive UI already renders the streamed response. To inspect machine-readable partial events in a headless task, pass Claude Code's `--output-format stream-json --include-partial-messages --verbose` flags; the wrapper forwards them. This is useful for measuring time to first visible output and detecting broken SSE framing without logging prompt bodies or credentials.
 
+Claude Code's [gateway guide](https://code.claude.com/docs/en/llm-gateway-protocol#streaming)
+describes SSE pings as one way to prevent client-side idle timeouts during
+long pauses. The [pinned translator's configuration](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/config.example.yaml)
+documents streaming keep-alives as disabled by default; neither running local
+generation explicitly enables them. A separate [upstream discussion](https://github.com/router-for-me/CLIProxyAPI/discussions/2138)
+reports a similar incomplete-stream symptom and a participant's configuration
+change, but does not establish this installation's cause. Downstream keep-alives
+cannot reconstruct a missing upstream terminal event. Their framing, timing,
+error handling, cancellation and interaction with safe retries still need an
+isolated end-to-end test before changing the active runtime.
+
 The official primary GPT-Live WebSocket uses `/v1/live/sessions` without a
 model query, then `session.start` and `session.started`. It is distinct from
 Realtime `/v1/realtime` and an existing Live call's sideband. A 2026-10-31

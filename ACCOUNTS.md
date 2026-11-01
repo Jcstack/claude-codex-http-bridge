@@ -104,6 +104,10 @@ catalog at that moment; a later switch can still occur before or during the
 client's lifetime. Model IDs without sufficient metadata are excluded, and
 account-specific capability metadata beyond what the local service reports is
 not independently certified.
+Claude Code's documented [gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery)
+runs at startup, and a `modelPicker` with `replaceBuiltInOptions` hides its
+discovered rows. Turning that flag on alone therefore does not refresh the
+picker of an existing session.
 
 ## Verification
 

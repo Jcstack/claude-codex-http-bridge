@@ -64,6 +64,8 @@ jobs:
         run: python tests/probe_claude_client.py
       - name: Verify subagent default, alias and forced model routing
         run: python tests/probe_subagent_models.py
+      - name: Verify per-model effort limits with a synthetic gateway
+        run: python tests/probe_effort_limits.py
       - name: Check tool effects across interrupted Messages streams
         run: python tests/probe_claude_stream_safety.py
   gateway:

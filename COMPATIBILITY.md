@@ -35,4 +35,14 @@ Checked 2026-10-30. Claude Code is the harness. The local proxy supplies model i
 
 Sources: [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [OpenAI model selection](https://developers.openai.com/api/docs/guides/model-selection), [Claude model overview](https://platform.claude.com/docs/en/models/overview), [Claude Code model configuration](https://code.claude.com/docs/en/model-config), and [status-line input schema](https://code.claude.com/docs/en/statusline).
 
+For future models with fewer reasoning levels, Claude Code documents a
+per-model [`maxEffortLevel`](https://code.claude.com/docs/en/settings-reference#maxeffortlevel).
+In a credential-free Claude Code 2.1.316 fixture, a `high` cap changed an
+explicit `max` request to `high`; a separate uncapped model still sent `max`.
+The cap also allowed `medium`, so it cannot by itself represent a hypothetical
+non-contiguous set such as `low` and `high`. This bridge has not relaxed its
+current full-effort eligibility requirement or silently capped user requests.
+Any future partial-capability support needs clear selection behavior and
+end-to-end tests across UI, subagents, switching, and upstream metadata.
+
 There is no controlled head-to-head **of this bridge**. Independent same-harness model results and paired harness evidence are assessed in [MODEL_HARNESS_EVIDENCE.md](MODEL_HARNESS_EVIDENCE.md); the proposed direct API-route acceptance tests are in [API_ROUTE_RESEARCH.md](API_ROUTE_RESEARCH.md). To compare on a specific repository, use the same task, effort budget, tools, and acceptance tests, then inspect the resulting code and time to completion. The bridge's compatibility alias is a Claude Code UI/capability mapping; it does not change the underlying Codex model.
