@@ -139,8 +139,14 @@ The two rounds used fresh synthetic prefixes, and no second account was tested.
 An isolated TLS ingress and translator sent the same synthetic content to a
 fake origin with session order A, A, B, A. The translated A cache key stayed
 stable and differed from B's; the pinned-executor fixture separately checks
-session, child-agent and model scope. Neither test proves the provider's cache
-isolation or the complete live path's internal key selection.
+session, child-agent and model scope. A further in-process test of that executor's
+Responses route verifies that an incoming cache key is preserved in its native
+request body and `Session-Id` header. These compositional tests do not inspect
+the production request's internal key or prove provider cache isolation.
+The [public OpenAI API caching guide](https://developers.openai.com/api/docs/guides/prompt-caching)
+describes distinct keys as a way to separate accounting and help prevent
+cache-hit probing. The tested Codex subscription backend is a different route,
+so that API documentation alone does not establish its isolation rules.
 
 ```sh
 python tests/live_cache_scope.py --root PRIVATE_ROOT --confirm-live

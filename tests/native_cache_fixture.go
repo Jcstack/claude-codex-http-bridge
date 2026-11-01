@@ -158,3 +158,22 @@ func TestCodexBridgeNativeDynamicToolCachePrefix(t *testing.T) {
 		t.Fatal("native fixture did not preserve the selected effort")
 	}
 }
+
+func TestCodexBridgeResponsesCacheKeyReachesNativeRequest(t *testing.T) {
+	proxy := NewCodexExecutor(&config.Config{})
+	for _, cacheKey := range []string{"synthetic-session-a", "synthetic-session-b"} {
+		payload, err := json.Marshal(map[string]any{"model": "gpt-6.1-sol", "stream": true,
+			"prompt_cache_key": cacheKey, "input": []any{map[string]any{"role": "user", "content": "fixture"}}})
+		if err != nil {
+			t.Fatal("synthetic Responses serialization failed")
+		}
+		request, body, err := proxy.cacheHelper(context.Background(), tr.FormatOpenAIResponse,
+			"https://example.invalid/v1/responses", ex.Request{Model: "gpt-6.1-sol", Payload: payload}, payload, nil)
+		if err != nil {
+			t.Fatal("synthetic Responses cache setup failed")
+		}
+		if gjson.GetBytes(body, "prompt_cache_key").String() != cacheKey || request.Header.Get("Session-Id") != cacheKey {
+			t.Fatal("Responses cache key was not preserved for the native upstream request")
+		}
+	}
+}
