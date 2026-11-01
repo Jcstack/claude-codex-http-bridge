@@ -149,7 +149,7 @@ class Usage:
         rows = list(self.rows.values())
         totals = {field: sum(row.get(field, 0) for row in rows) for field in USAGE_FIELDS}
         denominator = sum(totals[field] for field in INPUT_FIELDS)
-        return {"responses_with_usage": len(rows), **totals,
+        return {"responses_with_usage": len(rows), "counter_merge_policy": "maximum_valid_value_per_response_identity", **totals,
                 "reported_total_input_tokens": denominator,
                 "cache_read_fraction_of_reported_input": round(totals["cache_read_input_tokens"] / denominator, 6) if denominator else None,
                 "responses_missing_counter": {field: sum(field not in row for row in rows) for field in USAGE_FIELDS},

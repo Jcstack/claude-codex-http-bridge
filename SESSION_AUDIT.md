@@ -39,7 +39,10 @@ before sharing. It is not automatically saved or committed.
   Omitted records/files and parser limits are reported. Symlinked paths below
   a configured Claude root are skipped.
 - Cache usage is deduplicated by response identity, including across children.
-  Missing counters are reported separately. The fraction describes reported
+  Each counter keeps the maximum valid reported value for that identity;
+  smaller repeated output counters do not erase an earlier observation. These
+  totals are not billing or final-context measurements. Missing counters are
+  reported separately. The fraction describes reported
   input tokens, not request hit rate, throughput, subscription allowance or
   billing. Cached input still occupies context; cumulative input is not a
   context window. Child durations can overlap.
