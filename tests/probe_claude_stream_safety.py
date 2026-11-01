@@ -43,7 +43,7 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(block, dict) and block.get("type") == "tool_result"]
         self.server.requests.append({"has_tool_result": bool(tool_results)})
         count = len(self.server.requests)
-        tool = not tool_results
+        tool = not tool_results or not (self.server.work / "owned.txt").is_file()
         block = ({"type": "tool_use", "id": f"call_fixture_{count}", "name": "Write",
                   "input": {"file_path": str(self.server.work / "owned.txt"), "content": "SYNTHETIC"}}
                  if tool else {"type": "text", "text": "DONE"})
@@ -88,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
         count = len(self.server.requests)
         first = count == 1
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
-        if not results:
+        if not results or not (self.server.work / "owned.txt").is_file():
             arguments = json.dumps({"file_path": str(self.server.work / "owned.txt"), "content": "SYNTHETIC"})
             item = {"id": f"fc_fixture_{count}", "type": "function_call", "call_id": f"call_fixture_{count}",
                     "name": "Write", "arguments": arguments, "status": "completed"}
@@ -151,7 +151,7 @@ def main():
             config.mkdir(mode=0o700)
             marker = root / "hooks"
             hook = root / "hook.py"
-            hook.write_text('import pathlib,sys\nwith pathlib.Path(sys.argv[1]).open("a") as f: f.write("write\\n")\n', encoding="utf-8")
+            hook.write_text('import json,pathlib,sys\njson.load(sys.stdin)\nwith pathlib.Path(sys.argv[1]).open("a") as f: f.write("write\\n")\n', encoding="utf-8")
             settings = root / "settings.json"
             settings.write_text(json.dumps({"modelPicker": {"options": [
                 {"model": "gpt-6.1-sol", "label": "Fixture", "behavesAs": "claude-sonnet-5-5"}],
@@ -185,19 +185,31 @@ def main():
                     port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, "gpt-6.1-sol"))
                     env.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_AUTH_TOKEN=key)
                 result = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, timeout=45)
-                final = json.loads(result.stdout)
+                try:
+                    final = json.loads(result.stdout)
+                except ValueError:
+                    print(json.dumps({"failed_case": mode, "reason": "client_result_not_json", "returncode": result.returncode,
+                        "stdout_characters": len(result.stdout), "stderr_characters": len(result.stderr), "requests": len(server.requests)}), flush=True)
+                    raise
                 hooks = marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
                 target = work / "owned.txt"
                 succeeded = result.returncode == 0 and final.get("is_error") is False
-                assert server.requests, "Client never reached the synthetic endpoint"
-                if mode == "healthy":
-                    assert succeeded, "Healthy fixture did not complete successfully"
-                assert len(hooks) <= 1, "A stream interruption executed the same logical write twice"
-                if succeeded:
-                    assert len(hooks) == 1 and target.read_text(encoding="utf-8") == "SYNTHETIC", "Client reported success without completing the owned write"
-                    assert any(request["has_tool_result"] for request in server.requests[1:]), "Continuation lost the committed tool result"
-                else:
-                    assert final.get("is_error") is True or result.returncode != 0, "Client termination was ambiguous"
+                try:
+                    assert server.requests, "Client never reached the synthetic endpoint"
+                    if mode == "healthy":
+                        assert succeeded, "Healthy fixture did not complete successfully"
+                    assert len(hooks) <= 1, "A stream interruption executed the same logical write twice"
+                    if succeeded:
+                        assert len(hooks) == 1 and target.read_text(encoding="utf-8") == "SYNTHETIC", "Client reported success without completing the owned write"
+                        assert any(request["has_tool_result"] for request in server.requests[1:]), "Continuation lost the committed tool result"
+                    else:
+                        assert final.get("is_error") is True or result.returncode != 0, "Client termination was ambiguous"
+                except AssertionError as error:
+                    # Every assertion string is fixed fixture code, never model output.
+                    print(json.dumps({"failed_case": mode, "reason": str(error), "returncode": result.returncode,
+                        "reported_success": succeeded, "requests": len(server.requests), "write_hook_count": len(hooks),
+                        "file_exists": target.exists(), "exact_content": target.is_file() and target.read_text(encoding="utf-8") == "SYNTHETIC"}), flush=True)
+                    raise
                 metrics.append({"cut_after": mode, "reported_success": succeeded, "requests": len(server.requests),
                     "write_hook_count": len(hooks), "followup_has_tool_result": any(request["has_tool_result"] for request in server.requests[1:]),
                     "tool_write_at_most_once": True})
