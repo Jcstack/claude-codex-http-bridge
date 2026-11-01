@@ -72,6 +72,7 @@ jobs:
           python tests/smoke_api_contract.py "${{ matrix.binary }}"
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
           python tests/smoke_transport.py "${{ matrix.binary }}"
+          python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}"
           python tests/smoke_model_state.py "${{ matrix.binary }}"
           python tests/smoke_native_compaction.py "${{ matrix.binary }}"
           python tests/smoke_web_state.py "${{ matrix.binary }}" --claude-client

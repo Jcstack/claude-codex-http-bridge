@@ -77,3 +77,27 @@ Any recovery design must preserve tool identity and prove that partially
 delivered tool calls cannot execute twice. Do not manufacture a successful
 terminal event, lower the user's effort, add an arbitrary execution deadline
 or replay committed tool actions merely to hide a disconnect.
+
+## First tool-safety gate
+
+`tests/probe_claude_stream_safety.py` uses the actual locked Claude client, a
+disposable Write target and a PostToolUse hook that counts effects. It needs no
+model account. The optional `--proxy-binary PATH` runs the reviewed translator
+between that client and a synthetic Responses origin.
+
+The initial local check on Claude Code 2.1.316 passed both paths. The translator
+path covers a healthy baseline, half-written arguments, complete arguments,
+a completed tool item without a response terminal, and a late error after
+`response.completed`. Every successful case performed the write exactly once
+and sent its tool result on continuation. No case duplicated the write.
+
+The direct Messages check also showed that a completed tool block can execute
+before the entire response is terminated. Consequently, absence of a response
+terminal is insufficient evidence that replay is safe. Partial arguments can
+instead abort without an effect; the gate permits that safe outcome and rejects
+false success. It always requires the healthy control to succeed.
+
+Both checks are CI gates on Linux, macOS and Windows. These fixtures cover the
+specified error events and Write/hook interaction, not all socket failures,
+parallel tools or the exact upstream failure in the user's historical session.
+Provider cause and general safe stream recovery remain open work.
