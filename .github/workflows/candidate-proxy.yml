@@ -88,6 +88,7 @@ jobs:
           python tests/probe_gateway_tool_names.py "names-${{ matrix.binary }}" --previous "${{ matrix.binary }}"
           python tests/smoke_transport.py "${{ matrix.binary }}"
           python tests/probe_stream_keepalive.py "${{ matrix.binary }}" runtime-bundle
+          python tests/probe_settings_handoff.py runtime-bundle
           python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}"
           python tests/probe_parallel_stream.py "${{ matrix.binary }}"
           if [ "$RUNNER_OS" != "Windows" ]; then

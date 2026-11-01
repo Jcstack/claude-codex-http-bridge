@@ -124,7 +124,7 @@ claude-codex bridge stop              # after background work has finished
 
 Inside Claude Code:
 
-- `/model` lists every eligible text model returned by the local bridge's current `/v1/models` catalog. Use the arrow keys and press **s** to switch for this session only. Enter saves the model to Claude Code's user settings and may affect a later plain `claude` launch.
+- `/model` lists the eligible text models discovered from the local bridge's `/v1/models` catalog when this session started. Use the arrow keys and press **s** to switch for this session only. Enter saves the model to Claude Code's user settings and may affect a later plain `claude` launch. `claude-codex models` checks the current catalog; an already running session's picker is not automatically refreshed.
 - `/effort` selects `low`, `medium`, `high`, `xhigh`, or `max`. `/effort ultracode` enables Claude Code's own dynamic workflows; it is not Codex Ultra.
 - `/autocompact` shows the configured window for the selected model. The launcher supplies a per-model setting, so `/model` switches also switch that setting. Claude reserves space internally and may compact earlier. Its higher-priority launch setting cannot currently be changed by `/autocompact` within that session.
 

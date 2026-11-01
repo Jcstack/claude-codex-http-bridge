@@ -25,6 +25,34 @@ Retiring the original service requires its dependent sessions to finish. Moving
 an already-running client from its old endpoint is not implemented by editing
 its environment or settings files.
 
+An isolated Claude Code 2.1.316 probe found a possible future migration path:
+when its user settings file changed, an ordinary long-running client completed
+an already-started fake HTTP stream, then used a new authenticated fake HTTPS
+gateway on the next turn with its earlier conversation intact. Adding the
+temporary CA in the changed settings worked in this native-client sample; a
+negative case without that CA did not reach the HTTPS server. A higher-priority
+`--settings` environment kept the original route, changing the `--settings`
+file itself did not change it, and `--restricted` ignored user settings. The
+probe uses only synthetic credentials, a disposable CA and local endpoints;
+it does not establish cross-platform or live-session migration by itself.
+
+In particular, user settings are shared by multiple sessions, `ConfigChange`
+hooks may block an edit, and removing an environment key does not clear it from
+a running client. A safe implementation still needs per-session scope, an
+authenticated and verified target, atomic update and rollback, in-flight and
+background-task checks, and validation against the actual settings precedence.
+No live user's settings were changed to run this probe. [Claude settings and
+reload](https://code.claude.com/docs/en/settings#when-edits-take-effect),
+[environment updates](https://code.claude.com/docs/en/env-vars#set-variables-in-settings-files),
+and [configuration hooks](https://code.claude.com/docs/en/hooks#configchange).
+
+Claude's built-in [gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery)
+is also a startup snapshot: it filters model IDs without `claude` or
+`anthropic`, and a replacing `modelPicker` hides discovered rows. It therefore
+cannot on its own keep existing GPT model pickers current. This launcher builds
+its picker from the selected account's discovered catalog at session launch;
+updating existing sessions safely remains open.
+
 ## Build and install
 
 Use a trusted build from the candidate workflow, or reproduce its pinned source,
