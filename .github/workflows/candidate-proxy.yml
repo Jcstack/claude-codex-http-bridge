@@ -55,16 +55,21 @@ jobs:
           cd upstream-source
           go mod verify
           go build -o "../previous-${{ matrix.binary }}" ./cmd/server
-          git apply ../upstream/patches/08437a67-gateway-tool-names.patch
-          git apply ../upstream/patches/gateway-instance-identity.patch
-          cp ../tests/native_gateway_names_fixture.go internal/translator/codex/claude/bridge_gateway_names_local_test.go
+          git apply ../upstream/patches/incomplete-tool-guard.patch
+          cp ../tests/translator_incomplete_fixture.go internal/translator/codex/claude/bridge_incomplete_local_test.go
           go test ./internal/translator/codex/claude
           go test ./internal/runtime/executor/helps
           cp ../tests/native_cache_fixture.go internal/runtime/executor/bridge_native_cache_fixture_local_test.go
+          cp ../tests/native_incomplete_fixture.go internal/runtime/executor/bridge_incomplete_local_test.go
           go test -timeout 90s -run 'TestCodex|TestBridgeCompact' ./internal/runtime/executor
           cp ../tests/auth_handoff_fixture.go sdk/cliproxy/auth/bridge_handoff_local_test.go
           go test -timeout 60s -run '^TestBridgeAccountHandoffKeepsAdmittedStream$' ./sdk/cliproxy/auth
           go build -o "../${{ matrix.binary }}" ./cmd/server
+          git apply ../upstream/patches/08437a67-gateway-tool-names.patch
+          git apply ../upstream/patches/gateway-instance-identity.patch
+          cp ../tests/native_gateway_names_fixture.go internal/translator/codex/claude/bridge_gateway_names_local_test.go
+          go test ./internal/translator/codex/claude
+          go build -o "../names-${{ matrix.binary }}" ./cmd/server
           cd ../gateway
           go test -timeout 60s ./...
           go build -o ../bridge-ingress .
@@ -75,10 +80,12 @@ jobs:
         run: |
           set -euo pipefail
           python tests/smoke_api_contract.py "${{ matrix.binary }}"
+          python tests/probe_incomplete_nonstream.py "${{ matrix.binary }}"
+          python tests/probe_incomplete_cache_handoff.py "previous-${{ matrix.binary }}" "${{ matrix.binary }}"
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
           python tests/probe_toolsearch_cache_batch.py "${{ matrix.binary }}"
-          python tests/probe_gateway_tool_names.py "${{ matrix.binary }}"
-          python tests/probe_gateway_tool_names.py "${{ matrix.binary }}" --previous "previous-${{ matrix.binary }}"
+          python tests/probe_gateway_tool_names.py "names-${{ matrix.binary }}"
+          python tests/probe_gateway_tool_names.py "names-${{ matrix.binary }}" --previous "${{ matrix.binary }}"
           python tests/smoke_transport.py "${{ matrix.binary }}"
           python tests/probe_stream_keepalive.py "${{ matrix.binary }}" runtime-bundle
           python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}"

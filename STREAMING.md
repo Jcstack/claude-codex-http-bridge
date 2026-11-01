@@ -42,6 +42,43 @@ no reported stream error; the existing origin and ingress identities remained
 unchanged. This is a connectivity sample, not evidence that a long request or
 the recurring incomplete-stream failure is fixed.
 
+### Incomplete tool-call safety, 2026-11-02
+
+A credential-free fake Responses origin exposed a separate boundary bug in the
+currently running translator. It sent a valid JSON argument followed by
+`response.incomplete` / `max_output_tokens`, while the function item still had
+`status: in_progress` and had not emitted `response.output_item.done`. The old
+translator closed the tool block and the real isolated Claude client executed
+one synthetic write. This is a reproduction with an owned fixture; it does not
+establish that the active user session encountered this event. OpenAI documents
+[`response.incomplete` and item lifecycle events](https://developers.openai.com/api/reference/resources/responses/streaming-events),
+while Anthropic says an incomplete tool block at a [token limit](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons#incomplete-tool-use-blocks)
+requires special handling.
+
+The [candidate guard](upstream/patches/incomplete-tool-guard.patch) reports an
+error instead of completing an unconfirmed streamed client-tool block. It also
+rejects an explicitly unfinished `output_item.done`; a tool explicitly marked
+completed remains eligible for normal handling. HTTP and WebSocket non-stream
+requests fail with a request-scoped 502 instead of cooling the account. The
+native executor and real-Claude fixtures use synthetic traffic: they cover
+partial JSON, valid but unconfirmed JSON, an unfinished item, a completed-item
+control, and two parallel tools with a completed first item. The Claude client
+can independently retry after the error; in the tested parallel fixture the
+completed result was retained and neither effect was duplicated. These samples
+do not prove exactly-once behavior for every plugin, cancellation or retry.
+Separately, [a before/after fixture](tests/probe_incomplete_cache_handoff.py)
+compares exact synthetic model, instructions, tools, input, reasoning, choice
+and session cache-key bytes across three dynamic-tool stages, including a long
+gateway name. The safety-only candidate preserves them; enabling the separate
+experimental name improvement intentionally fails this comparison. This is not
+a measurement of the provider's actual cache hits.
+
+The guard is a source candidate and is **not yet installed** in the running
+translator or original origin. Cross-platform gates and a safe managed-backend
+handoff are still required; the origin and old direct sessions have separate
+upgrade limits. This issue is distinct from the previously observed EOF/503
+errors, whose root cause remains unknown.
+
 A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
 on Claude Code 2.1.201 reported an additional content-progress timeout that
 comments and ping events did not reset. That result is version- and setup-specific

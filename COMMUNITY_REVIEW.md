@@ -150,8 +150,10 @@ Selected changes and their boundaries:
   name formats keep upstream's fallback. A digest or ordinal is not proof of
   account identity, and especially long names can remain ambiguous.
 
-The source-locked candidate now includes the upstream name patch followed by
-our instance follow-up. Local Go integration tests check deferred tool reveal,
+An experimental candidate applies the upstream name patch followed by our
+instance follow-up. The separately packaged safety candidate leaves those name
+patches out, so applying the incomplete-tool guard does not itself rewrite MCP
+tool names. Local Go integration tests check deferred tool reveal,
 collisions, same-prefix instances, streamed and non-streamed reverse mapping,
 replay, removal and the 64-character fallback. The old pin and upstream-only
 fix each fail their respective new negative controls. A real Claude Code client

@@ -13,7 +13,7 @@ import secrets
 
 SOURCE = Path(__file__).resolve().parent
 UPSTREAM = "9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5"
-PATCHES = ("12d97cf-inline-tools-backport.patch", "12d97cf-deferred-tools.patch", "web-search-replay.patch", "loopback-tls.patch", "url-citations.patch", "native-compaction-v2.patch", "08437a67-gateway-tool-names.patch", "gateway-instance-identity.patch")
+PATCHES = ("12d97cf-inline-tools-backport.patch", "12d97cf-deferred-tools.patch", "web-search-replay.patch", "loopback-tls.patch", "url-citations.patch", "native-compaction-v2.patch", "incomplete-tool-guard.patch")
 
 
 def canonical(value: dict) -> bytes:
@@ -154,6 +154,31 @@ def activate(root: Path, source: Path) -> str:
     if os.name == "nt":
         windows_acl.lock([root / "runtime-selected.json"])
     return identity
+
+
+def selection_snapshot(root: Path) -> bytes | None:
+    path = root / "runtime-selected.json"
+    if not path.exists():
+        return None
+    safe_file(path, limit=65536)
+    return path.read_bytes()
+
+
+def rollback_selection(root: Path, previous: bytes | None, attempted_identity: str) -> None:
+    """Restore an unsuccessful activation without overwriting another writer."""
+    path = root / "runtime-selected.json"
+    current = selection_snapshot(root)
+    if current == previous:
+        return
+    if current != canonical({"bundle": attempted_identity}):
+        raise RuntimeError("Runtime selection changed during failed upgrade; recovery requires inspection")
+    if previous is None:
+        path.unlink()
+    else:
+        write_file(path, previous, 0o600)
+        if os.name == "nt":
+            import windows_acl
+            windows_acl.lock([path])
 
 
 def selected(root: Path) -> tuple[Path, dict, str] | None:

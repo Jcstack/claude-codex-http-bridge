@@ -681,13 +681,27 @@ def main() -> int:
         import runtime_bundle
         import accounts
         with accounts.switch_lock(ROOT, wait_seconds=30):
+            previous_selection = attempted_identity = None
             if mode == "bridge-upgrade":
                 with service_lock():
-                    runtime_bundle.activate(ROOT, Path(selected).expanduser().absolute())
-            runtime, state, _ = ensure_service(route=route)
-            models, verify = managed_catalog(state)
-            managed = rolling_runtime.ensure(ROOT, runtime, state, models, force=mode == "bridge-reload",
-                                             before_publish=verify)
+                    bundle = Path(selected).expanduser().absolute()
+                    previous_selection = runtime_bundle.selection_snapshot(ROOT)
+                    _, attempted_identity = runtime_bundle.verify(bundle)
+                    try:
+                        runtime_bundle.activate(ROOT, bundle)
+                    except BaseException:
+                        runtime_bundle.rollback_selection(ROOT, previous_selection, attempted_identity)
+                        raise
+            try:
+                runtime, state, _ = ensure_service(route=route)
+                models, verify = managed_catalog(state)
+                managed = rolling_runtime.ensure(ROOT, runtime, state, models, force=mode == "bridge-reload",
+                                                 before_publish=verify)
+            except BaseException:
+                if mode == "bridge-upgrade":
+                    with service_lock():
+                        runtime_bundle.rollback_selection(ROOT, previous_selection, attempted_identity)
+                raise
         import quota_recovery
         quota_recovery.ensure_watch(ROOT)
         print(f"Managed TLS endpoint ready: https://127.0.0.1:{managed['port']}; legacy sessions retain their original service")

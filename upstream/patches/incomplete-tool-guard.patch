@@ -1,0 +1,218 @@
+diff --git a/internal/runtime/executor/codex_executor_execute.go b/internal/runtime/executor/codex_executor_execute.go
+index 316edb94..889b7d6d 100644
+--- a/internal/runtime/executor/codex_executor_execute.go
++++ b/internal/runtime/executor/codex_executor_execute.go
+@@ -210,6 +210,9 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 		}
+ 
+ 		completedData := patchCodexCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
++		if responseFormat == sdktranslator.FormatClaude && codexUnconfirmedTerminalTool(eventType, completedData) {
++			return cliproxyexecutor.Response{}, newCodexIncompleteToolCallError()
++		}
+ 		if eventType == "response.completed" {
+ 			cacheCodexReasoningReplayFromCompleted(replayScope, completedData)
+ 		}
+diff --git a/internal/runtime/executor/codex_executor_terminal.go b/internal/runtime/executor/codex_executor_terminal.go
+index 82ca00bf..bb6d98ba 100644
+--- a/internal/runtime/executor/codex_executor_terminal.go
++++ b/internal/runtime/executor/codex_executor_terminal.go
+@@ -46,6 +46,39 @@ func (codexEmptyIncompleteStreamError) IsRequestScoped() bool {
+ 	return true
+ }
+ 
++// This error is request-scoped: a truncated tool item must not cool down
++// the account or be automatically retried against another credential.
++type codexIncompleteToolCallError struct {
++	statusErr
++}
++
++func newCodexIncompleteToolCallError() codexIncompleteToolCallError {
++	return codexIncompleteToolCallError{statusErr: statusErr{
++		code: http.StatusBadGateway,
++		msg:  "Upstream ended before a client tool call was complete.",
++	}}
++}
++
++func (codexIncompleteToolCallError) IsRequestScoped() bool {
++	return true
++}
++
++func codexUnconfirmedTerminalTool(eventType string, payload []byte) bool {
++	unconfirmed := false
++	gjson.GetBytes(payload, "response.output").ForEach(func(_, item gjson.Result) bool {
++		if item.Get("type").String() != "function_call" {
++			return true
++		}
++		status := item.Get("status").String()
++		if status != "completed" && (eventType == "response.incomplete" || status != "") {
++			unconfirmed = true
++			return false
++		}
++		return true
++	})
++	return unconfirmed
++}
++
+ // Streamed Codex responses may emit response.output_item.done events while leaving
+ // response.completed.response.output empty. Keep the stream path aligned with the
+ // already-patched non-stream path by reconstructing response.output from those items.
+diff --git a/internal/runtime/executor/codex_websockets_execute.go b/internal/runtime/executor/codex_websockets_execute.go
+index 1637c5d1..a50435d9 100644
+--- a/internal/runtime/executor/codex_websockets_execute.go
++++ b/internal/runtime/executor/codex_websockets_execute.go
+@@ -367,6 +367,16 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
+ 				return resp, streamErr
+ 			}
+ 			payload = patchCodexCompletedOutput(payload, outputItemsByIndex, outputItemsFallback)
++			if responseFormat == sdktranslator.FormatClaude && codexUnconfirmedTerminalTool(eventType, payload) {
++				if sess != nil {
++					e.invalidateUpstreamConn(sess, conn, "incomplete_tool_call", nil)
++					unlockSession()
++				}
++				streamErr := newCodexIncompleteToolCallError()
++				helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
++				reporter.PublishFailure(ctx, streamErr)
++				return resp, streamErr
++			}
+ 			if eventType != "response.incomplete" {
+ 				cacheCodexReasoningReplayFromCompleted(replayScope, payload)
+ 			}
+diff --git a/internal/translator/codex/claude/codex_claude_parallel_function_calls_test.go b/internal/translator/codex/claude/codex_claude_parallel_function_calls_test.go
+index b92fd52a..90d71a50 100644
+--- a/internal/translator/codex/claude/codex_claude_parallel_function_calls_test.go
++++ b/internal/translator/codex/claude/codex_claude_parallel_function_calls_test.go
+@@ -290,6 +290,10 @@ func TestConvertCodexResponseToClaude_StreamTerminalHydratesInterleavedFunctionC
+ 	for _, terminalType := range []string{"response.completed", "response.incomplete"} {
+ 		t.Run(terminalType, func(t *testing.T) {
+ 			terminal := `data: {"type":"` + terminalType + `","response":{"usage":{"input_tokens":1,"output_tokens":1},"output":[{"type":"function_call","call_id":"call_a","name":"Read","arguments":"{\"file_path\":\"a\"}"},{"type":"function_call","call_id":"call_b","name":"Read","arguments":"{\"file_path\":\"b\"}"}]}}`
++			if terminalType == "response.incomplete" {
++				// An incomplete response may still contain explicitly completed tools.
++				terminal = strings.ReplaceAll(terminal, `"type":"function_call"`, `"type":"function_call","status":"completed"`)
++			}
+ 			chunks := [][]byte{
+ 				[]byte(`data: {"type":"response.created","response":{"id":"resp_parallel","model":"gpt-5"}}`),
+ 				[]byte(`data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_a","name":"Read"},"output_index":0}`),
+diff --git a/internal/translator/codex/claude/codex_claude_response.go b/internal/translator/codex/claude/codex_claude_response.go
+index 94e0b08b..2d9865d3 100644
+--- a/internal/translator/codex/claude/codex_claude_response.go
++++ b/internal/translator/codex/claude/codex_claude_response.go
+@@ -44,6 +44,7 @@ type ConvertCodexResponseToClaudeParams struct {
+ 	ShortToOriginalToolNames map[string]string
+ 	ToolNamesResolved        bool
+ 	HasEmittedToolUse        bool
++	RejectedIncompleteTool   bool
+ 	BlockIndex               int
+ 	HasTextDelta             bool
+ 	TextBlockOpen            bool
+@@ -115,6 +116,9 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 	output := make([]byte, 0, 512)
+ 	rootResult := gjson.ParseBytes(rawJSON)
+ 	params := (*param).(*ConvertCodexResponseToClaudeParams)
++	if params.RejectedIncompleteTool {
++		return [][]byte{}
++	}
+ 
+ 	typeResult := rootResult.Get("type")
+ 	typeStr := typeResult.String()
+@@ -204,8 +208,13 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 	case "response.web_search_call.searching", "response.web_search_call.completed", "response.web_search_call.in_progress":
+ 		// Wait for populated web_search_call items on output_item.done.
+ 	case "response.completed", "response.incomplete":
+-		template = []byte(`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":0,"output_tokens":0}}`)
+ 		responseData := rootResult.Get("response")
++		if (typeStr == "response.incomplete" && codexIncompleteHasUnconfirmedToolCalls(params, responseData)) ||
++			codexTerminalHasExplicitUnfinishedTool(responseData) {
++			params.RejectedIncompleteTool = true
++			return [][]byte{codexIncompleteToolCallError()}
++		}
++		template = []byte(`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":0,"output_tokens":0}}`)
+ 		responseData.Get("output").ForEach(func(index, item gjson.Result) bool {
+ 			output = appendCodexMessageURLCitations(output, params, index.Int(), item)
+ 			return true
+@@ -339,6 +348,10 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
+ 				return true
+ 			})
+ 		case "function_call":
++			if status := itemResult.Get("status").String(); status != "" && status != "completed" {
++				params.RejectedIncompleteTool = true
++				return [][]byte{codexIncompleteToolCallError()}
++			}
+ 			output = append(output, finalizeCodexThinkingBlock(params)...)
+ 			output = append(output, stopCodexTextBlock(params)...)
+ 			call := codexFunctionCallForEvent(params, rootResult, itemResult)
+@@ -426,6 +439,64 @@ func appendDeferredCodexStreamEvents(output []byte, originalRequestRawJSON []byt
+ 	return output
+ }
+ 
++// Never close an unconfirmed client tool block when a response is incomplete.
++// Returning an SSE error prevents a Claude client from executing a partially
++// generated call and does not replay actions that might already have completed.
++func codexIncompleteToolCallError() []byte {
++	return codexStreamErrorToClaudeError(gjson.Parse(`{"error":{"type":"api_error","message":"Upstream ended before a client tool call was complete."}}`))
++}
++
++func codexTerminalHasExplicitUnfinishedTool(responseData gjson.Result) bool {
++	unfinished := false
++	responseData.Get("output").ForEach(func(_, item gjson.Result) bool {
++		if item.Get("type").String() == "function_call" {
++			status := item.Get("status").String()
++			if status != "" && status != "completed" {
++				unfinished = true
++				return false
++			}
++		}
++		return true
++	})
++	return unfinished
++}
++
++func codexIncompleteHasUnconfirmedToolCalls(params *ConvertCodexResponseToClaudeParams, responseData gjson.Result) bool {
++	confirmed := make(map[*codexFunctionCallStream]bool)
++	unsafe := false
++	responseData.Get("output").ForEach(func(index, item gjson.Result) bool {
++		if item.Get("type").String() != "function_call" {
++			return true
++		}
++		keys := codexFunctionCallKeys(gjson.Result{}, item)
++		if itemOutputIndex := item.Get("output_index"); itemOutputIndex.Exists() {
++			keys = appendUniqueCodexFunctionCallKey(keys, "output:"+itemOutputIndex.Raw)
++		}
++		if index.Exists() {
++			keys = appendUniqueCodexFunctionCallKey(keys, "output:"+index.String())
++		}
++		call := codexFunctionCallForKeys(params, keys)
++		status := item.Get("status").String()
++		if status != "completed" && (status != "" || call == nil || !call.Done) {
++			unsafe = true
++			return false
++		}
++		if call != nil {
++			confirmed[call] = true
++		}
++		return true
++	})
++	if unsafe {
++		return true
++	}
++	for _, call := range params.FunctionCallQueue {
++		if call != nil && !call.Closed && !call.Done && !confirmed[call] {
++			return true
++		}
++	}
++	return false
++}
++
+ func codexStreamErrorToClaudeError(rootResult gjson.Result) []byte {
+ 	errorResult := rootResult.Get("error")
+ 	errType := strings.TrimSpace(errorResult.Get("type").String())
+@@ -475,6 +546,10 @@ func ConvertCodexResponseToClaudeNonStream(_ context.Context, _ string, original
+ 	if !responseData.Exists() {
+ 		return []byte{}
+ 	}
++	if (typeStr == "response.incomplete" && codexIncompleteHasUnconfirmedToolCalls(&ConvertCodexResponseToClaudeParams{}, responseData)) ||
++		codexTerminalHasExplicitUnfinishedTool(responseData) {
++		return []byte{}
++	}
+ 
+ 	out := []byte(`{"id":"","type":"message","role":"assistant","model":"","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}`)
+ 	out, _ = sjson.SetBytes(out, "id", responseData.Get("id").String())

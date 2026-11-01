@@ -5,8 +5,13 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from contextlib import nullcontext
+import sys
 from unittest.mock import patch
 
+import accounts
+import launcher
+import rolling_runtime
 import runtime_bundle
 
 
@@ -74,6 +79,69 @@ class BundleTests(unittest.TestCase):
                 installed.write_text(json.dumps(value))
                 with self.assertRaisesRegex(RuntimeError, "identity"):
                     runtime_bundle.selected(destination)
+
+    def test_upgrade_failure_restores_previous_runtime_selection(self):
+        for had_previous in (False, True):
+            with self.subTest(had_previous=had_previous), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); runtime_bundle.private_dir(root)
+                old_dir = root / "old"; old_dir.mkdir()
+                new_dir = root / "new"; new_dir.mkdir()
+                old_bundle = self.fixture(old_dir)
+                self.fixture(new_dir)
+                # Give the new fixture a distinct identity.
+                proxy = new_dir / "proxy-input"; proxy.write_bytes(b"different-synthetic-proxy")
+                candidate = new_dir / "candidate"
+                runtime_bundle.pack(proxy, new_dir / "ingress-input", candidate)
+                install = root / "install"; runtime_bundle.private_dir(install)
+                if had_previous:
+                    runtime_bundle.activate(install, old_bundle)
+                before = runtime_bundle.selection_snapshot(install)
+                with patch.object(launcher, "ROOT", install), patch.object(launcher, "service_lock", return_value=nullcontext()), \
+                     patch.object(launcher, "helper_output", return_value=""), \
+                     patch.object(accounts, "switch_lock", return_value=nullcontext()), \
+                     patch.object(launcher, "ensure_service", return_value=(install / "runtime", {"fixture": True}, None)), \
+                     patch.object(launcher, "managed_catalog", return_value=({}, lambda: None)), \
+                     patch.object(rolling_runtime, "ensure", side_effect=RuntimeError("synthetic readiness failure")), \
+                     patch.object(sys, "argv", ["launcher.py", "bridge", "upgrade", str(candidate)]):
+                    with self.assertRaisesRegex(RuntimeError, "synthetic readiness failure"):
+                        launcher.main()
+                self.assertEqual(runtime_bundle.selection_snapshot(install), before)
+                if had_previous:
+                    self.assertEqual(runtime_bundle.selected(install)[2], json.loads(before)["bundle"])
+
+    def test_failed_upgrade_does_not_overwrite_another_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); runtime_bundle.private_dir(root)
+            previous = runtime_bundle.canonical({"bundle": "a" * 64})
+            attempted = "b" * 64
+            changed = runtime_bundle.canonical({"bundle": "c" * 64})
+            runtime_bundle.write_file(root / "runtime-selected.json", changed, 0o600)
+            if os.name == "nt":
+                import windows_acl
+                windows_acl.lock([root / "runtime-selected.json"])
+            with self.assertRaisesRegex(RuntimeError, "selection changed"):
+                runtime_bundle.rollback_selection(root, previous, attempted)
+            self.assertEqual((root / "runtime-selected.json").read_bytes(), changed)
+
+    def test_upgrade_activation_error_after_selection_is_rolled_back(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); runtime_bundle.private_dir(root)
+            bundle = self.fixture(root)
+            install = root / "install"; runtime_bundle.private_dir(install)
+            real_activate = runtime_bundle.activate
+
+            def fail_after_selection(destination, source):
+                real_activate(destination, source)
+                raise RuntimeError("synthetic post-selection failure")
+
+            with patch.object(launcher, "ROOT", install), patch.object(launcher, "service_lock", return_value=nullcontext()), \
+                 patch.object(launcher, "helper_output", return_value=""), \
+                 patch.object(accounts, "switch_lock", return_value=nullcontext()), \
+                 patch.object(runtime_bundle, "activate", side_effect=fail_after_selection), \
+                 patch.object(sys, "argv", ["launcher.py", "bridge", "upgrade", str(bundle)]):
+                with self.assertRaisesRegex(RuntimeError, "synthetic post-selection failure"):
+                    launcher.main()
+            self.assertIsNone(runtime_bundle.selection_snapshot(install))
 
 
 if __name__ == "__main__": unittest.main()

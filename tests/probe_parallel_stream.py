@@ -101,7 +101,9 @@ class Handler(BaseHTTPRequestHandler):
                             "labels": [word for word in ("success", "creat", "cancel", "interrupt", "error", "denied", "fail",
                                                           "abort", "reject", "stop", "deny", "user", "tool", "no result", "timeout")
                                        if word in text]}
-        self.server.requests.append({"acknowledged": sorted(observed), "successful_results": sorted(succeeded_results),
+        self.server.requests.append({"effects_before_request": sorted(label for label, name in TARGETS.items()
+                                         if (self.server.work / name).is_file()),
+                                     "acknowledged": sorted(observed), "successful_results": sorted(succeeded_results),
                                      "synthetic_result_hints": hints})
         if self.server.resume_interrupted:
             observed = succeeded_results
@@ -147,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
                       "usage": {"input_tokens": 1000, "output_tokens": 10}}})
 
         # For the first response exactly two function calls are interleaved.
-        cuts = {"healthy": 10, "eof_before_first": 7, "eof_after_first": 8,
+        cuts = {"healthy": 10, "max_before_first": 7, "max_after_first": 8, "eof_before_first": 7, "eof_after_first": 8,
                 "eof_after_both": 9, "error_after_first": 8, "failed_after_both": 9,
                 "error_after_completed": 10, "cancel_before_items": 7, "cancel_after_both": 9,
                 "ctrl_c_before_items": 7, "ctrl_c_after_first_item": 8,
@@ -167,6 +169,15 @@ class Handler(BaseHTTPRequestHandler):
             if first and self.server.mode in ("cancel_before_items", "ctrl_c_before_items", "ctrl_c_after_first_item"):
                 self.server.phase_ready.set()
                 self.server.release.wait(30)
+            elif first and self.server.mode.startswith("max_"):
+                completed = 1 if self.server.mode == "max_after_first" else 0
+                partial = [{**item, "status": "completed" if index < completed else "in_progress"}
+                           for index, item in enumerate(output)]
+                terminal = {"type": "response.incomplete", "response": {**response, "status": "incomplete",
+                            "incomplete_details": {"reason": "max_output_tokens"}, "output": partial,
+                            "usage": {"input_tokens": 1000, "output_tokens": 10}}}
+                self.wfile.write(("data: " + json.dumps(terminal) + "\n\n").encode())
+                self.wfile.flush()
             elif first and self.server.mode.startswith("eof_"):
                 self.connection.shutdown(socket.SHUT_WR)
             elif first and self.server.mode not in ("healthy", "ctrl_c_between_effects"):
@@ -184,16 +195,22 @@ def main():
     parser.add_argument("proxy_binary", type=Path)
     parser.add_argument("--resume-interrupted", action="store_true",
                         help="Probe resuming the interrupted between-effects session")
+    parser.add_argument("--incomplete-only", action="store_true",
+                        help="Run only the two incomplete-terminal cases")
     args = parser.parse_args()
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("The locked Claude client is required")
-    modes = ("healthy", "eof_before_first", "eof_after_first", "eof_after_both",
+    modes = ("healthy", "max_before_first", "max_after_first", "eof_before_first", "eof_after_first", "eof_after_both",
              "error_after_first", "failed_after_both", "error_after_completed",
              "cancel_before_items", "cancel_after_both")
     if os.name != "nt":
         modes += ("ctrl_c_before_items", "ctrl_c_after_first_item", "ctrl_c_between_effects", "ctrl_c_after_both")
-    if args.resume_interrupted:
+    if args.resume_interrupted and args.incomplete_only:
+        raise RuntimeError("Choose only one focused fixture")
+    if args.incomplete_only:
+        modes = ("max_before_first", "max_after_first")
+    elif args.resume_interrupted:
         if os.name == "nt":
             raise RuntimeError("This terminal Ctrl-C fixture requires POSIX")
         modes = ("ctrl_c_between_effects",)
@@ -336,6 +353,12 @@ elif label is not None:
                 try:
                     assert server.requests, "Client never reached the synthetic endpoint"
                     assert all(count <= 1 for count in counts.values()), "A parallel tool effect was duplicated"
+                    if mode in ("max_before_first", "max_after_first"):
+                        forbidden = {"A", "B"} if mode == "max_before_first" else {"B"}
+                        if len(server.requests) > 1:
+                            assert not forbidden.intersection(server.requests[1]["effects_before_request"]), "An unconfirmed parallel tool ran before continuation"
+                        else:
+                            assert not any(counts[label] for label in forbidden), "An unconfirmed parallel tool ran"
                     if mode == "healthy":
                         assert succeeded, "Healthy parallel fixture did not complete successfully"
                     if mode.endswith("before_items"):
@@ -394,7 +417,7 @@ elif label is not None:
                 server.server_close()
                 thread.join(timeout=2)
     print(json.dumps({"mock_only": True, "through_translator": True,
-                      "terminal_ctrl_c_exercised": os.name != "nt", "cases": metrics}))
+                      "terminal_ctrl_c_exercised": any(mode.startswith("ctrl_c_") for mode in modes), "cases": metrics}))
 
 
 if __name__ == "__main__":

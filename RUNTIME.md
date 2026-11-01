@@ -64,6 +64,10 @@ checks a replacement, atomically changes new-request routing, and stops retired
 backends only after their admitted request count reaches zero. A request is never
 replayed after partial output. Replacement failure restores the previous
 manifest and state. Pending drain work can be completed by another reload.
+On a handled `bridge upgrade` failure, the runtime selection is also restored
+if it still names the candidate; a concurrent different selection is never
+overwritten. A process crash or power loss during selection and publication is
+not covered by this in-process rollback.
 
 `bridge stop` refuses while managed requests are active. As with the original
 service, wait for background tasks before stopping; a task can be between model
@@ -75,14 +79,15 @@ usable but cannot accept that option without the reviewed patch. Replay uses
 the stable private origin-guard key, preserving signed state across translator
 replacement without copying rotating OAuth credentials.
 
-The source-locked candidate also includes a reviewed upstream gateway MCP-name
-backport and an instance-prefix follow-up, described in [the community
+An experimental candidate adds a reviewed upstream gateway MCP-name backport
+and an instance-prefix follow-up, described in [the community
 review](COMMUNITY_REVIEW.md#follow-up-review-v8051-and-gateway-tool-names-2026-11-02).
 These patches change some names seen by the model and can invalidate a cached
 prefix in an existing conversation. A synthetic old-to-new tool loop preserves
 the selected tool and result; it does not prove every live plugin or transcript
-can be switched without impact. Building a candidate does not replace the
-running translator, origin or ingress.
+can be switched without impact. Those optional patches are not in the packaged
+safety candidate. Building a candidate does not replace the running translator,
+origin or ingress.
 
 ## Native URL citations
 
