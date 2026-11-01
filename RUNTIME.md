@@ -38,8 +38,10 @@ passed, the installed helper was updated and the managed translator was
 replaced through the rolling reload. The selected account, original service,
 TLS ingress and selected binary bundle retained their identities; one old
 stream was still draining when the reload returned. The new translator has the
-restricted environment. The existing TLS ingress and original service were not
-restarted, so their earlier process environments are unaffected. Historical
+restricted environment. After the old stream ended, its idle generation was
+retired under the service lock; the current generation stayed unchanged. The
+existing TLS ingress and original service were not restarted, so their earlier
+process environments are unaffected. Historical
 sessions connected directly to the original service also remain on its older
 translator, outside the new incomplete-tool guard.
 

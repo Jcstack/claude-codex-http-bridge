@@ -84,6 +84,7 @@ jobs:
           python tests/probe_incomplete_cache_handoff.py "previous-${{ matrix.binary }}" "${{ matrix.binary }}"
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
           python tests/probe_toolsearch_cache_batch.py "${{ matrix.binary }}"
+          python tests/probe_effort_roundtrip.py "${{ matrix.binary }}"
           python tests/probe_gateway_tool_names.py "names-${{ matrix.binary }}"
           python tests/probe_gateway_tool_names.py "names-${{ matrix.binary }}" --previous "${{ matrix.binary }}"
           python tests/smoke_transport.py "${{ matrix.binary }}"
