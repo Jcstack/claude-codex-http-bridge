@@ -58,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
         count = len(self.server.requests)
         tool = not tool_results or not (self.server.work / "owned.txt").is_file()
         block = ({"type": "tool_use", "id": f"call_fixture_{count}", "name": "Write",
-                  "input": {"file_path": str(self.server.work / "owned.txt"), "content": "SYNTHETIC"}}
+                  "input": {"file_path": (self.server.work / "owned.txt").as_posix(), "content": "SYNTHETIC"}}
                  if tool else {"type": "text", "text": "DONE"})
         message = {"id": f"msg_fixture_{count}", "type": "message", "role": "assistant",
                    "model": body.get("model"), "content": [], "stop_reason": None, "stop_sequence": None,
@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         first = count == 1
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
         if not results or not (self.server.work / "owned.txt").is_file():
-            arguments = json.dumps({"file_path": str(self.server.work / "owned.txt"), "content": "SYNTHETIC"})
+            arguments = json.dumps({"file_path": (self.server.work / "owned.txt").as_posix(), "content": "SYNTHETIC"})
             item = {"id": f"fc_fixture_{count}", "type": "function_call", "call_id": f"call_fixture_{count}",
                     "name": "Write", "arguments": arguments, "status": "completed"}
             events = [
@@ -155,7 +155,7 @@ def main():
     modes = (("healthy", "partial_arguments", "arguments_done", "tool_item_done", "response_completed") if args.proxy_binary else
              ("healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop"))
     for mode in modes:
-        with tempfile.TemporaryDirectory(prefix="bridge-stream-safety-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="bridge-stream-safety-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             work = root / "work"
@@ -186,7 +186,8 @@ def main():
                 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
             command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                 "--settings", str(settings), "--permission-mode", "dontAsk", "--output-format", "json",
-                "--model", "gpt-6.1-sol", "--tools", "Write", "--allowedTools", "Write", "--max-turns", "4",
+                "--model", "gpt-6.1-sol", "--tools", "Write", "--allowedTools", "Edit(./owned.txt)",
+                "--add-dir", work.as_posix(), "--max-turns", "4",
                 "-p", "Write SYNTHETIC to owned.txt exactly once."]
             stack = ExitStack()
             try:
