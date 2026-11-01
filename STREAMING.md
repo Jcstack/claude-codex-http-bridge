@@ -45,10 +45,15 @@ the recurring incomplete-stream failure is fixed.
 A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
 on Claude Code 2.1.201 reported an additional content-progress timeout that
 comments and ping events did not reset. That result is version- and setup-specific
-and has not been reproduced on this installation. Conversely, a heartbeat that
-does reset a byte-idle watchdog can conceal a stalled upstream connection. These
-trade-offs require a deliberate liveness and cancellation policy; this bridge
-does not fabricate empty thinking content to extend a stream.
+and has not been reproduced on this installation. Claude Code's current
+[network documentation](https://code.claude.com/docs/en/network-config#streaming-idle-watchdogs)
+describes separate event-, byte-, and body-idle watchdogs, with gateway defaults
+of roughly five minutes and bounded extensions when bytes continue arriving.
+A heartbeat can therefore delay detection of a stalled upstream even if another
+watchdog eventually fires. The observed 46.8- and 215-second request durations
+are not themselves measurements of idle gaps. These trade-offs require a
+deliberate liveness and cancellation policy; this bridge does not fabricate
+empty thinking content to extend a stream.
 
 The official primary GPT-Live WebSocket uses `/v1/live/sessions` without a
 model query, then `session.start` and `session.started`. It is distinct from
