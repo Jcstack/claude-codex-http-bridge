@@ -77,11 +77,15 @@ session audit reports the allowlisted `incomplete_tool_call` category without
 printing that message. An automatic client retry may not leave such a record;
 absence of the category is not proof that no guard fired.
 
-The guard is a source candidate and is **not yet installed** in the running
-translator or original origin. Cross-platform gates and a safe managed-backend
-handoff are still required; the origin and old direct sessions have separate
-upgrade limits. This issue is distinct from the previously observed EOF/503
-errors, whose root cause remains unknown.
+On 2026-11-02, the safety-only candidate passed a [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41345932840)
+and was rolled into the local managed backend. The selected account, original
+origin and stable TLS ingress remained unchanged. One old stream was still
+active during handoff and subsequently drained; a new backend inference later
+completed HTTP handling without a recorded stream error. HTTP 200 alone does
+not prove a complete answer. No extra live inference was sent for this rollout.
+The original origin and sessions still directly connected to it retain the old
+translator and need a separately safe migration. This issue is distinct from the
+previously observed EOF/503 errors, whose root cause remains unknown.
 
 A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
 on Claude Code 2.1.201 reported an additional content-progress timeout that
