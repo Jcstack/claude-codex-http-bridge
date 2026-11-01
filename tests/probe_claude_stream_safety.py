@@ -20,6 +20,19 @@ import threading
 from live_support import temporary_translator
 
 
+def result_hints(items):
+    text = json.dumps(items).lower()
+    return [label for label, needles in (
+        ("permission", ("permission", "denied", "not allowed", "not permitted")),
+        ("validation", ("validation", "invalid", "required")),
+        ("path", ("file_path", "absolute", "directory", "path")),
+        ("read_first", ("not been read", "read it first", "must read", "read the file")),
+        ("missing", ("enoent", "does not exist", "not found")),
+        ("hook", ("hook",)),
+        ("stream", ("stream",)),
+    ) if any(needle in text for needle in needles)]
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -41,7 +54,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         tool_results = [block for message in body.get("messages", []) for block in message.get("content", [])
                         if isinstance(block, dict) and block.get("type") == "tool_result"]
-        self.server.requests.append({"has_tool_result": bool(tool_results)})
+        self.server.requests.append({"has_tool_result": bool(tool_results), "tool_result_hints": result_hints(tool_results)})
         count = len(self.server.requests)
         tool = not tool_results or not (self.server.work / "owned.txt").is_file()
         block = ({"type": "tool_use", "id": f"call_fixture_{count}", "name": "Write",
@@ -84,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
     def emit_responses(self, body):
         results = [item for item in body.get("input", [])
                    if isinstance(item, dict) and item.get("type") == "function_call_output"]
-        self.server.requests.append({"has_tool_result": bool(results)})
+        self.server.requests.append({"has_tool_result": bool(results), "tool_result_hints": result_hints(results)})
         count = len(self.server.requests)
         first = count == 1
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
@@ -208,7 +221,9 @@ def main():
                     # Every assertion string is fixed fixture code, never model output.
                     print(json.dumps({"failed_case": mode, "reason": str(error), "returncode": result.returncode,
                         "reported_success": succeeded, "requests": len(server.requests), "write_hook_count": len(hooks),
-                        "file_exists": target.exists(), "exact_content": target.is_file() and target.read_text(encoding="utf-8") == "SYNTHETIC"}), flush=True)
+                        "file_exists": target.exists(), "exact_content": target.is_file() and target.read_text(encoding="utf-8") == "SYNTHETIC",
+                        "permission_denials_count": len(final.get("permission_denials", [])),
+                        "request_metadata": server.requests, "client_error_hints": result_hints(final.get("errors", []))}), flush=True)
                     raise
                 metrics.append({"cut_after": mode, "reported_success": succeeded, "requests": len(server.requests),
                     "write_hook_count": len(hooks), "followup_has_tool_result": any(request["has_tool_result"] for request in server.requests[1:]),
