@@ -85,6 +85,20 @@ only when one same-log local tag and a nearby timestamp give a unique match;
 ambiguous and missing matches stay explicit. It does not expose the tag, log
 line, request body, or private path. The local tag is not a cross-layer ID.
 
+A 24-hour snapshot ending near 02:46 China time on 2026-11-02 contained 56
+child logs, of which 12 had request model/effort metadata in that window. Those
+records requested Astra with `high` 94 times and `low` 27 times; the main log
+mostly requested Astra `max`. Counts are request records, not independent
+tasks, verified provider identities, or evidence of why an effort was chosen.
+The remaining child logs did not contain request metadata in that window.
+
+In a separate credential-free test with Claude Code 2.1.316 and a synthetic
+Messages server, an Astra parent at `max` invoked an Astra child. Omitting the
+child effort produced `max`; explicitly requesting `high` or `low` preserved
+that value. This verifies those specific client request shapes without the
+translator or real model. It does not establish how the observed live children
+were configured, so the bridge does not silently override their effort.
+
 The sampled timeout messages exactly match the pinned origin's incomplete
 stream sentinel. The running origin is the installed pinned release and its
 binary contains that sentinel. The matching [executor code](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/runtime/executor/codex_executor_terminal.go)

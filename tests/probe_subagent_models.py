@@ -98,7 +98,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agent: bool = False,
-             agent_effort: str | None = None) -> dict:
+             agent_effort: str | None = None, parent_effort: str = "high",
+             parent_model: str = PARENT_MODEL, default_child_model: str = DEFAULT_CHILD_MODEL,
+             alias_child_model: str = ALIAS_CHILD_MODEL) -> dict:
     with tempfile.TemporaryDirectory(prefix="bridge-subagent-fixture-") as temporary:
         root = Path(temporary)
         work = root / "work"
@@ -106,7 +108,7 @@ def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agen
         config = root / "config"
         config.mkdir(mode=0o700)
         settings = root / "settings.json"
-        models = (PARENT_MODEL, DEFAULT_CHILD_MODEL, ALIAS_CHILD_MODEL)
+        models = (parent_model, default_child_model, alias_child_model)
         settings.write_text(json.dumps({"modelPicker": {"options": [
             {"model": model, "label": "Synthetic fixture", "behavesAs": bridge_models.behaves_as(model)}
             for model in models], "replaceBuiltInOptions": True},
@@ -124,23 +126,23 @@ def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agen
                "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if key in os.environ}
         env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_AUTH_TOKEN": "fixture-only",
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_port}",
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL": ALIAS_CHILD_MODEL,
-                    "ANTHROPIC_DEFAULT_SONNET_MODEL": ALIAS_CHILD_MODEL,
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": PARENT_MODEL,
-                    "CLAUDE_CODE_SUBAGENT_MODEL": DEFAULT_CHILD_MODEL,
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL": alias_child_model,
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": alias_child_model,
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": parent_model,
+                    "CLAUDE_CODE_SUBAGENT_MODEL": default_child_model,
                     "CLAUDE_CODE_ATTRIBUTION_HEADER": "0", "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "1",
                     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1"})
         if force:
             env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"] = "1"
         with patch.dict(os.environ, env, clear=True):
-            env = launcher.claude_environment(server.server_port, "fixture-only", PARENT_MODEL,
-                available_models={PARENT_MODEL, DEFAULT_CHILD_MODEL, ALIAS_CHILD_MODEL})
+            env = launcher.claude_environment(server.server_port, "fixture-only", parent_model,
+                available_models={parent_model, default_child_model, alias_child_model})
         try:
             agent_args = ["--agents", json.dumps({"fixture-worker": {"description": "Synthetic check",
-                "prompt": "Respond with OK.", "model": ALIAS_CHILD_MODEL}})] if custom_agent else []
+                "prompt": "Respond with OK.", "model": alias_child_model}})] if custom_agent else []
             result = subprocess.run([claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-                "--permission-mode", "dontAsk", "--output-format", "json", "--model", PARENT_MODEL,
-                "--settings", str(settings), "--effort", "high", *agent_args,
+                "--permission-mode", "dontAsk", "--output-format", "json", "--model", parent_model,
+                "--settings", str(settings), "--effort", parent_effort, *agent_args,
                 "--tools", "Agent", "--allowedTools", "Agent", "--max-turns", "5", "-p", "Run the synthetic agent."],
                 cwd=work, env=env, capture_output=True, text=True, timeout=60)
             if result.returncode:
@@ -149,7 +151,7 @@ def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agen
             if final.get("is_error"):
                 raise RuntimeError("Isolated Claude subagent fixture reported an error")
             child_requests = [request for request in server.requests if request["agent_header"]]
-            return {"parent_model_retained": bool(server.requests) and server.requests[0]["model"] == PARENT_MODEL,
+            return {"parent_model_retained": bool(server.requests) and server.requests[0]["model"] == parent_model,
                     "parent_effort": server.requests[0]["effort"] if server.requests else None,
                     "child_models": [request["model"] for request in child_requests],
                     "child_efforts": [request["effort"] for request in child_requests]}
@@ -169,6 +171,9 @@ def main() -> int:
     forced = run_case(claude, alias="opus", force=True)
     custom = run_case(claude, alias=None, custom_agent=True)
     child_effort = run_case(claude, alias="opus", agent_effort="low")
+    astra = {effort or "omitted": run_case(claude, alias="opus", parent_model="gpt-6-astra",
+        alias_child_model="gpt-6.1-sol", parent_effort="max", agent_effort=effort)
+        for effort in (None, "high", "low")}
     result = {"parent_model_retained": all(case["parent_model_retained"] for case in (default, alias, same_family, forced, custom)),
               "subagent_default_model": default["child_models"] == [DEFAULT_CHILD_MODEL],
               "other_family_alias_takes_precedence": alias["child_models"] == [ALIAS_CHILD_MODEL],
@@ -176,6 +181,12 @@ def main() -> int:
               "agent_definition_full_model_id": custom["child_models"] == [ALIAS_CHILD_MODEL],
               "per_call_child_effort": child_effort["parent_effort"] == "high"
                                        and child_effort["child_efforts"] == ["low"],
+              "same_astra_child_inherits_max_when_effort_omitted":
+                  astra["omitted"]["parent_effort"] == "max" and astra["omitted"]["child_models"] == ["gpt-6-astra"]
+                  and astra["omitted"]["child_efforts"] == ["max"],
+              "same_astra_child_honors_explicit_high_and_low":
+                  all(astra[effort]["parent_effort"] == "max" and astra[effort]["child_models"] == ["gpt-6-astra"]
+                      and astra[effort]["child_efforts"] == [effort] for effort in ("high", "low")),
               "forced_subagent_model": forced["child_models"] == [DEFAULT_CHILD_MODEL]}
     print(json.dumps(result, sort_keys=True))
     return 0 if all(result.values()) else 1
