@@ -59,9 +59,11 @@ history prefixes. For this fixture, the key stays stable across tool changes
 and effort changes, and differs across synthetic sessions, agent headers and
 resolved models. The selected `max` and `high` effort values are also retained.
 The upstream executor tests separately cover model aliases and matching HTTP
-and WebSocket key derivation. These in-process tests do not verify forwarding
-of every real Claude client's agent headers, actual provider cache hits, or
-isolation between real accounts.
+and WebSocket key derivation. The isolated Claude client fixture emits an agent
+header, and the rolling gateway fixture preserves synthetic session and agent
+headers through a backend switch. These checks do not verify forwarding by
+every Claude client version, actual provider cache hits, or isolation between
+real accounts.
 
 ## Why acceptance is insufficient
 

@@ -69,6 +69,7 @@ func call(t *testing.T, server, key, path string) *http.Response {
 	req, _ := http.NewRequest("POST", server+path, strings.NewReader(`{"model":"fixture"}`))
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("X-Claude-Code-Session-Id", "fixture-stable-session")
+	req.Header.Set("X-Claude-Code-Agent-Id", "fixture-child-agent")
 	res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -128,8 +129,9 @@ func TestRollingBackendPreservesAdmittedStreamAndIdentity(t *testing.T) {
 		t.Fatal("admitted stream did not finish on old backend")
 	}
 	for expected, headers := range map[string]http.Header{strings.Repeat("a", 32): <-aHeaders, strings.Repeat("b", 32): <-bHeaders} {
-		if headers.Get("Authorization") != "Bearer "+expected || headers.Get("X-Claude-Code-Session-Id") != "fixture-stable-session" {
-			t.Fatal("credential replacement or session preservation failed")
+		if headers.Get("Authorization") != "Bearer "+expected || headers.Get("X-Claude-Code-Session-Id") != "fixture-stable-session" ||
+			headers.Get("X-Claude-Code-Agent-Id") != "fixture-child-agent" {
+			t.Fatal("credential replacement or session/agent preservation failed")
 		}
 	}
 }
