@@ -39,9 +39,8 @@ Existing sessions, plugins and MCP servers have not been modified or scanned.
 `claude-codex mcp-audit` reads server keys from the default local Claude
 configuration and the current directory's `.mcp.json`. It does not execute
 commands, contact or initialize MCP servers, or write configuration or audit
-files. By default it
-prints counts only; `--show-names` additionally prints the conflicting server
-and tool names locally. `--config FILE` can be repeated to inspect explicitly
+files. By default it prints counts only; `--show-names` additionally prints the
+conflicting server and tool names locally. `--config FILE` can be repeated to inspect explicitly
 selected configuration files instead of the defaults. Server-name collisions
 are potential conflicts: they affect calls only where tool names overlap.
 
@@ -63,6 +62,12 @@ tools currently loaded in a running session, resolve configuration precedence,
 or cover later tool-list changes. Non-ASCII names and aliases over 128
 characters are counted separately. Zero conflicts in a partial snapshot is
 not a guarantee of safe or complete plugin behavior.
+
+After the [three-platform source and client gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41356275179)
+passed on 2026-11-02, the local installation received the reviewed launcher
+and audit module. A synthetic installed-command check passed; the selected
+account, origin, ingress and current backend retained their identities, and no
+service was restarted.
 
 Run the read-only, credential-free client observation after installing the
 locked fixture with `npm ci --prefix tests/claude-client --ignore-scripts`:

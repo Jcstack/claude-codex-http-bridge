@@ -121,6 +121,13 @@ absence of a cross-layer request identity; it cannot distinguish model work
 from network or other upstream waiting. Main-request effort is not proof of
 the maintenance request's effort.
 
+A later one-hour sample contained an automatic compaction recorded as 574.868
+seconds, with client metadata reporting 753,797 tokens before and 51,271 after.
+A shared origin `/v1/responses` request ended within ten seconds and lasted
+574 seconds with an HTTP 200 access status. The timestamp and duration are a
+correlation only: the logs have no cross-layer identity tying the two records,
+and HTTP 200 alone does not establish a complete stream or compaction quality.
+
 As a separate local-only control on 2026-11-02, a disposable TLS ingress,
 candidate translator and fake origin relayed synthetic messages of 100,000,
 1,000,000 and 4,000,000 bytes in 0.058, 0.130 and 0.407 seconds respectively;
