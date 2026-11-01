@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import signal
 import shutil
 import socket
 import subprocess
@@ -22,6 +23,25 @@ from live_support import temporary_translator
 
 MODEL = "gpt-6.1-sol"
 TARGETS = {"A": "owned-a.txt", "B": "owned-b.txt"}
+
+
+def terminal_client(command, work, env):
+    """Own a POSIX controlling terminal so its Ctrl-C reaches only this fixture."""
+    import pty
+    master, slave = pty.openpty()
+    wrapper = ("import fcntl,os,sys,termios;"
+               "fcntl.ioctl(0,termios.TIOCSCTTY,0);"
+               "os.tcsetpgrp(0,os.getpgrp());"
+               "os.execvpe(sys.argv[1],sys.argv[1:],os.environ)")
+    try:
+        process = subprocess.Popen([sys.executable, "-c", wrapper, *command], cwd=work, env=env,
+            stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    except BaseException:
+        os.close(master)
+        raise
+    finally:
+        os.close(slave)
+    return process, master
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -89,20 +109,21 @@ class Handler(BaseHTTPRequestHandler):
         # For the first response exactly two function calls are interleaved.
         cuts = {"healthy": 10, "eof_before_first": 7, "eof_after_first": 8,
                 "eof_after_both": 9, "error_after_first": 8, "failed_after_both": 9,
-                "error_after_completed": 10, "cancel_before_items": 7, "cancel_after_both": 9}
+                "error_after_completed": 10, "cancel_before_items": 7, "cancel_after_both": 9,
+                "ctrl_c_before_items": 7, "ctrl_c_after_first_item": 8, "ctrl_c_after_both": 9}
         cutoff = cuts[self.server.mode] if first else len(events)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         try:
-            if self.server.mode == "cancel_after_both" and not first:
+            if self.server.mode in ("cancel_after_both", "ctrl_c_after_both") and not first:
                 self.server.phase_ready.set()
                 self.server.release.wait(30)
                 return
             for event in events[:cutoff]:
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
-            if first and self.server.mode == "cancel_before_items":
+            if first and self.server.mode in ("cancel_before_items", "ctrl_c_before_items", "ctrl_c_after_first_item"):
                 self.server.phase_ready.set()
                 self.server.release.wait(30)
             elif first and self.server.mode.startswith("eof_"):
@@ -127,6 +148,8 @@ def main():
     modes = ("healthy", "eof_before_first", "eof_after_first", "eof_after_both",
              "error_after_first", "failed_after_both", "error_after_completed",
              "cancel_before_items", "cancel_after_both")
+    if os.name != "nt":
+        modes += ("ctrl_c_before_items", "ctrl_c_after_first_item", "ctrl_c_after_both")
     metrics = []
     for mode in modes:
         with tempfile.TemporaryDirectory(prefix="bridge-parallel-stream-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
@@ -186,6 +209,7 @@ elif label is not None:
             upstream = {"state": {"port": server.server_port}, "key": "synthetic-local-upstream", "models": {MODEL: spec}}
             stack = ExitStack()
             process = None
+            terminal_master = None
             try:
                 port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, MODEL))
                 env.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_AUTH_TOKEN=key,
@@ -194,15 +218,29 @@ elif label is not None:
                     "--settings", str(settings), "--permission-mode", "dontAsk", "--output-format", "json",
                     "--model", MODEL, "--tools", "Write", "--add-dir", work.as_posix(), "--max-turns", "6",
                     "-p", "Write SYNTHETIC to owned-a.txt and owned-b.txt once each."]
-                cancelled = mode.startswith("cancel_")
+                terminal_interrupt = mode.startswith("ctrl_c_")
+                terminal_isig = None
+                cancelled = mode.startswith("cancel_") or terminal_interrupt
                 if cancelled:
-                    process = subprocess.Popen(command, cwd=work, env=env, stdin=subprocess.DEVNULL,
-                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                    if mode == "cancel_after_both":
+                    if terminal_interrupt:
+                        process, terminal_master = terminal_client(command, work, env)
+                    else:
+                        process = subprocess.Popen(command, cwd=work, env=env, stdin=subprocess.DEVNULL,
+                                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    if mode.endswith("after_both"):
                         assert all(server.effects[label].wait(20) for label in TARGETS), "Parallel effects did not finish"
                     assert server.phase_ready.wait(20), "Cancellation boundary was not reached"
                     assert process.poll() is None, "Client exited before the cancellation boundary"
-                    process.terminate()
+                    if terminal_interrupt:
+                        import termios
+                        attributes = termios.tcgetattr(terminal_master)
+                        terminal_isig = bool(attributes[3] & termios.ISIG)
+                        interrupt_byte = attributes[6][termios.VINTR]
+                        if terminal_isig and interrupt_byte not in (b"\x03", 3):
+                            raise RuntimeError("Fixture terminal has a different interrupt character")
+                        os.write(terminal_master, b"\x03")
+                    else:
+                        process.terminate()
                     process.communicate(timeout=10)
                     server.release.set()
                     final = None
@@ -220,10 +258,14 @@ elif label is not None:
                     assert all(count <= 1 for count in counts.values()), "A parallel tool effect was duplicated"
                     if mode == "healthy":
                         assert succeeded, "Healthy parallel fixture did not complete successfully"
-                    if mode == "cancel_before_items":
+                    if mode.endswith("before_items"):
                         assert counts == {"A": 0, "B": 0}, "An effect ran after cancellation before tool completion"
                         assert not any((work / name).exists() for name in TARGETS), "Cancellation created a target"
-                    if mode == "cancel_after_both":
+                    if mode == "ctrl_c_after_first_item":
+                        assert counts["B"] == 0 and not (work / TARGETS["B"]).exists(), "An incomplete tool ran after Ctrl-C"
+                        if counts["A"] == 1:
+                            assert (work / TARGETS["A"]).read_text(encoding="utf-8") == "SYNTHETIC", "First effect was corrupted"
+                    if mode.endswith("after_both") and cancelled:
                         assert counts == {"A": 1, "B": 1}, "Cancellation lost or repeated a completed effect"
                         assert acknowledged == set(TARGETS), "Cancellation follow-up omitted a completed tool result"
                     if succeeded is True:
@@ -238,18 +280,26 @@ elif label is not None:
                         "acknowledged": sorted(acknowledged)}), flush=True)
                     raise
                 metrics.append({"case": mode, "reported_success": succeeded, "client_terminated_by_fixture": cancelled,
+                                "terminal_ctrl_c": terminal_interrupt,
+                                "terminal_isig_enabled": terminal_isig,
                                 "requests": len(server.requests),
                                 "effects": counts, "acknowledged": sorted(acknowledged), "at_most_once": True})
             finally:
                 server.release.set()
                 if process is not None and process.poll() is None:
-                    process.kill()
+                    if terminal_master is not None:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
                     process.communicate(timeout=10)
+                if terminal_master is not None:
+                    os.close(terminal_master)
                 stack.close()
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
-    print(json.dumps({"mock_only": True, "through_translator": True, "cases": metrics}))
+    print(json.dumps({"mock_only": True, "through_translator": True,
+                      "terminal_ctrl_c_exercised": os.name != "nt", "cases": metrics}))
 
 
 if __name__ == "__main__":

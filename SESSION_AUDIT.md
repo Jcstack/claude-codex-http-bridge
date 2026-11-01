@@ -80,6 +80,10 @@ origin-side wrapping of an incomplete stream, rather than establishing a
 provider timeout. The exact string could also be forwarded; the retained logs
 cannot establish where or why the terminal event was lost. Diagnostics classify
 the exact sentinel separately without returning its text or payload.
+An earlier [CLIProxyAPI issue](https://github.com/router-for-me/CLIProxyAPI/issues/3055)
+reports the same class of incomplete Codex streams through Claude's Messages
+route. It is a separate report against an older version, not proof of this
+installation's underlying cause or of a released fix.
 
 For several long compactions, an origin-service request in shared access logs
 ended at nearly the same time and ran for nearly the entire measured compact
@@ -146,6 +150,16 @@ single-tool boundaries. `tests/probe_parallel_stream.py` uses two interleaved
 tool calls, unique hook markers and tool-result IDs to exercise EOF, error and
 terminal-event boundaries. It also terminates its own isolated client before
 the first completed item and after both tool effects are acknowledged. Those
-cases check the observed effects and follow-up history, while leaving actual
-Ctrl-C behavior, arbitrary tools and unobserved provider failures for further
-verification. The parallel test is part of the three-platform candidate gate.
+cases check the observed effects and follow-up history. On POSIX, three further
+cases run the locked Claude client in `-p` mode with a private controlling
+pseudoterminal, then send the terminal's Ctrl-C character before either tool
+item completes, after the synthetic origin emits the first item, or after both
+effects and results are acknowledged. The local fixture observed no write in
+the first two cases and exactly one write per target afterwards. The middle
+case synchronizes with the origin sending an item, not with proof that Claude
+has consumed it. It controls only its own process session and temporary targets.
+
+The candidate gate runs across Linux, macOS and Windows; terminal Ctrl-C is
+exercised only on POSIX. Windows console events, interactive TUI behavior,
+interrupting between the two completed effects, arbitrary tools, resume after
+interruption and unobserved provider failures remain separate checks.

@@ -65,6 +65,57 @@ headers through a backend switch. These checks do not verify forwarding by
 every Claude client version, actual provider cache hits, or isolation between
 real accounts.
 
+## Live dynamic-tool cache observations
+
+On 2026-11-02, two independent synthetic histories were sent sequentially
+through the installed managed Messages gateway and the selected subscription
+account, requesting `gpt-6.1-sol` at low effort. Each history used a unique
+synthetic session ID and a stable reference of about 2,700 input tokens. The
+fixture supplied a ToolSearch call and its tool-reference result itself; it
+did not ask Claude Code to execute a real tool or use a user transcript.
+
+| Round | Phase | First reported cache read | Repeated reported cache read |
+| --- | --- | ---: | ---: |
+| 1 | Before tool reveal | not reported | 2,560 |
+| 1 | Tool revealed | 2,560 | 2,816 |
+| 1 | Tool removed | not reported | 2,816 |
+| 2 | Before tool reveal | not reported | 2,560 |
+| 2 | Tool revealed | 2,560 | 2,816 |
+| 2 | Tool removed | 2,816 | 2,816 |
+
+Both revealed and removed phases returned the synthetic reference answer.
+The initial control responses requested a synthetic tool; no tool was executed.
+The creation counter was not reported in these responses. An absent read
+counter is retained as unknown rather than converted into a measured zero.
+One removal request did not report a read and another did: these samples do
+not establish deterministic invalidation, a hit rate, an account boundary,
+retention, pricing or a latency benefit. They also do not exercise a real
+Claude client's ToolSearch orchestration or prove future backend behavior.
+
+Reproduce with:
+
+```sh
+python tests/live_dynamic_cache.py --root PRIVATE_ROOT --confirm-live
+```
+
+The explicit flag sends six small synthetic model requests and consumes
+subscription quota; the script stops if account selection changes, does not
+start or stop services, and withholds keys, replies and session IDs.
+
+An [open Claude Code report](https://github.com/anthropics/claude-code/issues/83756)
+describes cache rebuilds after loading larger batches of MCP tools. It concerns
+another user's setup and is not evidence that this bridge has the same issue.
+The live samples above reveal only one synthetic tool.
+
+`tests/probe_toolsearch_cache_batch.py` now runs the locked Claude client with
+one and nine synthetic MCP tools through the candidate translator and a fake
+Responses origin; their synthetic search queries are 51 and 411 bytes. In both
+local cases, the selected tools were deferred and
+then revealed, while tool-definition and instruction bytes, previous input
+items and the synthetic session cache key remained stable. This is a structural
+check of real Claude ToolSearch orchestration, not a measurement of provider
+cache reads. Live multi-tool batches and other client versions remain open.
+
 ## Why acceptance is insufficient
 
 The reviewed upstream request converter explicitly removes top-level
