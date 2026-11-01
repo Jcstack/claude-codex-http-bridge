@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import mcp_name_audit
 
@@ -83,11 +84,25 @@ class MCPNameAuditTest(unittest.TestCase):
             stdout = StringIO()
             with redirect_stdout(stdout):
                 self.assertEqual(mcp_name_audit.main(["--config", str(config)]), 0)
-            self.assertFalse(json.loads(stdout.getvalue())["tool_inventory_supplied"])
+            absent = json.loads(stdout.getvalue())
+            self.assertFalse(absent["tool_inventory_supplied"])
+            self.assertIsNone(absent["possible_tool_alias_collision_groups"])
+            self.assertIsNone(absent["unverified_tool_names"])
+            self.assertIsNone(absent["over_128_character_tool_aliases"])
             stdout = StringIO()
             with redirect_stdout(stdout):
                 self.assertEqual(mcp_name_audit.main(["--config", str(config), "--inventory", str(inventory)]), 0)
             self.assertEqual(json.loads(stdout.getvalue())["possible_server_name_collision_groups"], 1)
+
+    def test_missing_default_sources_are_unknown_not_zero(self):
+        stdout = StringIO()
+        with patch.object(mcp_name_audit, "default_configs", return_value=[]), redirect_stdout(stdout):
+            self.assertEqual(mcp_name_audit.main(["--show-names"]), 0)
+        result = json.loads(stdout.getvalue())
+        self.assertIsNone(result["possible_server_name_collision_groups"])
+        self.assertIsNone(result["possible_tool_alias_collision_groups"])
+        self.assertIsNone(result["server_collisions"])
+        self.assertIsNone(result["tool_collisions"])
 
 
 if __name__ == "__main__":

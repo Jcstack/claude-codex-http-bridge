@@ -151,6 +151,18 @@ def main(arguments=None):
         if inventory is not None:
             names.update(row["name"] for row in inventory["servers"])
         report = analyze(names, rows, show_names=args.show_names)
+        if inventory is None:
+            # A zero here would falsely suggest that the original tool names
+            # were inspected. JSON null explicitly means the data was absent.
+            for name in ("possible_tool_alias_collision_groups", "unverified_tool_names",
+                         "over_128_character_tool_aliases"):
+                report[name] = None
+            if args.show_names:
+                report["tool_collisions"] = None
+        if not read_count and inventory is None:
+            report["possible_server_name_collision_groups"] = None
+            if args.show_names:
+                report["server_collisions"] = None
         report.update({"configuration_files_read": read_count, "default_files_skipped": skipped,
                        "tool_inventory_supplied": args.inventory is not None})
         print(json.dumps(report, ensure_ascii=True, sort_keys=True))

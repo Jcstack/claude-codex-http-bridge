@@ -61,7 +61,8 @@ or verify the inventory, inspect plugin manifests automatically, enumerate the
 tools currently loaded in a running session, resolve configuration precedence,
 or cover later tool-list changes. Non-ASCII names and aliases over 128
 characters are counted separately. Zero conflicts in a partial snapshot is
-not a guarantee of safe or complete plugin behavior.
+not a guarantee of safe or complete plugin behavior. Without a tool inventory,
+tool-collision and related unexamined counts are `null`, not zero.
 
 After the [three-platform source and client gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41356275179)
 passed on 2026-11-02, the local installation received the reviewed launcher
