@@ -116,6 +116,40 @@ items and the synthetic session cache key remained stable. This is a structural
 check of real Claude ToolSearch orchestration, not a measurement of provider
 cache reads. Live multi-tool batches and other client versions remain open.
 
+## Same-account synthetic session scope
+
+On 2026-11-02, two independent rounds each sent the same fresh synthetic
+prefix through the managed subscription route with two newly generated session
+IDs, in the order A-first, A-repeat, B-first, B-repeat, A-after-B. Each request
+used Sol at low effort; every response contained the expected synthetic value.
+The selected account was checked before and after each request. No tool ran.
+
+| Round | A first | A repeat | B first | B repeat | A after B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | not reported | not reported | 2,432 | 2,432 | not reported |
+| 2 | not reported | not reported | not reported | 2,432 | 2,432 |
+
+Values are reported `cache_read_input_tokens`; creation counters were not
+reported. Each request reported about 2,646–2,648 total input tokens when
+uncached input and cache reads are added. “Not reported” is not proof of zero
+or a cache miss. The first B request in one round reported a read, but this
+does not establish which prior request populated it, how the provider partitions
+or routes caches, or whether identical prefixes are shared between sessions.
+The two rounds used fresh synthetic prefixes, and no second account was tested.
+An isolated TLS ingress and translator sent the same synthetic content to a
+fake origin with session order A, A, B, A. The translated A cache key stayed
+stable and differed from B's; the pinned-executor fixture separately checks
+session, child-agent and model scope. Neither test proves the provider's cache
+isolation or the complete live path's internal key selection.
+
+```sh
+python tests/live_cache_scope.py --root PRIVATE_ROOT --confirm-live
+```
+
+The explicit flag sends five small synthetic model requests and consumes
+subscription quota; the script stops if account selection changes, does not
+start or stop services, and withholds keys, replies and session IDs.
+
 ## Why acceptance is insufficient
 
 The reviewed upstream request converter explicitly removes top-level

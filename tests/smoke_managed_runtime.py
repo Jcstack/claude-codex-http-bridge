@@ -290,6 +290,21 @@ def main():
                     updated = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC})
                     assert len(updated["generations"]) == 1
                     assert launcher.listener_pids(base["port"]) == {base["pid"]}
+                    # Verify session cache-key separation across the actual
+                    # managed TLS/translator hop, using only a fake origin.
+                    scoped = []
+                    for session in ("00000000-0000-4000-8000-000000000001",
+                                    "00000000-0000-4000-8000-000000000001",
+                                    "00000000-0000-4000-8000-000000000002",
+                                    "00000000-0000-4000-8000-000000000001"):
+                        payload = {**request, "metadata": {"user_id": json.dumps({"session_id": session})}}
+                        stream(value["port"], key, payload, ca_file=ca)
+                        scoped.append(Upstream.requests[-1])
+                    keys = [row.get("prompt_cache_key") for row in scoped]
+                    assert isinstance(keys[0], str) and keys[0] and isinstance(keys[2], str) and keys[2]
+                    assert keys[0] == keys[1] == keys[3] != keys[2]
+                    assert all(scoped[0].get(field) == row.get(field) for row in scoped[1:]
+                               for field in ("model", "instructions", "input", "tools"))
                     for config in runtime.glob("g-*/config.yaml"):
                         assert "a" * 64 not in config.read_text(), "Legacy key reached translator config"
                     # A wrong legacy PID must fail before exposing its key.
@@ -320,6 +335,7 @@ def main():
                     if args.claude_client: persistent_claude(root, updated, base_runtime, base, background=args.background_client)
                     print(json.dumps({"mock_only": True, "stable_tls_endpoint": "pass",
                         "old_stream_drained": "pass", "active_stop_refused": "pass", "legacy_service_preserved": "pass",
+                        "same_session_key_stable_different_sessions_distinct": "pass",
                         "legacy_key_not_given_to_translator": "pass", "origin_pid_checked_before_credentials": "pass",
                         "origin_quota_preserved_and_early_reset_retried": "pass",
                         "same_claude_process_after_backend_reload": "pass" if args.claude_client else "not-run",
