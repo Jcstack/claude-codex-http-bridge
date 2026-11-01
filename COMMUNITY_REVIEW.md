@@ -1,6 +1,6 @@
 # Community proxy review and upgrade gate
 
-Checked 2026-10-30. This project keeps Claude Code as the harness. The current authenticated localhost service runs the reviewed CLIProxyAPI v8.0.46 release. No candidate below was given an OAuth credential in this review, and the live service was not replaced.
+Reviewed 2026-10-30; follow-ups through 2026-11-02 appear below. This project keeps Claude Code as the harness. The current authenticated localhost origin runs the reviewed CLIProxyAPI v8.0.46 release. No candidate below was given an OAuth credential in this review, and the live service was not replaced.
 
 Follow-up native Live review, 2026-10-31: the source-matched V3 call now returns
 201 locally, while media and sideband remain incomplete. OpenAI's
@@ -30,7 +30,7 @@ OpenAI's [API Tool Search guide](https://developers.openai.com/api/docs/guides/t
 
 | Project | Maintenance and capability evidence | Decision for this installation |
 | --- | --- | --- |
-| [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | The latest inspected release is [v8.0.48](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.48), published Oct 30 at 14:37 UTC. [Issue #7112](https://github.com/router-for-me/CLIProxyAPI/issues/7112) reproduces the missing `tool_addition`; [commit `12d97cf`](https://github.com/router-for-me/CLIProxyAPI/commit/12d97cfe196be266b45f4f7e0cc394c9fdc2e099) implements the inline-tool fix, now included in v8.0.48. That does not by itself establish the separate deferred-schema gates. [Issue #1894](https://github.com/router-for-me/CLIProxyAPI/issues/1894) and its closed PR identify the separate deferred-schema gap. | Keep the verified patched translator and authenticated origin. Review v8.0.48 with the full credential-free and cross-platform gates before replacing the origin; its auth/usage changes are broader than this translator fix. |
+| [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | The latest inspected release is [v8.0.51](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.51), published Nov 1 at 17:08 UTC. [Issue #7112](https://github.com/router-for-me/CLIProxyAPI/issues/7112) reproduces the missing `tool_addition`; [commit `12d97cf`](https://github.com/router-for-me/CLIProxyAPI/commit/12d97cfe196be266b45f4f7e0cc394c9fdc2e099) implements it. A credential-free build of v8.0.51 passes the inline-addition gate but still fails the three deferred-tool and removal gates described below. [Issue #1894](https://github.com/router-for-me/CLIProxyAPI/issues/1894) identifies the separate deferred-schema gap. | Keep the verified patched translator and authenticated origin. Newer authentication and translation changes need full compatibility, privacy and cross-platform checks before an origin migration. |
 | [pleaseai/shunt](https://github.com/pleaseai/shunt) | [v0.61.0](https://github.com/pleaseai/shunt/releases/tag/v0.61.0) was released Oct 30. Its [ToolSearch implementation issue #82](https://github.com/pleaseai/shunt/issues/82) and [progressive-reveal issue #43](https://github.com/pleaseai/shunt/issues/43) include protocol cases and tests. The v0.61.0 release assets are macOS/Linux only; the tagged source has no `tool_addition` translation. Its native subscription-route `tool_search` assumption needs a live acceptance check against the official preview limit above. Its default loopback mode has no inbound client authentication unless configured. | Strong implementation reference, especially for schema order and streaming. No credential migration or backend switch while Windows, inline tools and route behavior remain unverified. |
 | [raine/claude-code-proxy](https://github.com/raine/claude-code-proxy) | [v0.1.47](https://github.com/raine/claude-code-proxy/releases/tag/v0.1.47) was published Oct 25. Open [issue #182](https://github.com/raine/claude-code-proxy/issues/182) reports `tool_reference` rendering as an unsupported block and cache-prefix rewrites; open [issue #163](https://github.com/raine/claude-code-proxy/issues/163) reports Codex compaction-state loss. | Focused alternative, but its open tool-search and continuation issues prevent a safe replacement today. |
 | [Claude Code Router](https://github.com/musistudio/claude-code-router) | [v3.1.3](https://github.com/musistudio/claude-code-router/releases/tag/v3.1.3) is broad, but open [issue #1643](https://github.com/musistudio/claude-code-router/issues/1643) reproduces a lost Responses `tool_result` on the next turn. | Useful reference for provider breadth; a successful text request does not establish tool-loop correctness. |
@@ -106,3 +106,72 @@ and [environment proxy handling #7103](https://github.com/router-for-me/CLIProxy
 remain open in the reviewed snapshot. No unaudited pin bump or live origin
 restart was performed. The next upstream migration needs the existing patch,
 privacy, Windows and live handoff gates.
+
+## Follow-up review: v8.0.51 and gateway tool names, 2026-11-02
+
+The [v8.0.51 tag](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.51)
+points to `7cad1cb7df48c6c5ffb7ff0b34ef8198806115bc`, 76 commits after the
+installed upstream pin. The comparison is a targeted source and capability
+review, not an audit of all changes. An unmodified, credential-free macOS build
+passed upstream's Claude translator tests and our basic mock Responses contract.
+Our dynamic-tool probe returned **true** for mid-conversation addition but
+**false** for initial deferred hiding, reveal without rewriting the tool prefix,
+and restricting a removed tool. The existing patched candidate passes those
+gates. The independent patch applicability checks found that the reviewed TLS
+patch applies cleanly to the new tag; the other patches did not apply standalone,
+some because an earlier change is already upstream or because patches depend on
+one another. This is not a complete port attempt.
+
+Selected changes and their boundaries:
+
+- [Incomplete-stream cooldown change](https://github.com/router-for-me/CLIProxyAPI/commit/f013eb66)
+  marks an incomplete **OpenAI-compatible executor** stream as truncated so it
+  does not cool down a credential. The current subscription route uses the Codex
+  executor; this diff alone does not establish a fix for its observed EOFs or
+  previous 429 incident.
+- [Codex refresh scheduling change](https://github.com/router-for-me/CLIProxyAPI/commit/95f125ff)
+  avoids auto-refresh attempts for local Codex credentials without renewal
+  material, with explicit exceptions for other refresh owners. Its broader
+  authentication lifecycle still needs review against our single-refresh-owner
+  and account-switch protections before use.
+- [Visible commentary](https://github.com/router-for-me/CLIProxyAPI/commit/cc4b9949)
+  is off by default. The code mirrors public Codex commentary into a visible
+  Claude text block and removes the adjacent copy on replay; the visible copy is
+  emitted when that commentary block closes. It does not expose private
+  reasoning or establish real-time audio/video, and its interaction with our
+  tool, citation, cache and compaction patches has not been validated.
+- [Gateway MCP name fix](https://github.com/router-for-me/CLIProxyAPI/commit/08437a6742a548b001a42569be2de6d150a2e94c),
+  motivated by [issue #7155](https://github.com/router-for-me/CLIProxyAPI/issues/7155),
+  retains a readable action when a gateway tool name exceeds the 64-character
+  limit. The upstream rule can label same-named tools from distinct instances
+  with an ordinal alone. Our [follow-up patch](upstream/patches/gateway-instance-identity.patch)
+  also retains an instance-ID prefix and short stable digest when they fit; it
+  uses a shorter prefix, then falls back to no instance ID if necessary. Unknown
+  name formats keep upstream's fallback. A digest or ordinal is not proof of
+  account identity, and especially long names can remain ambiguous.
+
+The source-locked candidate now includes the upstream name patch followed by
+our instance follow-up. Local Go integration tests check deferred tool reveal,
+collisions, same-prefix instances, streamed and non-streamed reverse mapping,
+replay, removal and the 64-character fallback. The old pin and upstream-only
+fix each fail their respective new negative controls. A real Claude Code client
+with two same-description synthetic MCP tools selected the intended instance,
+called it once and replayed the result through a fake Responses origin. A second
+fixture switched between old and new translators within that tool loop: the
+tool result still arrived, but the serialized historical tool names changed,
+so a cached prefix can change. These are synthetic local tests, not a guarantee
+for arbitrary plugins or model decisions. Cross-platform CI and a live account
+handoff remain separate gates; the installed running translator has not been
+replaced by this candidate.
+
+The latest reviewed Shunt release remains v0.61.0. Its open [issue #880](https://github.com/pleaseai/shunt/issues/880)
+reports that some admin tests can inspect real non-Codex account stores unless
+those paths are isolated. [Issue #877](https://github.com/pleaseai/shunt/issues/877)
+describes a plausible overlapping-login race and explicitly says it was not
+observed in practice. These are project reports, not findings about this bridge.
+They reinforce the decision not to run another proxy's account tests against a
+real user profile or migrate refresh credentials during evaluation. Its
+[session-affinity discussion](https://github.com/pleaseai/shunt/issues/873)
+is useful for future design: account changes may affect continuation state and
+cache, not merely which account pays for a request. It does not prove identical
+behavior for this bridge's subscription route.

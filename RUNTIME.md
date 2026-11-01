@@ -75,6 +75,15 @@ usable but cannot accept that option without the reviewed patch. Replay uses
 the stable private origin-guard key, preserving signed state across translator
 replacement without copying rotating OAuth credentials.
 
+The source-locked candidate also includes a reviewed upstream gateway MCP-name
+backport and an instance-prefix follow-up, described in [the community
+review](COMMUNITY_REVIEW.md#follow-up-review-v8051-and-gateway-tool-names-2026-11-02).
+These patches change some names seen by the model and can invalidate a cached
+prefix in an existing conversation. A synthetic old-to-new tool loop preserves
+the selected tool and result; it does not prove every live plugin or transcript
+can be switched without impact. Building a candidate does not replace the
+running translator, origin or ingress.
+
 ## Native URL citations
 
 The [URL annotation patch](upstream/patches/url-citations.patch) maps OpenAI

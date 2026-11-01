@@ -1,0 +1,144 @@
+diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
+index 10d5dceb457..742591ae772 100644
+--- a/internal/translator/codex/claude/codex_claude_request.go
++++ b/internal/translator/codex/claude/codex_claude_request.go
+@@ -12,6 +12,7 @@ import (
+ 	"encoding/hex"
+ 	"encoding/json"
+ 	"fmt"
++	"regexp"
+ 	"strconv"
+ 	"strings"
+ 
+@@ -609,6 +610,11 @@ func convertClaudeWebSearchToolToCodex(tool gjson.Result) []byte {
+ 	return out
+ }
+ 
++// gatewayToolNamePattern matches gateway tool ids of the form
++// `[mcp_]<server words>-<hex id...>_<tool>`, e.g.
++// `mcp_github-12345678-9abc-def0-1234-56789abcdef0-12345678_add-issue-comment`.
++var gatewayToolNamePattern = regexp.MustCompile(`^(?:mcp_)?([a-z][a-z0-9-]*?)-[0-9a-f]{6,}(?:-[0-9a-f]+)*_(.+)$`)
++
+ // shortenNameIfNeeded applies a simple shortening rule for a single name.
+ func shortenNameIfNeeded(name string) string {
+ 	const limit = 64
+@@ -618,11 +624,20 @@ func shortenNameIfNeeded(name string) string {
+ 	if strings.HasPrefix(name, "mcp__") {
+ 		idx := strings.LastIndex(name, "__")
+ 		if idx > 0 {
+-			cand := "mcp__" + name[idx+2:]
+-			if len(cand) > limit {
+-				return cand[:limit]
++			rest := name[idx+2:]
++			cand := "mcp__" + rest
++			if len(cand) <= limit {
++				return cand
+ 			}
+-			return cand
++			// Plain truncation keeps only the shared server prefix, so every tool of a
++			// long-named server collapses to the same 64 characters and the model cannot
++			// tell them apart. Keep the server's words and the tool's own name instead.
++			if m := gatewayToolNamePattern.FindStringSubmatch(rest); m != nil {
++				if readable := "mcp__" + m[1] + "_" + m[2]; len(readable) <= limit {
++					return readable
++				}
++			}
++			return cand[:limit]
+ 		}
+ 	}
+ 	return name[:limit]
+@@ -634,22 +649,7 @@ func buildShortNameMap(names []string) map[string]string {
+ 	used := map[string]struct{}{}
+ 	m := map[string]string{}
+ 
+-	baseCandidate := func(n string) string {
+-		if len(n) <= limit {
+-			return n
+-		}
+-		if strings.HasPrefix(n, "mcp__") {
+-			idx := strings.LastIndex(n, "__")
+-			if idx > 0 {
+-				cand := "mcp__" + n[idx+2:]
+-				if len(cand) > limit {
+-					cand = cand[:limit]
+-				}
+-				return cand
+-			}
+-		}
+-		return n[:limit]
+-	}
++	baseCandidate := shortenNameIfNeeded
+ 
+ 	makeUnique := func(cand string) string {
+ 		if _, ok := used[cand]; !ok {
+diff --git a/internal/translator/codex/claude/codex_claude_tool_names_test.go b/internal/translator/codex/claude/codex_claude_tool_names_test.go
+new file mode 100644
+index 00000000000..d85ff71a6f5
+--- /dev/null
++++ b/internal/translator/codex/claude/codex_claude_tool_names_test.go
+@@ -0,0 +1,65 @@
++package claude
++
++import (
++	"strings"
++	"testing"
++)
++
++const gatewayPrefix = "mcp__gateway__mcp_github-12345678-9abc-def0-1234-56789abcdef0-12345678_"
++
++func TestBuildShortNameMapKeepsGatewayToolNamesDistinct(t *testing.T) {
++	names := []string{
++		gatewayPrefix + "add-comment-to-pending-review",
++		gatewayPrefix + "create-branch",
++		gatewayPrefix + "get_file_contents",
++		"mcp__gateway__mcp_playwright-browser-67892a0b_browser_click",
++		"Bash",
++	}
++	m := buildShortNameMap(names)
++	want := map[string]string{
++		names[0]: "mcp__github_add-comment-to-pending-review",
++		names[1]: "mcp__github_create-branch",
++		names[2]: "mcp__github_get_file_contents",
++		names[3]: "mcp__gateway__mcp_playwright-browser-67892a0b_browser_click",
++		names[4]: "Bash",
++	}
++	for orig, short := range want {
++		if got := m[orig]; got != short {
++			t.Errorf("short(%q) = %q, want %q", orig, got, short)
++		}
++		if len(m[orig]) > 64 {
++			t.Errorf("short(%q) is %d chars", orig, len(m[orig]))
++		}
++	}
++}
++
++func TestBuildShortNameMapDisambiguatesSameToolOnTwoServers(t *testing.T) {
++	a := gatewayPrefix + "create-branch"
++	b := "mcp__gateway__mcp_github-0b9e7c1d-1111-2222-3333-444455556666-89abcdef_create-branch"
++	m := buildShortNameMap([]string{a, b})
++	if m[a] == m[b] {
++		t.Fatalf("both servers mapped to %q", m[a])
++	}
++	if !strings.HasPrefix(m[b], "mcp__github_create-branch") {
++		t.Fatalf("second server lost its readable name: %q", m[b])
++	}
++}
++
++func TestReverseMapRestoresReadableGatewayNames(t *testing.T) {
++	orig := gatewayPrefix + "add-issue-comment"
++	req := []byte(`{"tools":[{"name":"` + orig + `","input_schema":{"type":"object"}}]}`)
++	rev := buildReverseMapFromClaudeOriginalShortToOriginal(req)
++	if got := rev["mcp__github_add-issue-comment"]; got != orig {
++		t.Fatalf("reverse map = %q, want %q", got, orig)
++	}
++	if got := shortenNameIfNeeded(orig); got != "mcp__github_add-issue-comment" {
++		t.Fatalf("single-name shortening = %q", got)
++	}
++}
++
++func TestShortenNameIfNeededFallsBackForUnknownLongNames(t *testing.T) {
++	long := "mcp__srv__" + strings.Repeat("x", 80)
++	if got := shortenNameIfNeeded(long); len(got) != 64 || !strings.HasPrefix(got, "mcp__xxx") {
++		t.Fatalf("fallback = %q", got)
++	}
++}

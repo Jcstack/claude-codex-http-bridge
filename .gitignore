@@ -53,6 +53,7 @@
 !tests/*.py
 !tests/auth_handoff_fixture.go
 !tests/native_cache_fixture.go
+!tests/native_gateway_names_fixture.go
 !tests/claude-client/
 !tests/claude-client/package.json
 !tests/claude-client/package-lock.json
@@ -68,6 +69,8 @@
 !upstream/patches/loopback-tls.patch
 !upstream/patches/url-citations.patch
 !upstream/patches/native-compaction-v2.patch
+!upstream/patches/08437a67-gateway-tool-names.patch
+!upstream/patches/gateway-instance-identity.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml
