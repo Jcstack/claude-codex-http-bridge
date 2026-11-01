@@ -20,6 +20,7 @@
 !PLAN.md
 !CACHE_AUDIT.md
 !SESSION_AUDIT.md
+!MCP_NAMING.md
 !SECURITY.md
 !LICENSE
 !config.example.yaml
@@ -28,6 +29,7 @@
 !launcher.py
 !diagnostics.py
 !session_audit.py
+!mcp_name_audit.py
 !statusline_adapter.py
 !session_models.py
 !codex_usage.py

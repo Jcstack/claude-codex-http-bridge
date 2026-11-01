@@ -35,6 +35,8 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
         return "desktop", "", arguments[1:]
     if arguments and arguments[0] == "diagnostics":
         return "diagnostics", "", arguments[1:]
+    if arguments and arguments[0] == "mcp-audit":
+        return "mcp-audit", "", arguments[1:]
     if arguments and arguments[0] == "--help":
         return "help", "", []
     if arguments and arguments[0] in ("codex-login", "models", "--list-models", "usage"):
@@ -644,11 +646,15 @@ def main() -> int:
         print("Opt-in native V2 /compact: --native-compaction (reviewed subscription runtime required); --no-native-compaction disables it.")
         print("Opt-in scoped computer use: claude-codex desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
         print("Read-only metadata: claude-codex diagnostics [--hours 2 | --lifetime] [--session UUID | --tracked] [--include-children].")
+        print("Partial offline MCP name check: claude-codex mcp-audit [--config FILE] [--inventory FILE] [--show-names].")
         print("Reconcile a stale local quota gate after an upstream reset: claude-codex quota recover.")
         return 0
     if mode == "diagnostics":
         import diagnostics
         return diagnostics.main(claude_args, root=ROOT, route=route)
+    if mode == "mcp-audit":
+        import mcp_name_audit
+        return mcp_name_audit.main(claude_args)
     helper_output("verify")
     if mode == "quota":
         if route != "subscription": raise ValueError("Quota recovery uses the Codex subscription profile")

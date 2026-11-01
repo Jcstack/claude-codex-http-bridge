@@ -20,6 +20,7 @@ import api_profile
 import codex_usage
 import install
 import launcher
+import mcp_name_audit
 import statusline_adapter
 import webfetch_pdf_guard
 import windows_acl
@@ -377,6 +378,8 @@ Model ID: `gpt-6.1-sol`
             windows_acl.verify([credential])
 
     def test_launcher_model_and_background_arguments(self) -> None:
+        self.assertEqual(launcher.parse_args(["mcp-audit", "--show-names"]),
+                         ("mcp-audit", "", ["--show-names"]))
         self.assertEqual(
             launcher.parse_args(["--model", "gpt-6.1-sol", "--effort", "max"]),
             ("claude", "gpt-6.1-sol", ["--effort", "max"]),
@@ -385,6 +388,13 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(launcher.parse_args(["usage"]), ("usage", "", []))
         self.assertEqual(launcher.parse_args(["--background"]), ("claude", "sol", ["--background"]))
         self.assertEqual(launcher.parse_args(["bridge", "stop"]), ("bridge-stop", "", []))
+
+    def test_mcp_audit_dispatch_does_not_start_or_verify_a_service(self) -> None:
+        with patch.object(sys, "argv", ["launcher.py", "mcp-audit", "--show-names"]), \
+             patch.object(launcher, "helper_output", side_effect=AssertionError("unexpected service helper")), \
+             patch.object(mcp_name_audit, "main", return_value=0) as audit:
+            self.assertEqual(launcher.main(), 0)
+            audit.assert_called_once_with(["--show-names"])
 
     def test_statusline_uses_selected_route_and_hides_unrelated_billing(self) -> None:
         payload = {
