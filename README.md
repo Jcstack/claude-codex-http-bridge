@@ -38,6 +38,23 @@ claude-codex --model gpt-6.1-sol
 
 在会话中用 `/model` 切换动态发现的模型，用 `/effort` 调整推理强度。`/background` 需要的本机代理会继续运行；任务结束后可运行 `claude-codex bridge stop`。原有 `claude` 命令仍按原来的账号与设置运行。若本机已有 `claude-codex` 命令，安装器会停止；确认要改用这个仓库的版本后运行 `./install.sh --replace-command`。OAuth 文件和运行日志只留在本机安装目录，不进入 Git。
 
+子代理默认使用 Claude Code 的模型选择规则；未单独配置时，`opus`、`sonnet`、
+`haiku` 和 `fable` 兼容别名都指向启动时选中的 GPT。可以为新启动的会话指定不同
+的子代理默认模型或别名映射，例如：
+
+```bash
+ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-6.1-sol \
+CLAUDE_CODE_SUBAGENT_MODEL=gpt-6.1-terra \
+claude-codex --model gpt-6-astra
+```
+
+PowerShell 中可先设置 `$env:ANTHROPIC_DEFAULT_SONNET_MODEL` 和
+`$env:CLAUDE_CODE_SUBAGENT_MODEL`，再运行上述启动命令。模型 ID 必须出现在当前
+`claude-codex models` 的可选目录中；不符合时启动器会报错，不会静默替换。调用时
+指定的别名或代理定义可以覆盖子代理默认值；`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`
+可按 Claude Code 规则强制使用默认值。分叉等例外与优先级见
+[Claude Code 子代理文档](https://code.claude.com/docs/en/sub-agents)。已打开的会话不受新启动设置影响。
+
 安装包含 V2 补丁的审查运行包后，可用 `claude-codex --native-compaction`
 选择原生 Codex 压缩。它保留主任务 effort，支持 `/compact` 后续接；默认仍使用
 Claude 摘要。已运行会话不会被修改。详见[验证结果与边界](NATIVE_COMPACTION.md)。

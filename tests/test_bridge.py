@@ -38,6 +38,30 @@ def model(context: int, search: bool = True) -> dict:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_subagent_and_alias_models_must_be_in_live_catalog(self):
+        catalog = {"gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra"}
+        with patch.dict(os.environ, {}, clear=True):
+            env = launcher.claude_environment(12345, "mock-local-key", "gpt-6-astra", available_models=catalog)
+            self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "gpt-6-astra")
+            self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", env)
+        with patch.dict(os.environ, {"ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-6.1-sol",
+                                    "CLAUDE_CODE_SUBAGENT_MODEL": "gpt-6.1-terra",
+                                    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}, clear=True):
+            env = launcher.claude_environment(12345, "mock-local-key", "gpt-6-astra", available_models=catalog)
+            self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "gpt-6.1-sol")
+            self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "gpt-6-astra")
+            self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "gpt-6.1-terra")
+            self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1")
+        with patch.dict(os.environ, {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}, clear=True):
+            env = launcher.claude_environment(12345, "mock-local-key", "gpt-6-astra", available_models=catalog)
+            self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "sonnet")
+        for name in ("CLAUDE_CODE_SUBAGENT_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL"):
+            with self.subTest(variable=name), patch.dict(os.environ, {name: "PRIVATE_INVALID_VALUE"}, clear=True):
+                with self.assertRaises(ValueError) as failure:
+                    launcher.claude_environment(12345, "mock-local-key", "gpt-6-astra", available_models=catalog)
+                self.assertIn(name, str(failure.exception))
+                self.assertNotIn("PRIVATE_INVALID_VALUE", str(failure.exception))
+
     def test_native_compaction_requires_reviewed_runtime_and_keeps_other_headers(self):
         manifest = {"source": {"files": {"upstream/patches/native-compaction-v2.patch": "fixture"}}}
         with patch.dict(os.environ, {}, clear=True):

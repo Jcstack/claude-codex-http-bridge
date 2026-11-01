@@ -141,8 +141,21 @@ def wait_for_catalog(proxy: subprocess.Popen, environment: dict[str, str], requi
 
 
 def claude_environment(port: int, key: str, model: str,
-                       route: str = "subscription") -> dict[str, str]:
+                       route: str = "subscription", *,
+                       available_models: set[str] | None = None) -> dict[str, str]:
     environment = os.environ.copy()
+    allowed = {model, *(available_models or ())}
+    alias_names = ("ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                   "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL")
+    alias_models = {}
+    for name in alias_names:
+        requested = environment.get(name, "").strip()
+        if requested and requested not in allowed:
+            raise ValueError(f"{name} is not in the eligible local model catalog; run claude-codex models")
+        alias_models[name] = requested or model
+    subagent = environment.get("CLAUDE_CODE_SUBAGENT_MODEL", "").strip()
+    if subagent and subagent not in allowed | {"inherit", "opus", "sonnet", "haiku", "fable"}:
+        raise ValueError("CLAUDE_CODE_SUBAGENT_MODEL is not an eligible model ID or Claude model alias")
     for name in (
         "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
         "ANTHROPIC_MODEL",
@@ -154,12 +167,11 @@ def claude_environment(port: int, key: str, model: str,
     environment.update({
         "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
         "ANTHROPIC_AUTH_TOKEN": key,
-        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
-        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
-        "ANTHROPIC_DEFAULT_FABLE_MODEL": model,
         "ENABLE_TOOL_SEARCH": "true",
     })
+    environment.update(alias_models)
+    if subagent:
+        environment["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent
     # Documented gateway controls. OpenAI does not strip Anthropic's attribution
     # block; omit it at the client to keep the reusable prefix stable. Fixed-
     # vocabulary hint headers distinguish compaction from ordinary turns without
@@ -537,7 +549,7 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         codex_usage.start_refresh(runtime / "codex-usage.json")
     _, _, key_path, _ = state_paths(runtime, state)
     claude_environment_values = claude_environment(state["port"], key_path.read_text().strip(),
-                                                  model, route)
+                                                  model, route, available_models=set(json.loads(catalog_json)))
     if managed:
         claude_environment_values = rolling_runtime.client_environment(ROOT, managed, claude_environment_values, directory)
     manifest = None
