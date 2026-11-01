@@ -97,7 +97,16 @@ def main():
                 raise AssertionError("Unauthenticated client was accepted")
             except urllib.error.HTTPError as error:
                 assert error.code == 401
+            except ConnectionResetError:
+                # Windows can deliver a reset when the server rejects a POST
+                # before consuming its body. It is a rejection only if nothing
+                # reached the origin and a valid request still succeeds below.
+                pass
             assert server.attempts == 0
+            with request(port, key) as response:
+                assert events(response)[-1].get("type") == "message_stop"
+            assert server.attempts == 1
+            server.attempts = 0
             checks["inbound_auth_before_upstream"] = True
             server.mode = "retry"
             with request(port, key) as response:

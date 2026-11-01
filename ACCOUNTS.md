@@ -85,13 +85,25 @@ connections, every possible encrypted native item, and every future upstream
 protocol are not certified by the handoff tests.
 
 The managed translator's model list is a snapshot taken when its backend
-generation starts. `account use` changes the credential selection but does not
-itself reconcile that snapshot. If the next account has a different catalog,
-an existing managed endpoint and a running Claude model picker can therefore
-temporarily retain the earlier list. A later launcher start normally attempts
-to reconcile the managed backend using the catalog snapshot it fetched; it
-does not rewrite the model picker already loaded by an existing Claude process.
-A fully automatic, race-safe account/catalog handoff remains open work.
+generation starts. During `account use`, the launcher verifies the selected
+account against the account-specific model IDs and available model metadata.
+If the resulting eligible catalog differs, it prepares and checks a replacement
+backend, verifies the catalog again before publication, and keeps the existing
+TLS ingress and admitted streams. An unchanged catalog does not trigger a
+replacement. Account changes and managed launcher preparation use the same
+local lock. Failed reconciliation restores the previous selection and attempts
+to restore its catalog; an unverified recovery leaves the private journal for
+`account recover`.
+
+This is not an atomic switch for every request: a new request can arrive after
+the credential selection changes but before a different backend catalog is
+published. Also, a running Claude process retains the model-picker and context
+settings loaded at its startup; synchronizing the backend cannot rewrite those
+settings. Client preparation discovers the selected account's eligible
+catalog at that moment; a later switch can still occur before or during the
+client's lifetime. Model IDs without sufficient metadata are excluded, and
+account-specific capability metadata beyond what the local service reports is
+not independently certified.
 
 ## Verification
 
@@ -101,6 +113,12 @@ caches, and fixed-host usage requests. The pinned upstream test
 `tests/auth_handoff_fixture.go` verifies that disabling an account does not call
 its execution-session closer, mutate an admitted request's credential snapshot,
 cancel its context, or re-enable it when an old stream finishes.
+
+An isolated local endpoint also exercises unchanged catalogs, changed catalogs,
+a catalog changing during preparation, rollback, and a stream spanning a
+backend handoff. The account lock is exercised concurrently. These use synthetic
+accounts and a fake provider; they do not establish atomic admission during a
+live account switch or dynamic updates to an existing Claude model picker.
 
 A local account handoff also completed while a synthetic generation stream was
 still running. That stream spanned the switch and finished cleanly after about

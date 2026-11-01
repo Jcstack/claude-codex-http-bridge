@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 
 ROOT = Path(os.environ.get("CLAUDE_CODEX_BRIDGE_HOME", Path(__file__).resolve().parent)).expanduser().absolute()
@@ -513,6 +513,22 @@ def bridge_stop(route: str = "subscription") -> int:
         return 0
 
 
+def managed_catalog(state: dict):
+    """Call while holding the account lock; verify again before publication."""
+    import accounts
+    management = accounts.Management(ROOT)
+    if management.state != state:
+        raise RuntimeError("Account model owner changed; no catalog was published")
+    models = accounts.selected_catalog(ROOT, management)
+
+    def verify_before_publish():
+        current = accounts.Management(ROOT)
+        if current.state != state or accounts.selected_catalog(ROOT, current) != models:
+            raise RuntimeError("Account model catalog changed during replacement")
+
+    return models, verify_before_publish
+
+
 def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
                 route: str = "subscription", *, explicit_model: bool = True) -> int:
     runtime, state, created = ensure_service(route=route)
@@ -527,15 +543,22 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
             selected = remembered
         elif resuming:
             resume_without_model = True
-    model_info = helper_output("prepare", selected, environment=environment).split("\t")
-    if len(model_info) != 5:
-        raise RuntimeError("Model helper returned an invalid result")
-    model, context, compact, settings, catalog_json = model_info
     managed = None
-    if route == "subscription" and (ROOT / "runtime-selected.json").exists():
+    managed_enabled = route == "subscription" and (ROOT / "runtime-selected.json").exists()
+    if managed_enabled:
+        import accounts
         import rolling_runtime
-        models = json.loads(helper_output("snapshot", environment=environment))
-        managed = rolling_runtime.ensure(ROOT, runtime, state, models)
+    lock = accounts.switch_lock(ROOT, wait_seconds=30) if managed_enabled else nullcontext()
+    with lock:
+        model_info = helper_output("prepare", selected, environment=environment).split("\t")
+        if len(model_info) != 5:
+            raise RuntimeError("Model helper returned an invalid result")
+        model, context, compact, settings, catalog_json = model_info
+        if managed_enabled:
+            models, verify = managed_catalog(state)
+            if json.loads(catalog_json) != {name: spec["context_window"] for name, spec in models.items()}:
+                raise RuntimeError("Model catalog changed during session preparation; retry the launch")
+            managed = rolling_runtime.ensure(ROOT, runtime, state, models, before_publish=verify)
     if route == "subscription":
         import quota_recovery
         quota_recovery.ensure_watch(ROOT)
@@ -656,13 +679,15 @@ def main() -> int:
         if route != "subscription": raise ValueError("Managed runtime currently wraps the Codex subscription route")
         import rolling_runtime
         import runtime_bundle
-        if mode == "bridge-upgrade":
-            with service_lock():
-                runtime_bundle.activate(ROOT, Path(selected).expanduser().absolute())
-        runtime, state, _ = ensure_service(route=route)
-        environment = service_environment(state, runtime, route)
-        models = json.loads(helper_output("snapshot", environment=environment))
-        managed = rolling_runtime.ensure(ROOT, runtime, state, models, force=mode == "bridge-reload")
+        import accounts
+        with accounts.switch_lock(ROOT, wait_seconds=30):
+            if mode == "bridge-upgrade":
+                with service_lock():
+                    runtime_bundle.activate(ROOT, Path(selected).expanduser().absolute())
+            runtime, state, _ = ensure_service(route=route)
+            models, verify = managed_catalog(state)
+            managed = rolling_runtime.ensure(ROOT, runtime, state, models, force=mode == "bridge-reload",
+                                             before_publish=verify)
         import quota_recovery
         quota_recovery.ensure_watch(ROOT)
         print(f"Managed TLS endpoint ready: https://127.0.0.1:{managed['port']}; legacy sessions retain their original service")
@@ -673,9 +698,11 @@ def main() -> int:
             import quota_recovery
             quota_recovery.ensure_watch(ROOT)
         if route == "subscription" and (ROOT / "runtime-selected.json").exists():
+            import accounts
             import rolling_runtime
-            environment = service_environment(state, runtime, route)
-            managed = rolling_runtime.ensure(ROOT, runtime, state, json.loads(helper_output("snapshot", environment=environment)))
+            with accounts.switch_lock(ROOT, wait_seconds=30):
+                models, verify = managed_catalog(state)
+                managed = rolling_runtime.ensure(ROOT, runtime, state, models, before_publish=verify)
             print(f"Managed TLS endpoint is running on https://127.0.0.1:{managed['port']}")
             return 0
         label = "OpenAI API" if route == "api" else "Codex"

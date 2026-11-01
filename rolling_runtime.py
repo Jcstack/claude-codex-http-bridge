@@ -141,13 +141,19 @@ def origin_manifest(root: Path, runtime: Path, base_runtime: Path, base: dict) -
                                    "port": base["port"], "key_file": str(key_copy)})
 
 
-def backend_config(runtime: Path, port: int, front_port: int, models: dict, key: str) -> str:
+def model_rows(models: dict) -> str:
     model_rows = []
     for model, spec in sorted(models.items()):
         if not re.fullmatch(r"gpt-[a-z0-9.-]+", model): raise RuntimeError("Invalid catalog model ID")
         levels = [item["effort"] for item in spec["supported_reasoning_levels"]]
         model_rows.append(f'        - name: {json.dumps(model)}\n          max-context-length: {int(spec["context_window"])}\n'
                           f'          thinking:\n            levels: {json.dumps(levels)}')
+    if not model_rows: raise RuntimeError("Managed model catalog is empty")
+    return "\n".join(model_rows)
+
+
+def backend_config(runtime: Path, port: int, front_port: int, models: dict, key: str) -> str:
+    rows = model_rows(models)
     return f'''config-version: 8
 server:
   host: "127.0.0.1"
@@ -174,7 +180,7 @@ api-keys:
     - name: guarded-local-codex
       base-url: "https://127.0.0.1:{front_port}/bridge/origin/v1"
       models:
-{chr(10).join(model_rows)}
+{rows}
       keys:
         - api-key: {json.dumps(private_key(runtime / "origin-guard-key"))}
 observability:
@@ -213,7 +219,25 @@ def drain(root: Path, value: dict) -> None:
     write(root / "runtime-managed" / "service.json", value)
 
 
-def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: bool = False) -> dict:
+def catalog_matches(root: Path, value: dict, models: dict) -> bool:
+    """Compare only generated model metadata; never expose the private config."""
+    row = value["generations"][value["current"]]
+    if launcher.listener_pids(row["port"]) != {row["pid"]}:
+        raise RuntimeError("Managed catalog backend is unavailable")
+    directory = root / "runtime-managed" / value["current"]
+    if directory.is_symlink() or not directory.is_dir():
+        raise RuntimeError("Managed catalog directory is invalid")
+    config = directory / "config.yaml"
+    runtime_bundle.safe_file(config, limit=2 * 1024 * 1024)
+    text = config.read_text()
+    blocks = re.findall(r"(?ms)^      models:\n(.*?)^      keys:\n", text)
+    if len(blocks) != 1:
+        raise RuntimeError("Managed catalog configuration is invalid")
+    return blocks[0] == model_rows(models) + "\n"
+
+
+def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: bool = False,
+           before_publish=None) -> dict:
     with launcher.service_lock():
         chosen = runtime_bundle.selected(root)
         if chosen is None: raise RuntimeError("No reviewed runtime bundle is installed")
@@ -272,6 +296,8 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
                 except (urllib.error.URLError, ValueError, TimeoutError): pass
                 if backend.poll() is not None or time.monotonic() >= deadline: raise RuntimeError("Replacement catalog did not become ready")
                 time.sleep(.1)
+            if before_publish is not None:
+                before_publish()
             value["generations"][generation] = {"pid": backend.pid, "port": port, "fingerprint": fingerprint}
             value["current"] = generation
             write(runtime / "service.json", value)

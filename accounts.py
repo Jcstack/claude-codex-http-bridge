@@ -6,6 +6,7 @@ import argparse
 import base64
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import errno
 import hashlib
 import hmac
 import http.client
@@ -431,7 +432,7 @@ def local_accounts(root: Path) -> list[dict]:
 
 
 @contextmanager
-def switch_lock(root: Path):
+def switch_lock(root: Path, *, wait_seconds: float = 0):
     directory = root / "accounts"
     private_directory(directory)
     path = directory / ".switch.lock"
@@ -443,11 +444,24 @@ def switch_lock(root: Path):
             import windows_acl
             windows_acl.lock([path])
             import msvcrt
-            # Lock before updating the byte: an update would race another owner.
-            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            try:
+                if platform.system() == "Windows":
+                    # Lock before updating the byte: an update would race another owner.
+                    handle.seek(0)
+                    msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Another account operation is in progress") from None
+                time.sleep(.1)
         try:
             yield directory
         finally:
@@ -456,6 +470,80 @@ def switch_lock(root: Path):
                 msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
+def selected_catalog(root: Path, management: Management) -> dict:
+    """Read a catalog for exactly one verified selected account, without inference."""
+    import bridge_models
+    import launcher
+    import rolling_runtime
+
+    def current():
+        enabled = [row for row in management.files() if not row.get("disabled")]
+        local = [row for row in local_accounts(root) if not row["record"].get("disabled")]
+        if len(enabled) != 1 or len(local) != 1 or enabled[0].get("name") != local[0]["name"]:
+            raise RuntimeError("Selected account changed while reading its model catalog")
+        return local[0]["name"], local[0]["fingerprint"]
+
+    name, identity = current()
+    listed = management.call("GET", "auth-files/models?" + urllib.parse.urlencode({"name": name})).get("models")
+    if not isinstance(listed, list):
+        raise RuntimeError("Selected account model catalog is unavailable")
+    allowed = {row["id"] for row in listed if isinstance(row, dict) and isinstance(row.get("id"), str)}
+    runtime = root / "runtime"
+    if not launcher.state_is_live(runtime, management.state):
+        raise RuntimeError("Account model owner is unavailable; no catalog was published")
+    key = rolling_runtime.private_key(launcher.state_paths(runtime, management.state)[2])
+    rich = request_json(f'http://127.0.0.1:{management.state["port"]}/v1/models?client_version=cpa',
+                        headers={"Authorization": "Bearer " + key}, timeout=8).get("models")
+    if not isinstance(rich, list):
+        raise RuntimeError("Account model metadata is unavailable")
+    rows = {row["slug"]: row for row in rich if isinstance(row, dict)
+            and isinstance(row.get("slug"), str) and row["slug"] in allowed}
+    expected = {slug for slug, row in rows.items() if slug.startswith("gpt-")
+                and not slug.startswith("gpt-image-") and isinstance(row.get("input_modalities"), list)
+                and "text" in row["input_modalities"] and bridge_models.eligible(bridge_models.context_metadata(row))}
+    try:
+        completed = subprocess.run([sys.executable, str(root / "bridge_models.py"), "snapshot"],
+            env=launcher.service_environment(management.state, runtime), capture_output=True, text=True,
+            check=True, timeout=20)
+        if len(completed.stdout) > 4 * 1024 * 1024:
+            raise RuntimeError("Account model catalog exceeds its metadata limit")
+        models = json.loads(completed.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        raise RuntimeError("Could not verify the selected account model catalog") from None
+    if (current() != (name, identity) or not isinstance(models, dict) or not models
+            or set(models) != expected):
+        raise RuntimeError("Selected account model catalog is inconsistent; no catalog was published")
+    return models
+
+
+def synchronize_managed_catalog(root: Path, management: Management) -> bool:
+    """Reconcile an existing endpoint while preserving its ingress and streams.
+
+    The caller holds switch_lock. New requests may still arrive between the
+    account update and the replacement publication; that interval is not atomic.
+    """
+    import rolling_runtime
+    import runtime_bundle
+    value = rolling_runtime.state(root)
+    if value is None:
+        return False
+    if runtime_bundle.selected(root) is None:
+        raise RuntimeError("Managed runtime selection is unavailable")
+    models = selected_catalog(root, management)
+    rolling_runtime.endpoint_status(root, value)
+    if rolling_runtime.catalog_matches(root, value, models):
+        return False
+    expected = runtime_bundle.canonical(models)
+
+    def verify_before_publish():
+        if runtime_bundle.canonical(selected_catalog(root, management)) != expected:
+            raise RuntimeError("Account model catalog changed during replacement")
+
+    rolling_runtime.ensure(root, root / "runtime", management.state, models, force=True,
+                           before_publish=verify_before_publish)
+    return True
 
 
 def select_record(root: Path, alias: str) -> dict:
@@ -573,6 +661,7 @@ def switch_account(root: Path, alias: str) -> None:
         existing = next((entry for entry in entries if entry["fingerprint"] == identity), None)
         before = {row["name"]: bool(row.get("disabled")) for row in management.files()}
         if existing and before.get(existing["name"]) is False and sum(not v for v in before.values()) == 1:
+            synchronize_managed_catalog(root, management)
             print(f"Account '{alias}' is already selected; no sessions were restarted.")
             return
         checked_path = stage_path(root, alias).with_suffix(".checked")
@@ -607,12 +696,18 @@ def switch_account(root: Path, alias: str) -> None:
             after = {row["name"]: bool(row.get("disabled")) for row in management.files()}
             if {key for key, disabled in after.items() if not disabled} != {name}:
                 raise RuntimeError("Active account selection could not be verified")
+            synchronize_managed_catalog(root, management)
         except BaseException:
             restored = True
             # Restore enabled accounts first so rollback also avoids an empty pool.
             for previous, disabled in sorted(before.items(), key=lambda item: item[1]):
                 try:
                     management.set_disabled(previous, disabled)
+                except Exception:
+                    restored = False
+            if restored:
+                try:
+                    synchronize_managed_catalog(root, management)
                 except Exception:
                     restored = False
             if restored:
@@ -667,6 +762,7 @@ def recover_account(root: Path) -> None:
         after = {row["name"]: bool(row.get("disabled")) for row in management.files()}
         if any(after.get(name) != disabled for name, disabled in saved.items()):
             raise RuntimeError("Account recovery could not be verified; private record retained")
+        synchronize_managed_catalog(root, management)
         path.unlink()
         print("Previous account selection restored; no sessions were restarted.")
 
