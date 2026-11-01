@@ -74,7 +74,7 @@ jobs:
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
           python tests/probe_toolsearch_cache_batch.py "${{ matrix.binary }}"
           python tests/smoke_transport.py "${{ matrix.binary }}"
-          python tests/probe_stream_keepalive.py "${{ matrix.binary }}"
+          python tests/probe_stream_keepalive.py "${{ matrix.binary }}" runtime-bundle
           python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}"
           python tests/probe_parallel_stream.py "${{ matrix.binary }}"
           if [ "$RUNNER_OS" != "Windows" ]; then

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,8 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import api_profile
 import launcher
+import rolling_runtime
+import runtime_bundle
 
 
 MODEL = "gpt-6.1-sol"
@@ -107,12 +110,16 @@ def translator(binary: Path, upstream_port: int, *, before_first: bool):
             launcher.stop_process(process)
 
 
-def request(port: int, key: str):
+def request(port: int, key: str, *, ca: Path | None = None):
     payload = {"model": MODEL, "max_tokens": 64, "stream": True,
                "messages": [{"role": "user", "content": "synthetic fixture"}]}
-    item = urllib.request.Request(f"http://127.0.0.1:{port}/v1/messages", data=json.dumps(payload).encode(),
+    scheme = "https" if ca else "http"
+    item = urllib.request.Request(f"{scheme}://127.0.0.1:{port}/v1/messages", data=json.dumps(payload).encode(),
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
-    return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(item, timeout=15)
+    handlers = [urllib.request.ProxyHandler({})]
+    if ca:
+        handlers.append(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=str(ca))))
+    return urllib.request.build_opener(*handlers).open(item, timeout=15)
 
 
 def read_stream(response) -> tuple[int, list[str]]:
@@ -131,7 +138,7 @@ def read_stream(response) -> tuple[int, list[str]]:
     return comments, events
 
 
-def claude_stream(port: int, key: str) -> None:
+def claude_stream(port: int, key: str, *, ca: Path | None = None) -> None:
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("Claude client fixture is unavailable")
@@ -147,10 +154,14 @@ def claude_stream(port: int, key: str) -> None:
             "replaceBuiltInOptions": True}}), encoding="utf-8")
         env = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC",
                "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if name in os.environ}
+        scheme = "https" if ca else "http"
         env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_AUTH_TOKEN": key,
-                    "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
+                    "ANTHROPIC_BASE_URL": f"{scheme}://127.0.0.1:{port}",
                     "ANTHROPIC_DEFAULT_SONNET_MODEL": MODEL, "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
                     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1"})
+        if ca:
+            env.update({"NODE_EXTRA_CA_CERTS": str(ca), "NODE_TLS_REJECT_UNAUTHORIZED": "1",
+                        "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"})
         result = subprocess.run([claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
             "--settings", str(settings), "--permission-mode", "dontAsk", "--output-format", "json",
             "--model", MODEL, "--tools", "", "-p", "Return the synthetic fixture response."],
@@ -162,9 +173,53 @@ def claude_stream(port: int, key: str) -> None:
             raise RuntimeError("Isolated Claude did not finish the keep-alive fixture")
 
 
+def managed_tls(bundle: Path, origin) -> None:
+    runtime_bundle.verify(bundle)
+    with tempfile.TemporaryDirectory(prefix="bridge-keepalive-tls-") as temporary:
+        root = Path(temporary)
+        runtime_bundle.private_dir(root)
+        base_runtime = root / "runtime"
+        runtime_bundle.private_dir(base_runtime)
+        source = base_runtime / "session-fixture"
+        runtime_bundle.private_dir(source)
+        for name, value in (("config.yaml", "synthetic"), ("key", "a" * 64), ("proxy.log", "")):
+            api_profile.write_private(source / name, value)
+        base = {"pid": os.getpid(), "port": origin.server_port, "session": source.name}
+        original_config = rolling_runtime.backend_config
+
+        def fixture_config(*args):
+            return original_config(*args) + "\nrequests:\n  streaming:\n    keepalive-seconds: 1\n    bootstrap-retries: 0\n"
+
+        with patch.object(launcher, "ROOT", root), patch.object(rolling_runtime, "backend_config", side_effect=fixture_config):
+            runtime_bundle.activate(root, bundle)
+            try:
+                value = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC})
+                runtime = root / "runtime-managed"
+                ca = runtime / "ca.pem"
+                key = rolling_runtime.private_key(runtime / "front-key")
+                origin.mode = "stream"
+                with request(value["port"], key, ca=ca) as response:
+                    comments, events = read_stream(response)
+                if comments < 1 or not events or events[-1] != "message_stop":
+                    raise RuntimeError("TLS ingress did not preserve synthetic keep-alives")
+                claude_stream(value["port"], key, ca=ca)
+                origin.mode = "cancel"
+                origin.attempts = 0
+                origin.disconnected.clear()
+                with request(value["port"], key, ca=ca) as response:
+                    for line in response:
+                        if line.startswith(b":"):
+                            break
+                if not origin.disconnected.wait(8) or origin.attempts != 1:
+                    raise RuntimeError("TLS ingress did not propagate synthetic cancellation")
+            finally:
+                if rolling_runtime.state(root) is not None:
+                    rolling_runtime.stop(root)
+
+
 def main() -> None:
-    if len(sys.argv) != 2:
-        raise RuntimeError("Usage: probe_stream_keepalive.py /path/to/reviewed-proxy")
+    if len(sys.argv) not in (2, 3):
+        raise RuntimeError("Usage: probe_stream_keepalive.py /path/to/reviewed-proxy [bundle]")
     origin = ThreadingHTTPServer(("127.0.0.1", 0), Origin)
     origin.attempts = 0
     origin.disconnected = threading.Event()
@@ -209,9 +264,12 @@ def main() -> None:
                 prefirst_comments, error_events = read_stream(response)
             if status != 200 or prefirst_comments < 1 or "error" not in error_events:
                 raise RuntimeError("Pre-first-token error framing did not match the fixture expectation")
+        if len(sys.argv) == 3:
+            managed_tls(Path(sys.argv[2]).resolve(), origin)
         print(json.dumps({"mock_only": True, "post_first_token_keepalive_and_completion": True,
             "claude_client_completed_with_keepalive": True,
             "incomplete_stream_not_replayed_or_completed": True, "cancel_releases_origin": True,
+            "isolated_tls_ingress_and_claude": "pass" if len(sys.argv) == 3 else "not-run",
             "pre_first_disabled_preserves_http_503": True,
             "pre_first_enabled_commits_200_then_inband_error": True,
             "active_runtime_changed": False}, sort_keys=True))

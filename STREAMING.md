@@ -29,9 +29,26 @@ HTTP 503; enabling them committed HTTP 200 first and delivered that failure as
 an in-band stream error. The latter can change client retry behavior. With
 post-first-token keep-alives, an isolated Claude client completed a synthetic
 response; separate fake-stream cases showed cancellation reaching the fake
-origin and a truncated stream neither being replayed nor marked complete. The
-fixture does not test the active TLS ingress, a real model, or recovery from a
-missing upstream terminal, and has not changed runtime settings.
+origin and a truncated stream neither being replayed nor marked complete. A
+second disposable TLS ingress preserved the keep-alive, let the Claude client
+finish, and forwarded cancellation to the fake origin. These fixtures do not
+test the active ingress or recovery from a missing upstream terminal, and have
+not changed runtime settings.
+
+On 2026-11-02 one short, low-effort Sol request used a disposable TLS ingress
+and a one-second keep-alive against the selected subscription origin. It
+completed in 2.81 seconds, with one keep-alive comment, one `message_stop` and
+no reported stream error; the existing origin and ingress identities remained
+unchanged. This is a connectivity sample, not evidence that a long request or
+the recurring incomplete-stream failure is fixed.
+
+A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
+on Claude Code 2.1.201 reported an additional content-progress timeout that
+comments and ping events did not reset. That result is version- and setup-specific
+and has not been reproduced on this installation. Conversely, a heartbeat that
+does reset a byte-idle watchdog can conceal a stalled upstream connection. These
+trade-offs require a deliberate liveness and cancellation policy; this bridge
+does not fabricate empty thinking content to extend a stream.
 
 The official primary GPT-Live WebSocket uses `/v1/live/sessions` without a
 model query, then `session.start` and `session.started`. It is distinct from
