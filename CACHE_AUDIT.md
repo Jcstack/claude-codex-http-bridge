@@ -29,6 +29,29 @@ then changed the lookup question. Every answer was correct:
 These observations demonstrate prefix reuse and also retain cache misses.
 They do not establish a latency improvement or working manual cache controls.
 
+## Dynamic-tool prefix gate
+
+The credential-free `tests/probe_proxy_features.py` sends synthetic Claude
+Messages requests through a candidate translator to a loopback Responses
+server. For one synthetic session, it checks the exact UTF-8 bytes of the
+tool definitions and their order, the instructions field, and each prior
+input item when ToolSearch reveals a deferred tool and that tool is later
+removed. In this fixture the synthetic Claude system prompt appears in the
+first Responses input item with the developer role; the separate instructions
+field is empty. The same session's nonempty `prompt_cache_key` stays stable,
+while a second synthetic session receives a different key. Removing the tool changes
+the allowed-tool selection intentionally; the entire request is not expected
+to remain byte-identical. The test keeps captured fixture requests only in
+memory and reports booleans rather than bodies or cache keys.
+
+The gate applies to this fixture and fake API-profile origin: it does not prove
+cache hits, native subscription executor behavior, account isolation, TTL,
+pricing, or prefix stability for arbitrary Claude Code versions or histories.
+The checked prefix follows the general guidance in
+[OpenAI's prompt-caching documentation](https://developers.openai.com/api/docs/guides/prompt-caching)
+and [Claude's tool-caching documentation](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching),
+but public API behavior is not assigned to the subscription route by inference.
+
 ## Why acceptance is insufficient
 
 The reviewed upstream request converter explicitly removes top-level
