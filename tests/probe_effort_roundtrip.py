@@ -5,6 +5,7 @@ not establish a real model's entitlement or actual reasoning behavior.
 """
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import argparse
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,9 @@ from claude_fixture import isolated_environment
 from live_support import temporary_translator
 
 
-MODEL = "gpt-6.1-sol"
+FAMILIES = {"sol": ("gpt-6.1-sol", "claude-sonnet-5-5"),
+            "astra": ("gpt-6-astra", "claude-opus-5-5"),
+            "luna": ("gpt-6-luna", "claude-haiku-5-5")}
 LEVELS = ("low", "medium", "high", "xhigh", "max")
 
 
@@ -33,7 +36,7 @@ class Handler(BaseHTTPRequestHandler):
                                      "effort": (body.get("reasoning") or {}).get("effort")})
         item = {"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed",
                 "content": [{"type": "output_text", "text": "DONE", "annotations": []}]}
-        response = {"id": "resp_fixture", "model": MODEL, "status": "in_progress"}
+        response = {"id": "resp_fixture", "model": self.server.model, "status": "in_progress"}
         events = [
             {"type": "response.created", "response": response},
             {"type": "response.output_item.added", "output_index": 0,
@@ -56,12 +59,12 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
-def client_arguments(claude, settings):
+def client_arguments(claude, settings, model):
     return [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-            "--settings", str(settings), "--permission-mode", "dontAsk", "--model", MODEL, "--tools", "Read"]
+            "--settings", str(settings), "--permission-mode", "dontAsk", "--model", model, "--tools", "Read"]
 
 
-def interactive(claude, settings, work, config, environment, server):
+def interactive(claude, settings, work, config, environment, server, model):
     if os.name == "nt":
         return {"skipped": "Windows interactive console is not covered"}
     import fcntl
@@ -79,7 +82,7 @@ def interactive(claude, settings, work, config, environment, server):
     wrapper = ("import fcntl,os,sys,termios;fcntl.ioctl(0,termios.TIOCSCTTY,0);"
                "os.tcsetpgrp(0,os.getpgrp());os.execvpe(sys.argv[1],sys.argv[1:],os.environ)")
     try:
-        process = subprocess.Popen([sys.executable, "-c", wrapper, *client_arguments(claude, settings)],
+        process = subprocess.Popen([sys.executable, "-c", wrapper, *client_arguments(claude, settings, model)],
                                    cwd=work, env=environment, stdin=slave, stdout=slave, stderr=slave,
                                    start_new_session=True)
     except BaseException:
@@ -119,7 +122,7 @@ def interactive(claude, settings, work, config, environment, server):
             os.write(master, ("Emit fixture response " + level + ".\r").encode())
             collect(5)
             sent = server.requests[before:]
-            results[level] = len(sent) == 1 and sent[0] == {"model": MODEL, "effort": level}
+            results[level] = len(sent) == 1 and sent[0] == {"model": model, "effort": level}
         bodies = server.bodies[requests_at_start:]
         if len(bodies) != len(LEVELS):
             raise RuntimeError("Synthetic interactive request count was unexpected")
@@ -146,9 +149,12 @@ def interactive(claude, settings, work, config, environment, server):
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise RuntimeError("Usage: probe_effort_roundtrip.py /path/to/proxy")
-    binary = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("binary", type=Path)
+    parser.add_argument("--family", choices=tuple(FAMILIES), default="sol")
+    args = parser.parse_args()
+    binary = args.binary.resolve()
+    model, behaves_as = FAMILIES[args.family]
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude or not binary.is_file():
         raise RuntimeError("The locked Claude fixture and candidate proxy are required")
@@ -158,9 +164,10 @@ def main():
         work.mkdir()
         config.mkdir(mode=0o700)
         settings = root / "settings.json"
-        settings.write_text(json.dumps({"modelPicker": {"options": [{"model": MODEL, "label": "Fixture",
-            "behavesAs": "claude-sonnet-5-5"}], "replaceBuiltInOptions": True}}), encoding="utf-8")
+        settings.write_text(json.dumps({"modelPicker": {"options": [{"model": model, "label": "Fixture",
+            "behavesAs": behaves_as}], "replaceBuiltInOptions": True}}), encoding="utf-8")
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.model = model
         server.requests = []
         server.bodies = []
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -170,15 +177,15 @@ def main():
                            DISABLE_TELEMETRY="1")
         spec = {"context_window": 500000, "supports_search_tool": True, "input_modalities": ["text"],
                 "supported_reasoning_levels": [{"effort": value} for value in LEVELS]}
-        upstream = {"state": {"port": server.server_port}, "key": "synthetic-local-upstream", "models": {MODEL: spec}}
+        upstream = {"state": {"port": server.server_port}, "key": "synthetic-local-upstream", "models": {model: spec}}
         try:
-            with temporary_translator(binary, upstream, MODEL) as (port, key):
+            with temporary_translator(binary, upstream, model) as (port, key):
                 environment.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_AUTH_TOKEN=key,
-                                   ANTHROPIC_DEFAULT_SONNET_MODEL=MODEL)
+                                   ANTHROPIC_DEFAULT_SONNET_MODEL=model)
                 cli = {}
                 for level in LEVELS:
                     before = len(server.requests)
-                    result = subprocess.run([*client_arguments(claude, settings), "--output-format", "json",
+                    result = subprocess.run([*client_arguments(claude, settings, model), "--output-format", "json",
                                              "--effort", level, "-p", "Return the fixture response."],
                                             cwd=work, env=environment, capture_output=True, text=True, timeout=45)
                     try:
@@ -187,9 +194,10 @@ def main():
                     except (ValueError, AttributeError, TypeError):
                         successful = False
                     sent = server.requests[before:]
-                    cli[level] = successful and len(sent) == 1 and sent[0] == {"model": MODEL, "effort": level}
-                tui = interactive(claude, settings, work, config, environment, server)
-                print(json.dumps({"synthetic_only": True, "cli_roundtrip": cli, "interactive_roundtrip": tui}, sort_keys=True))
+                    cli[level] = successful and len(sent) == 1 and sent[0] == {"model": model, "effort": level}
+                tui = interactive(claude, settings, work, config, environment, server, model)
+                print(json.dumps({"synthetic_only": True, "family": args.family,
+                                  "cli_roundtrip": cli, "interactive_roundtrip": tui}, sort_keys=True))
                 if not all(cli.values()) or ("skipped" not in tui and not all(tui.values())):
                     raise RuntimeError("Synthetic effort round trip failed")
         finally:

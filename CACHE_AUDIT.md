@@ -208,8 +208,9 @@ No API-error records appeared in that tracked snapshot; it does not establish
 that every response completed or that no error was hidden by a retry.
 
 A credential-free interactive macOS fixture also switches through all five
-effort levels in one Claude session. At the fake Responses origin, the cache
-key stayed the same, nonempty tool definitions compared equal, and previous
+effort levels in separate Sol, Astra and Luna mapped sessions. At the fake
+Responses origin, the cache key stayed the same, nonempty tool definitions
+compared equal, and previous
 input items remained a structural prefix. These comparisons use parsed JSON,
 not a byte-for-byte assertion or a provider cache-hit measurement. The same
 fixture skips the interactive console on Windows.
