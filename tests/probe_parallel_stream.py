@@ -4,6 +4,8 @@ An owned Responses origin drives the reviewed translator. Independent hook
 markers count every successful effect; no user project or model account is used.
 """
 
+from claude_fixture import isolated_environment
+
 import argparse
 from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +45,26 @@ def terminal_client(command, work, env):
     finally:
         os.close(slave)
     return process, master
+
+
+def terminate_owned_client(process, terminal_master):
+    """Clean up only our child; do not mask an earlier fixture failure."""
+    try:
+        if terminal_master is not None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                if process.poll() is None:
+                    process.kill()
+        else:
+            process.kill()
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        process.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -275,9 +297,7 @@ elif label is not None:
                     "args": [str(hook), str(markers), str(work), str(server.server_port), mode],
                     "timeout": 45 if mode == "ctrl_c_between_effects" else 7}]}]
                     for event in ("PreToolUse", "PostToolUse")}}), encoding="utf-8")
-            allowed = ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT",
-                       "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP")
-            env = {key: os.environ[key] for key in allowed if key in os.environ}
+            env = isolated_environment(root)
             env.update(CLAUDE_CONFIG_DIR=str(config), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
             spec = {"context_window": 500000, "supports_search_tool": True, "input_modalities": ["text"],
                     "supported_reasoning_levels": [{"effort": level} for level in ("low", "medium", "high", "xhigh", "max")]}
@@ -401,21 +421,19 @@ elif label is not None:
                                 "effects": counts, "acknowledged": sorted(acknowledged), "at_most_once": True})
             finally:
                 server.release.set()
+                cleanup_ok = True
                 if process is not None and process.poll() is None:
-                    if terminal_master is not None:
-                        try:
-                            os.killpg(process.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-                    else:
-                        process.kill()
-                    process.communicate(timeout=10)
+                    cleanup_ok = terminate_owned_client(process, terminal_master)
                 if terminal_master is not None:
                     os.close(terminal_master)
                 stack.close()
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+                if not cleanup_ok:
+                    if sys.exc_info()[0] is None:
+                        raise RuntimeError("Synthetic client cleanup did not complete")
+                    print("Synthetic client cleanup did not complete", file=sys.stderr)
     print(json.dumps({"mock_only": True, "through_translator": True,
                       "terminal_ctrl_c_exercised": any(mode.startswith("ctrl_c_") for mode in modes), "cases": metrics}))
 

@@ -4,6 +4,8 @@ All upstream data is synthetic. No account, user project, credential, or externa
 model call is used. Replaces only disposable proxy processes between requests.
 """
 
+from claude_fixture import isolated_environment
+
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -126,7 +128,7 @@ def main():
             with tempfile.TemporaryDirectory(prefix="bridge-search-client-") as temporary:
                 root = Path(temporary); work = root / "workspace"; work.mkdir()
                 config = root / "claude"; config.mkdir(mode=0o700)
-                env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if k in os.environ}
+                env = isolated_environment(root)
                 env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_DEFAULT_SONNET_MODEL": MODEL,
                             "ANTHROPIC_DEFAULT_HAIKU_MODEL": MODEL, "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1"})

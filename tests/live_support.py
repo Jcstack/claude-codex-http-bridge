@@ -8,6 +8,8 @@ import sys
 import tempfile
 from unittest.mock import patch
 
+from claude_fixture import isolated_environment
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import api_profile
 import bridge_models
@@ -43,12 +45,12 @@ def temporary_translator(binary: Path, upstream: dict, model: str, *, models: di
         if "api.openai.com" in source:
             raise RuntimeError("Public API route is not permitted in this test")
         config.write_text(source)
+        environment = isolated_environment(root)
         process = subprocess.Popen([str(binary), "-config", str(config)],
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, cwd=root)
+                                   stderr=subprocess.DEVNULL, cwd=root, env=environment)
         try:
             launcher.wait_for_private_listener(process, port)
-            environment = os.environ.copy()
             environment.update({"CODEX_BRIDGE_PORT": str(port), "CODEX_BRIDGE_KEY_FILE": str(key),
                                 "CODEX_BRIDGE_ROUTE": "api",
                                 "CODEX_BRIDGE_API_METADATA_FILE": str(runtime / "catalog.json")})

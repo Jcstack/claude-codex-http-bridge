@@ -4,6 +4,8 @@ No model account, OAuth, project key, user config or external model calls.
 Tests variadic --mcp-config coexistence, real PDF and image tool-result content.
 """
 
+from claude_fixture import isolated_environment
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -83,7 +85,7 @@ def main():
             paths.append(path)
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler); server.requests = []
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
-        env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if k in os.environ}
+        env = isolated_environment(root)
         env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_AUTH_TOKEN": "fixture-only",
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_port}", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-6.1-sol",
                     "ENABLE_TOOL_SEARCH": "false", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1"})

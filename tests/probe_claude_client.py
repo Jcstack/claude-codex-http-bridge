@@ -4,6 +4,8 @@ No real model calls. Verifies client behavior, not model quality or translator
 behavior. Uses an isolated configuration and synthetic disposable workspace.
 """
 
+from claude_fixture import isolated_environment
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -99,7 +101,7 @@ def main():
         server = FixtureServer(("127.0.0.1", 0), Handler)
         server.requests = []; server.work = work
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
-        env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if k in os.environ}
+        env = isolated_environment(root)
         env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_AUTH_TOKEN": "fixture-only",
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_port}",
                     "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-6.1-sol",

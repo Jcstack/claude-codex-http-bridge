@@ -6,6 +6,8 @@ user transcript or model account is used.
 
 from __future__ import annotations
 
+from claude_fixture import isolated_environment
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -122,8 +124,7 @@ def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agen
         server.lock = threading.Lock()
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        env = {key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC",
-               "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if key in os.environ}
+        env = isolated_environment(root)
         env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_AUTH_TOKEN": "fixture-only",
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_port}",
                     "ANTHROPIC_DEFAULT_OPUS_MODEL": alias_child_model,

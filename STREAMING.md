@@ -45,7 +45,7 @@ the recurring incomplete-stream failure is fixed.
 ### Incomplete tool-call safety, 2026-11-02
 
 A credential-free fake Responses origin exposed a separate boundary bug in the
-currently running translator. It sent a valid JSON argument followed by
+then-running translator. It sent a valid JSON argument followed by
 `response.incomplete` / `max_output_tokens`, while the function item still had
 `status: in_progress` and had not emitted `response.output_item.done`. The old
 translator closed the tool block and the real isolated Claude client executed
@@ -86,6 +86,32 @@ not prove a complete answer. No extra live inference was sent for this rollout.
 The original origin and sessions still directly connected to it retain the old
 translator and need a separately safe migration. This issue is distinct from the
 previously observed EOF/503 errors, whose root cause remains unknown.
+
+### POSIX cancellation and fixture isolation
+
+On the local macOS host, the non-interactive `ctrl_c_between_effects` fixture
+timed out repeatedly when the installed Claude Code 2.1.316 ran with the
+existing HOME, despite a foreground pseudoterminal with `ISIG` enabled. At one
+timeout the process was reported as trying to exit; this does not establish
+whether SIGINT was ignored. A byte-identical, locked client at another path
+passed with that HOME, and the installed client passed the original focused
+fixture with an empty temporary HOME. A separate minimal pseudoterminal
+control also received SIGINT. These observations narrow the difference to the
+launch environment and path together, not a proven Claude or bridge root
+cause; interactive sessions and Windows console cancellation remain untested.
+
+The credential-free client fixtures now use a temporary HOME and, on Windows,
+temporary profile and application-data paths. They also retain their separate
+Claude configuration directory. The temporary translator helper and the
+keep-alive probe also pass a limited environment to their disposable proxy
+processes. Claude's [settings documentation](https://code.claude.com/docs/en/settings)
+describes additional global state outside individual project settings, so a
+separate configuration directory alone should not be treated as a complete
+home-directory isolation guarantee. This environment change is not an OS
+sandbox. The parallel fixture also falls back to terminating its own child if
+the owned process-group signal is denied; its original Ctrl-C timeout remains
+a failure. Other proxy launch paths and the live subscription clients have not
+all been migrated to this helper and still require a separate privacy review.
 
 A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
 on Claude Code 2.1.201 reported an additional content-progress timeout that

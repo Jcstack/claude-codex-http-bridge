@@ -4,6 +4,8 @@ Fake OpenAI origin -> guarded TLS ingress -> reviewed translator -> same ingress
 -> Claude. Replaces only disposable backends, never any installed user service.
 """
 
+from claude_fixture import isolated_environment
+
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -76,7 +78,7 @@ def persistent_claude(root, value, base_runtime, base, *, background=False):
     if not claude: raise RuntimeError("Claude fixture binary is required")
     config = root / "claude-config"; runtime_bundle.private_dir(config)
     work = root / "workspace"; work.mkdir()
-    env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if k in os.environ}
+    env = isolated_environment(root)
     env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_DEFAULT_SONNET_MODEL": MODEL,
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL": MODEL, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
                 "CLAUDE_CODE_ATTRIBUTION_HEADER": "0", "DISABLE_TELEMETRY": "1"})

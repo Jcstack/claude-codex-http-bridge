@@ -3,6 +3,8 @@
 The fixture never connects to a model account or changes the installed runtime.
 """
 
+from claude_fixture import isolated_environment
+
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -96,11 +98,11 @@ def translator(binary: Path, upstream_port: int, *, before_first: bool):
         text += "\nrequests:\n  streaming:\n    keepalive-seconds: 1\n    bootstrap-retries: 0\n"
         text += "    send-keepalive-before-ft: " + ("true" if before_first else "false") + "\n"
         api_profile.write_private(config, text)
+        environment = isolated_environment(root)
         process = subprocess.Popen([str(binary), "-config", str(config)], stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=root)
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=root, env=environment)
         try:
             launcher.wait_for_private_listener(process, port)
-            environment = os.environ.copy()
             environment.update({"CODEX_BRIDGE_PORT": str(port), "CODEX_BRIDGE_KEY_FILE": str(key),
                                 "CODEX_BRIDGE_ROUTE": "api",
                                 "CODEX_BRIDGE_API_METADATA_FILE": str(runtime / "catalog.json")})
@@ -152,8 +154,7 @@ def claude_stream(port: int, key: str, *, ca: Path | None = None) -> None:
         settings.write_text(json.dumps({"modelPicker": {"options": [{"model": MODEL,
             "label": "Synthetic fixture", "behavesAs": "claude-sonnet-5-5"}],
             "replaceBuiltInOptions": True}}), encoding="utf-8")
-        env = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC",
-               "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if name in os.environ}
+        env = isolated_environment(root)
         scheme = "https" if ca else "http"
         env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_AUTH_TOKEN": key,
                     "ANTHROPIC_BASE_URL": f"{scheme}://127.0.0.1:{port}",

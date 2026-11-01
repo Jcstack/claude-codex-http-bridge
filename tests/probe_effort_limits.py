@@ -3,6 +3,8 @@
 This probes client behavior only; it does not relax the production model gate.
 """
 
+from claude_fixture import isolated_environment
+
 from http.server import ThreadingHTTPServer
 import json
 import os
@@ -36,8 +38,7 @@ def main() -> None:
         server.mode = "text"
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        env = {key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC",
-               "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if key in os.environ}
+        env = isolated_environment(root)
         env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_AUTH_TOKEN": "fixture-only",
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_port}",
                     "ANTHROPIC_DEFAULT_SONNET_MODEL": sol,

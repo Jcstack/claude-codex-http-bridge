@@ -3,6 +3,8 @@
 The model origin and tools are synthetic. Requests remain in memory, no user
 configuration or account is used, and only pass/fail categories are printed.
 """
+
+from claude_fixture import isolated_environment
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import ExitStack
 import argparse
@@ -165,9 +167,7 @@ for line in sys.stdin:
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.requests, server.revealed = [], []
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
-        allowed = ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT",
-                   "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP")
-        env = {name: os.environ[name] for name in allowed if name in os.environ}
+        env = isolated_environment(root)
         env.update(CLAUDE_CONFIG_DIR=str(config), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
                    CLAUDE_CODE_ATTRIBUTION_HEADER="0", ENABLE_TOOL_SEARCH="true", DISABLE_TELEMETRY="1")
         spec = {"context_window": 500000, "supports_search_tool": True, "input_modalities": ["text"],

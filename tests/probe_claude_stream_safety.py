@@ -5,6 +5,8 @@ effects independently of request attempts. No model, user session or existing br
 service is called. This is a safety gate, not a provider recovery benchmark.
 """
 
+from claude_fixture import isolated_environment
+
 import argparse
 from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -225,9 +227,7 @@ else:
             server.target_name = "blocked.txt" if mode == "denied_target" else "owned.txt"
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
-            allowed = ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT",
-                       "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP")
-            env = {key: os.environ[key] for key in allowed if key in os.environ}
+            env = isolated_environment(root)
             env.update(CLAUDE_CONFIG_DIR=str(config), ANTHROPIC_AUTH_TOKEN="fixture-only",
                 ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
                 ANTHROPIC_DEFAULT_SONNET_MODEL="gpt-6.1-sol", ANTHROPIC_DEFAULT_HAIKU_MODEL="gpt-6.1-sol",

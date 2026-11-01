@@ -5,6 +5,8 @@ requests stay in memory; no account, user configuration or network model is used
 This checks structural cache prefixes, not provider cache hits.
 """
 
+from claude_fixture import isolated_environment
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -110,9 +112,7 @@ for line in sys.stdin:
         server.selected = ["mcp__batch__" + name for name in TOOLS[:count]]
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        allowed = ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT",
-                   "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP")
-        env = {name: os.environ[name] for name in allowed if name in os.environ}
+        env = isolated_environment(root)
         env.update(CLAUDE_CONFIG_DIR=str(config), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
                    CLAUDE_CODE_ATTRIBUTION_HEADER="0", ENABLE_TOOL_SEARCH="true", DISABLE_TELEMETRY="1")
         spec = {"context_window": 500000, "supports_search_tool": True, "input_modalities": ["text"],
