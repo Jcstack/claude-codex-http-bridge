@@ -21,6 +21,18 @@ cannot reconstruct a missing upstream terminal event. Their framing, timing,
 error handling, cancellation and interaction with safe retries still need an
 isolated end-to-end test before changing the active runtime.
 
+An initial isolated test of the pinned translator enabled a one-second
+keep-alive against a fake delayed Responses upstream. After the first output,
+the downstream stream included keep-alive comments and finished normally. With
+pre-first-token keep-alives disabled, a delayed upstream failure remained an
+HTTP 503; enabling them committed HTTP 200 first and delivered that failure as
+an in-band stream error. The latter can change client retry behavior. With
+post-first-token keep-alives, an isolated Claude client completed a synthetic
+response; separate fake-stream cases showed cancellation reaching the fake
+origin and a truncated stream neither being replayed nor marked complete. The
+fixture does not test the active TLS ingress, a real model, or recovery from a
+missing upstream terminal, and has not changed runtime settings.
+
 The official primary GPT-Live WebSocket uses `/v1/live/sessions` without a
 model query, then `session.start` and `session.started`. It is distinct from
 Realtime `/v1/realtime` and an existing Live call's sideband. A 2026-10-31
