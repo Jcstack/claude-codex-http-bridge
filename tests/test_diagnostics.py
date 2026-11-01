@@ -104,6 +104,23 @@ class DiagnosticsTests(unittest.TestCase):
             for private in ("PRIVATE_SECRET", "aabbccdd", "00112233", "44556677"):
                 self.assertNotIn(private, json.dumps(result))
 
+    def test_handshake_url_host_categories_never_expose_private_urls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            path.write_text(
+                '[2026-01-02 12:00:00] [aabbccdd] upstream execution failed: Post "https://user:PRIVATE_SECRET@chatgpt.com/private?token=PRIVATE_SECRET": TLS handshake: EOF\n'
+                '[2026-01-02 12:00:01] [aabbccdd] upstream execution failed: Post "https://chatgpt.com.evil.invalid/private": TLS handshake: EOF\n'
+                '[2026-01-02 12:00:02] [11223344] upstream execution failed: Post "https://127.0.0.1:12345/private": TLS handshake: EOF\n'
+                '[2026-01-02 12:00:03] [55667788] upstream execution failed: Post "https://api.openai.com/private": TLS handshake: EOF\n'
+                '[2026-01-02 12:00:04] [99887766] upstream execution failed: Post "https://chatgpt.com/a" and "https://127.0.0.1:12345/b": TLS handshake: EOF\n'
+                '[2026-01-02 12:00:05] [99887766] upstream execution failed: TLS handshake: EOF\n', encoding="utf-8")
+            result = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            detail = result["upstream_preconnection_failures"]["tls_handshake_eof"]
+            self.assertEqual(detail["url_host_mentions"],
+                             {"chatgpt": 1, "other": 1, "loopback": 1, "openai_api": 1, "mixed": 1, "none": 1})
+            for private in ("PRIVATE_SECRET", "evil.invalid", "12345", "aabbccdd"):
+                self.assertNotIn(private, json.dumps(result))
+
     def test_metadata_allowlist_drops_bodies_paths_and_untrusted_values(self):
         since = datetime(2026, 1, 1, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as temporary:

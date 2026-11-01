@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import statistics
+import urllib.parse
 
 
 LINE_LIMIT = 2 * 1024 * 1024
@@ -42,6 +43,32 @@ def endpoint_label(raw: str) -> str:
         if re.fullmatch(pattern, path):
             return label
     return "other"
+
+
+def mentioned_url_host_category(line: str) -> str:
+    """Classify URL host mentions without returning the URL, path or credentials.
+
+    An error can be forwarded through another proxy, so a mentioned host does
+    not establish which process opened a connection or whether it reached it.
+    """
+    categories = set()
+    for raw in re.findall(r'https?://[^\s"\'<>\\]+', line, flags=re.IGNORECASE):
+        try:
+            host = urllib.parse.urlsplit(raw).hostname
+        except ValueError:
+            host = None
+        if host is None:
+            continue
+        host = host.lower().rstrip(".")
+        if host in ("chatgpt.com", "chat.openai.com"):
+            categories.add("chatgpt")
+        elif host == "api.openai.com":
+            categories.add("openai_api")
+        elif host in ("127.0.0.1", "localhost", "::1"):
+            categories.add("loopback")
+        else:
+            categories.add("other")
+    return "none" if not categories else next(iter(categories)) if len(categories) == 1 else "mixed"
 
 
 def lines(path: Path, coverage: dict | None = None):
@@ -114,6 +141,7 @@ def incomplete_stream_shape(line: str) -> str:
 def proxy_summary(path: Path, since: datetime) -> dict:
     counts, errors = Counter(), Counter()
     preconnect = Counter()
+    preconnect_hosts = {}
     preconnect_requests = {}
     preconnect_last = {}
     inband, inband_requests, inband_last = Counter(), {}, {}
@@ -158,6 +186,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             if "upstream execution failed:" in lower and "tls handshake:" in lower:
                 category = "tls_handshake_eof" if re.search(r'\beof\b', lower) else "tls_handshake_other"
                 preconnect[category] += 1
+                preconnect_hosts.setdefault(category, Counter())[mentioned_url_host_category(line)] += 1
                 request = re.match(r'^\[[^]]+\]\s+\[([a-f0-9]{8})\]', line)
                 if request:
                     preconnect_requests.setdefault(category, set()).add(request[1])
@@ -197,7 +226,8 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     return {"completed_http_statuses": dict(counts), "transport_error_mentions": dict(errors),
             "upstream_preconnection_failures": {category: {
                 "attempt_mentions": count, "tagged_requests": len(preconnect_requests.get(category, set())),
-                "last_at": preconnect_last[category]} for category, count in preconnect.items()},
+                "last_at": preconnect_last[category],
+                "url_host_mentions": dict(preconnect_hosts.get(category, {}))} for category, count in preconnect.items()},
             "stream_failure_mentions": {category: {
                 "mentions": count, "tagged_requests": len(inband_requests.get(category, set())),
                 "last_at": inband_last[category]} for category, count in inband.items()},

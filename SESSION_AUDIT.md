@@ -121,6 +121,24 @@ absence of a cross-layer request identity; it cannot distinguish model work
 from network or other upstream waiting. Main-request effort is not proof of
 the maintenance request's effort.
 
+A later shared-log sample contained four HTTP 500 `/v1/messages` completions,
+each near 30 seconds, and four origin `/v1/responses` 500 completions near the
+same times. The origin recorded 14 TLS-handshake EOF mentions across five
+same-log local tags, each mentioning the fixed ChatGPT host; the managed layer
+recorded four such mentions. These counts and timestamps are not cross-layer
+request identities, and the tracked session recorded no API-error entry in the
+same window. After the last recorded origin failure, six origin Responses
+access records reported HTTP 200. Three later credential-free direct TLS
+handshakes to the official host also verified successfully. These checks do not
+establish the origin process's proxy route, the cause of the earlier EOF, or
+complete SSE responses. No proxy, credential, account or retry setting changed.
+
+Diagnostics classify URL host mentions in handshake-error lines into a fixed
+allowlist (`chatgpt`, `openai_api`, `loopback`, `other`, `mixed` or `none`)
+without exporting the URL, credentials, private hostname, path or local tag.
+A host mentioned in a forwarded error does not establish which process opened
+the connection. The classification is not a cross-layer request identifier.
+
 A later one-hour sample contained an automatic compaction recorded as 574.868
 seconds, with client metadata reporting 753,797 tokens before and 51,271 after.
 A shared origin `/v1/responses` request ended within ten seconds and lasted
