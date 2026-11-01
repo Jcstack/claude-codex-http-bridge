@@ -214,6 +214,15 @@ class SessionAuditTests(unittest.TestCase):
             self.assertEqual(report["last_api_error_records"][0]["status_mentions"], [])
             self.assertNotIn("PRIVATE_SECRET", json.dumps(report))
 
+    def test_incomplete_tool_guard_has_a_separate_sanitized_category(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "log.jsonl"
+            write_records(path, [{"type": "assistant", "isApiErrorMessage": True, "message": {"content": [
+                {"type": "text", "text": "Upstream ended before a client tool call was complete. PRIVATE_SECRET"}]}}])
+            report = audit.scan(path, None, audit.Usage())
+            self.assertEqual(report["api_error_category_mentions"], {"incomplete_tool_call": 1})
+            self.assertNotIn("PRIVATE_SECRET", json.dumps(report))
+
 
 if __name__ == "__main__":
     unittest.main()

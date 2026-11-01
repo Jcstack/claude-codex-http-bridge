@@ -106,7 +106,8 @@ class Handler(BaseHTTPRequestHandler):
         first = count == 1
         mode = self.server.mode.removeprefix("eof_").removeprefix("failed_").removeprefix("max_")
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
-        incomplete_retry = self.server.mode in ("max_partial_arguments", "max_arguments_done", "max_item_incomplete") and not first
+        incomplete_retry = self.server.mode in ("max_partial_arguments", "max_arguments_done", "max_item_incomplete",
+                                                "max_item_incomplete_then_completed") and not first
         if not incomplete_retry and (not results or not (self.server.work / "owned.txt").is_file()):
             arguments = json.dumps({"file_path": (self.server.work / self.server.target_name).as_posix(), "content": "SYNTHETIC"})
             item = {"id": f"fc_fixture_{count}", "type": "function_call", "call_id": f"call_fixture_{count}",
@@ -120,9 +121,10 @@ class Handler(BaseHTTPRequestHandler):
                 {"type": "response.function_call_arguments.done", "output_index": 0, "item_id": item["id"], "arguments": arguments},
                 {"type": "response.output_item.done", "output_index": 0, "item": item},
             ]
-            if first and mode == "item_incomplete":
+            if first and mode.startswith("item_incomplete"):
                 events[-1] = {**events[-1], "item": {**item, "status": "incomplete"}}
             cutoff = {"denied_target": 6, "healthy": 6, "partial_arguments": 3, "arguments_done": 4, "item_incomplete": 5,
+                      "item_incomplete_then_completed": 5,
                       "tool_item_done": 5, "response_completed": 6}[mode] if first else 6
         else:
             item = {"id": f"msg_fixture_{count}", "type": "message", "role": "assistant", "status": "completed",
@@ -147,13 +149,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
             if first and self.server.mode.startswith("max_"):
-                finished = mode == "tool_item_done"
+                finished = mode in ("tool_item_done", "item_incomplete_then_completed")
                 partial = {**item, "status": "completed" if finished else "in_progress"}
                 if mode == "partial_arguments":
                     partial["arguments"] = arguments[:10]
-                terminal = {"type": "response.incomplete", "response": {**response, "status": "incomplete",
-                    "incomplete_details": {"reason": "max_output_tokens"}, "output": [partial],
-                    "usage": {"input_tokens": 1000, "output_tokens": 10}}}
+                terminal_response = {**response, "status": "completed" if mode == "item_incomplete_then_completed" else "incomplete",
+                                     "output": [partial], "usage": {"input_tokens": 1000, "output_tokens": 10}}
+                if mode != "item_incomplete_then_completed":
+                    terminal_response["incomplete_details"] = {"reason": "max_output_tokens"}
+                terminal = {"type": "response.completed" if mode == "item_incomplete_then_completed" else "response.incomplete",
+                            "response": terminal_response}
                 self.wfile.write(("data: " + json.dumps(terminal) + "\n\n").encode())
                 self.wfile.flush()
             elif first and self.server.mode.startswith("eof_"):
@@ -179,7 +184,7 @@ def main():
     modes = (("denied_target", "healthy", "partial_arguments", "arguments_done", "tool_item_done", "response_completed",
               "eof_partial_arguments", "eof_arguments_done", "eof_tool_item_done", "eof_response_completed",
               "failed_partial_arguments", "failed_tool_item_done", "max_partial_arguments", "max_arguments_done",
-              "max_item_incomplete", "max_tool_item_done") if args.proxy_binary else
+              "max_item_incomplete", "max_item_incomplete_then_completed", "max_tool_item_done") if args.proxy_binary else
              ("denied_target", "healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop",
               "eof_partial_arguments", "eof_tool_block", "eof_stop_reason", "eof_message_stop"))
     for mode in modes:
@@ -258,7 +263,8 @@ else:
                     if mode == "denied_target":
                         assert not succeeded and not target.exists() and not (work / "blocked.txt").exists() and not hooks, "Scoped handler did not deny the other target"
                     assert len(hooks) <= 1, "A stream interruption executed the same logical write twice"
-                    incomplete_tool = mode in ("max_partial_arguments", "max_arguments_done", "max_item_incomplete")
+                    incomplete_tool = mode in ("max_partial_arguments", "max_arguments_done", "max_item_incomplete",
+                                               "max_item_incomplete_then_completed")
                     if incomplete_tool:
                         assert not target.exists() and not hooks, "An unconfirmed tool call was executed"
                     elif succeeded:

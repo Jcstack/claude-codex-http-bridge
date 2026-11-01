@@ -162,9 +162,11 @@ called it once and replayed the result through a fake Responses origin. A second
 fixture switched between old and new translators within that tool loop: the
 tool result still arrived, but the serialized historical tool names changed,
 so a cached prefix can change. These are synthetic local tests, not a guarantee
-for arbitrary plugins or model decisions. Cross-platform CI and a live account
-handoff remain separate gates; the installed running translator has not been
-replaced by this candidate.
+for arbitrary plugins or model decisions. A [credential-free three-platform
+run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41343960850)
+passed for that experimental candidate. A live account handoff and broader
+plugin cases remain separate gates; the installed running translator has not
+been replaced by the name candidate.
 
 The latest reviewed Shunt release remains v0.61.0. Its open [issue #880](https://github.com/pleaseai/shunt/issues/880)
 reports that some admin tests can inspect real non-Codex account stores unless

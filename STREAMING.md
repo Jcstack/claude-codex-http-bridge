@@ -72,6 +72,10 @@ and session cache-key bytes across three dynamic-tool stages, including a long
 gateway name. The safety-only candidate preserves them; enabling the separate
 experimental name improvement intentionally fails this comparison. This is not
 a measurement of the provider's actual cache hits.
+If Claude records the guard's fixed error as an API-error message, the local
+session audit reports the allowlisted `incomplete_tool_call` category without
+printing that message. An automatic client retry may not leave such a record;
+absence of the category is not proof that no guard fired.
 
 The guard is a source candidate and is **not yet installed** in the running
 translator or original origin. Cross-platform gates and a safe managed-backend
