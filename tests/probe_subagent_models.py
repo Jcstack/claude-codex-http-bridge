@@ -32,6 +32,7 @@ class FixtureServer(ThreadingHTTPServer):
     invoked: bool
     alias: str | None
     agent_type: str
+    agent_effort: str | None
     lock: threading.Lock
 
 
@@ -53,6 +54,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         with self.server.lock:
             self.server.requests.append({"model": body.get("model"),
+                                         "effort": (body.get("output_config") or {}).get("effort"),
                                          "agent_header": bool(self.headers.get("x-claude-code-agent-id"))})
             first = not self.server.invoked
             self.server.invoked = True
@@ -61,6 +63,8 @@ class Handler(BaseHTTPRequestHandler):
                            "subagent_type": self.server.agent_type}
             if self.server.alias:
                 agent_input["model"] = self.server.alias
+            if self.server.agent_effort:
+                agent_input["effort"] = self.server.agent_effort
             block = {"type": "tool_use", "id": "toolu_fixture", "name": "Agent", "input": agent_input}
             stop = "tool_use"
         else:
@@ -93,7 +97,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
 
-def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agent: bool = False) -> dict:
+def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agent: bool = False,
+             agent_effort: str | None = None) -> dict:
     with tempfile.TemporaryDirectory(prefix="bridge-subagent-fixture-") as temporary:
         root = Path(temporary)
         work = root / "work"
@@ -111,6 +116,7 @@ def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agen
         server.invoked = False
         server.alias = alias
         server.agent_type = "fixture-worker" if custom_agent else "general-purpose"
+        server.agent_effort = agent_effort
         server.lock = threading.Lock()
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -134,7 +140,7 @@ def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agen
                 "prompt": "Respond with OK.", "model": ALIAS_CHILD_MODEL}})] if custom_agent else []
             result = subprocess.run([claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                 "--permission-mode", "dontAsk", "--output-format", "json", "--model", PARENT_MODEL,
-                "--settings", str(settings), *agent_args,
+                "--settings", str(settings), "--effort", "high", *agent_args,
                 "--tools", "Agent", "--allowedTools", "Agent", "--max-turns", "5", "-p", "Run the synthetic agent."],
                 cwd=work, env=env, capture_output=True, text=True, timeout=60)
             if result.returncode:
@@ -142,9 +148,11 @@ def run_case(claude: str, *, alias: str | None, force: bool = False, custom_agen
             final = json.loads(result.stdout)
             if final.get("is_error"):
                 raise RuntimeError("Isolated Claude subagent fixture reported an error")
-            child_models = [request["model"] for request in server.requests if request["agent_header"]]
+            child_requests = [request for request in server.requests if request["agent_header"]]
             return {"parent_model_retained": bool(server.requests) and server.requests[0]["model"] == PARENT_MODEL,
-                    "child_models": child_models}
+                    "parent_effort": server.requests[0]["effort"] if server.requests else None,
+                    "child_models": [request["model"] for request in child_requests],
+                    "child_efforts": [request["effort"] for request in child_requests]}
         finally:
             server.shutdown()
             server.server_close()
@@ -160,11 +168,14 @@ def main() -> int:
     same_family = run_case(claude, alias="sonnet")
     forced = run_case(claude, alias="opus", force=True)
     custom = run_case(claude, alias=None, custom_agent=True)
+    child_effort = run_case(claude, alias="opus", agent_effort="low")
     result = {"parent_model_retained": all(case["parent_model_retained"] for case in (default, alias, same_family, forced, custom)),
               "subagent_default_model": default["child_models"] == [DEFAULT_CHILD_MODEL],
               "other_family_alias_takes_precedence": alias["child_models"] == [ALIAS_CHILD_MODEL],
               "same_family_alias_keeps_parent_model": same_family["child_models"] == [PARENT_MODEL],
               "agent_definition_full_model_id": custom["child_models"] == [ALIAS_CHILD_MODEL],
+              "per_call_child_effort": child_effort["parent_effort"] == "high"
+                                       and child_effort["child_efforts"] == ["low"],
               "forced_subagent_model": forced["child_models"] == [DEFAULT_CHILD_MODEL]}
     print(json.dumps(result, sort_keys=True))
     return 0 if all(result.values()) else 1
