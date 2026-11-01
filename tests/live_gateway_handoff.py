@@ -17,6 +17,7 @@ import time
 import urllib.request
 import uuid
 
+from claude_fixture import isolated_environment
 from live_support import existing_subscription, temporary_translator
 from live_compare_translators import stream
 import bridge_models
@@ -57,7 +58,7 @@ def main():
             free.bind(("127.0.0.1", 0)); port = free.getsockname()[1]
         ingress = subprocess.Popen([str(args.ingress.resolve()), "--root", str(root), "--listen", f"127.0.0.1:{port}",
             "--key-file", str(front_file), "--backend-file", str(manifest)], stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=root, env=isolated_environment(root))
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
         def status():

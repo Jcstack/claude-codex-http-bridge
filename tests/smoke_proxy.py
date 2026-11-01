@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
+
+from claude_fixture import isolated_environment
 
 
 root = Path(sys.argv[1]).absolute()
@@ -24,9 +27,16 @@ port_text, directory_text, config_text, key_text, log_text = output.getvalue().s
 directory, config, key, log = map(Path, (directory_text, config_text, key_text, log_text))
 process = None
 try:
-    with log.open("wb") as log_handle:
-        process = subprocess.Popen([str(launcher.PROXY), "-config", str(config)], stdout=log_handle, stderr=subprocess.STDOUT)
-        launcher.wait_for_private_listener(process, int(port_text))
+    with tempfile.TemporaryDirectory(prefix="bridge-proxy-smoke-home-") as temporary:
+        fixture_root = Path(temporary)
+        try:
+            with log.open("wb") as log_handle:
+                process = subprocess.Popen([str(launcher.PROXY), "-config", str(config)], stdout=log_handle,
+                                           stderr=subprocess.STDOUT, cwd=fixture_root, env=isolated_environment(fixture_root))
+                launcher.wait_for_private_listener(process, int(port_text))
+        finally:
+            launcher.stop_process(process)
+            process = None
     print("Proxy listener ownership: PASS")
 finally:
     launcher.stop_process(process)

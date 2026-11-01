@@ -28,6 +28,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        self.server.bodies.append(body)
         self.server.requests.append({"model": body.get("model"),
                                      "effort": (body.get("reasoning") or {}).get("effort")})
         item = {"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed",
@@ -57,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def client_arguments(claude, settings):
     return [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-            "--settings", str(settings), "--permission-mode", "dontAsk", "--model", MODEL, "--tools", ""]
+            "--settings", str(settings), "--permission-mode", "dontAsk", "--model", MODEL, "--tools", "Read"]
 
 
 def interactive(claude, settings, work, config, environment, server):
@@ -108,6 +109,7 @@ def interactive(claude, settings, work, config, environment, server):
             os.write(master, b"\x1b[B\r")
             collect(4)
         results = {}
+        requests_at_start = len(server.bodies)
         for level in LEVELS:
             if process.poll() is not None:
                 raise RuntimeError("Synthetic interactive client exited")
@@ -118,6 +120,19 @@ def interactive(claude, settings, work, config, environment, server):
             collect(5)
             sent = server.requests[before:]
             results[level] = len(sent) == 1 and sent[0] == {"model": MODEL, "effort": level}
+        bodies = server.bodies[requests_at_start:]
+        if len(bodies) != len(LEVELS):
+            raise RuntimeError("Synthetic interactive request count was unexpected")
+        keys = [body.get("prompt_cache_key") for body in bodies]
+        pairs = list(zip(bodies, bodies[1:]))
+        results["cache_key_present_and_stable"] = all(isinstance(key, str) and key for key in keys) and len(set(keys)) == 1
+        results["tool_definitions_present_and_stable"] = (
+            isinstance(bodies[0].get("tools"), list) and bool(bodies[0]["tools"])
+            and all(before.get("tools") == after.get("tools") for before, after in pairs))
+        results["input_items_preserve_structural_prefix"] = (
+            isinstance(bodies[0].get("input"), list) and bool(bodies[0]["input"])
+            and all(isinstance(before.get("input"), list) and isinstance(after.get("input"), list)
+                    and after["input"][:len(before["input"])] == before["input"] for before, after in pairs))
         return results
     finally:
         if process.poll() is None:
@@ -147,6 +162,7 @@ def main():
             "behavesAs": "claude-sonnet-5-5"}], "replaceBuiltInOptions": True}}), encoding="utf-8")
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.requests = []
+        server.bodies = []
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         environment = isolated_environment(root)

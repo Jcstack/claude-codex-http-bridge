@@ -19,6 +19,8 @@ import urllib.error
 import urllib.request
 from unittest.mock import patch
 
+from claude_fixture import isolated_environment
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import api_profile  # noqa: E402
 
@@ -203,7 +205,7 @@ def main() -> None:
         process = subprocess.Popen(
             [str(binary), "-config", str(config_path)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, cwd=root, env=isolated_environment(root),
         )
         try:
             for _ in range(50):

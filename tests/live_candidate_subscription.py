@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 from unittest.mock import patch
+
+from claude_fixture import isolated_environment
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import api_profile  # noqa: E402
@@ -59,7 +60,7 @@ def run(binary: Path, installed: Path, claude_smoke: bool = False) -> dict:
         process = subprocess.Popen(
             [str(binary), "-config", str(config_path)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, cwd=root, env=isolated_environment(root),
         )
         try:
             launcher.wait_for_private_listener(process, port)
@@ -187,8 +188,7 @@ for line in sys.stdin:
                                  "behavesAs": "claude-sonnet-5-5"}],
                     "replaceBuiltInOptions": True,
                 }}))
-                environment = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP")
-                               if name in os.environ}
+                environment = isolated_environment(root)
                 environment.update({
                     "CLAUDE_CONFIG_DIR": str(root / "claude-config"),
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
