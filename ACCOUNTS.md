@@ -87,10 +87,13 @@ protocol are not certified by the handoff tests.
 The managed translator's model list is a snapshot taken when its backend
 generation starts. During `account use`, the launcher verifies the selected
 account against the account-specific model IDs and available model metadata.
-If the resulting eligible catalog differs, it prepares and checks a replacement
-backend, verifies the catalog again before publication, and keeps the existing
-TLS ingress and admitted streams. An unchanged catalog does not trigger a
-replacement. Account changes and managed launcher preparation use the same
+If the eligible model IDs, context windows, or effort levels differ, it prepares
+and checks a replacement backend, verifies the snapshot again before publication,
+and keeps the existing TLS ingress and admitted streams. Unchanged values for
+those fields do not trigger a replacement. Input-modality metadata alone is not
+encoded in the generated backend's model rows; cross-account modality differences
+and the existing client's capability display therefore remain separate limitations.
+Account changes and managed launcher preparation use the same
 local lock. Failed reconciliation restores the previous selection and attempts
 to restore its catalog; an unverified recovery leaves the private journal for
 `account recover`.
