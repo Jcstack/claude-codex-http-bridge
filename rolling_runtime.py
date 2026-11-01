@@ -142,13 +142,22 @@ def origin_manifest(root: Path, runtime: Path, base_runtime: Path, base: dict) -
 
 
 def model_rows(models: dict) -> str:
+    if not isinstance(models, dict) or not models:
+        raise RuntimeError("Managed model catalog is empty or invalid")
+    if any(not isinstance(model, str) or not re.fullmatch(r"gpt-[a-z0-9.-]+", model) for model in models):
+        raise RuntimeError("Invalid catalog model ID")
     model_rows = []
     for model, spec in sorted(models.items()):
-        if not re.fullmatch(r"gpt-[a-z0-9.-]+", model): raise RuntimeError("Invalid catalog model ID")
-        levels = [item["effort"] for item in spec["supported_reasoning_levels"]]
-        model_rows.append(f'        - name: {json.dumps(model)}\n          max-context-length: {int(spec["context_window"])}\n'
+        if not isinstance(spec, dict) or type(spec.get("context_window")) is not int or spec["context_window"] <= 0:
+            raise RuntimeError("Invalid catalog context metadata")
+        metadata = spec.get("supported_reasoning_levels")
+        if (not isinstance(metadata, list) or not metadata or any(not isinstance(item, dict)
+                or not isinstance(item.get("effort"), str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", item["effort"])
+                for item in metadata)):
+            raise RuntimeError("Invalid catalog effort metadata")
+        levels = [item["effort"] for item in metadata]
+        model_rows.append(f'        - name: {json.dumps(model)}\n          max-context-length: {spec["context_window"]}\n'
                           f'          thinking:\n            levels: {json.dumps(levels)}')
-    if not model_rows: raise RuntimeError("Managed model catalog is empty")
     return "\n".join(model_rows)
 
 

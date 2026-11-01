@@ -71,8 +71,14 @@ class CatalogSyncTests(unittest.TestCase):
             with patch.object(launcher, "listener_pids", return_value={123}):
                 self.assertTrue(rolling_runtime.catalog_matches(root, value, {MODEL: SPEC}))
                 self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: {**SPEC, "context_window": 123456}}))
-                self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: {**SPEC, "supported_reasoning_levels": []}}))
+                self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: {**SPEC, "supported_reasoning_levels": [{"effort": "low"}]}}))
                 self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: SPEC, "gpt-6.2-sol": SPEC}))
+                for bad in ({**SPEC, "supported_reasoning_levels": []},
+                            {**SPEC, "supported_reasoning_levels": [{"effort": "low"}, {}]},
+                            {**SPEC, "supported_reasoning_levels": [{"effort": "bad\nvalue"}]},
+                            {**SPEC, "context_window": True}, {**SPEC, "context_window": 0}):
+                    with self.assertRaisesRegex(RuntimeError, "metadata"):
+                        rolling_runtime.catalog_matches(root, value, {MODEL: bad})
                 api_profile.write_private(config, "broken")
                 with self.assertRaisesRegex(RuntimeError, "configuration"):
                     rolling_runtime.catalog_matches(root, value, {MODEL: SPEC})
