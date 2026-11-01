@@ -25,6 +25,14 @@ Retiring the original service requires its dependent sessions to finish. Moving
 an already-running client from its old endpoint is not implemented by editing
 its environment or settings files.
 
+New managed ingress and translator processes, including TLS initialization,
+receive a small system-environment allowlist rather than inheriting every shell
+variable. Unrelated API keys, tokens and proxy credentials are not passed to
+these loopback-only processes; explicit system CA-file and CA-directory paths
+are retained. This does not sandbox them from files accessible to the user, and
+does not change the environment of Claude Code, the original origin or any
+already-running process.
+
 An isolated Claude Code 2.1.316 probe found a possible future migration path:
 when its user settings file changed, an ordinary long-running client completed
 an already-started fake HTTP stream, then used a new authenticated fake HTTPS

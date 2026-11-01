@@ -29,6 +29,19 @@ import runtime_bundle
 
 
 GENERATION = re.compile(r"g-[a-f0-9]{24}\Z")
+RUNTIME_ENVIRONMENT = (
+    "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
+    "APPDATA", "LOCALAPPDATA", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "GOGC", "GOMEMLIMIT", "GOMAXPROCS",
+)
+
+
+def process_environment() -> dict[str, str]:
+    """Keep unrelated shell credentials out of managed loopback processes."""
+    environment = {name: os.environ[name] for name in RUNTIME_ENVIRONMENT if name in os.environ}
+    environment["NO_PROXY"] = "127.0.0.1,localhost"
+    environment["no_proxy"] = "127.0.0.1,localhost"
+    return environment
 
 
 def directory(root: Path) -> Path:
@@ -108,13 +121,11 @@ def get_json(runtime: Path, port: int, path: str, key: str) -> dict:
 
 def start(binary: Path, arguments: list[str], log: Path, *, ca: Path | None = None, authority: str | None = None) -> subprocess.Popen:
     runtime_bundle.safe_file(binary)
-    environment = os.environ.copy()
+    environment = process_environment()
     if ca is not None:
         if authority is None: raise RuntimeError("Private loopback TLS authority is required")
         environment["CLAUDE_CODEX_LOOPBACK_CA"] = str(ca)
         environment["CLAUDE_CODEX_LOOPBACK_AUTHORITY"] = authority
-    environment["NO_PROXY"] = "127.0.0.1,localhost"
-    environment["no_proxy"] = "127.0.0.1,localhost"
     detached = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
                 if os.name == "nt" else {"start_new_session": True})
     if log.is_symlink(): raise RuntimeError("Runtime log must not be a symlink")
@@ -262,7 +273,7 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
         try:
             ingress_binary = bundle / manifest["binaries"]["ingress"]["file"]
             initialized = subprocess.run([str(ingress_binary), "--root", str(runtime), "--init-tls"],
-                                        capture_output=True, timeout=20, cwd=runtime)
+                                        capture_output=True, timeout=20, cwd=runtime, env=process_environment())
             if initialized.returncode: raise RuntimeError("Could not initialize private loopback TLS identity")
             if value is not None:
                 endpoint_status(root, value)

@@ -13,9 +13,42 @@ import accounts
 import launcher
 import rolling_runtime
 import runtime_bundle
+import windows_acl
 
 
 class BundleTests(unittest.TestCase):
+    def test_managed_process_environment_excludes_unrelated_shell_secrets(self):
+        sentinel = "PRIVATE_FIXTURE_SENTINEL"
+        inherited = {"OPENAI_API_KEY": sentinel, "ANTHROPIC_AUTH_TOKEN": sentinel,
+                     "GITHUB_TOKEN": sentinel, "AWS_SECRET_ACCESS_KEY": sentinel,
+                     "HTTPS_PROXY": "http://fixture:private@proxy.invalid",
+                     "CLAUDE_CODEX_LOOPBACK_CA": sentinel, "SSL_CERT_FILE": "/fixture/ca.pem", "GOGC": "75"}
+        with patch.dict(os.environ, inherited):
+            environment = rolling_runtime.process_environment()
+            self.assertEqual(os.environ["OPENAI_API_KEY"], sentinel)
+        for name in inherited:
+            if name not in ("SSL_CERT_FILE", "GOGC"):
+                self.assertNotIn(name, environment)
+        self.assertEqual(environment["SSL_CERT_FILE"], "/fixture/ca.pem")
+        self.assertEqual(environment["GOGC"], "75")
+        self.assertEqual(environment["NO_PROXY"], "127.0.0.1,localhost")
+        self.assertEqual(environment["no_proxy"], "127.0.0.1,localhost")
+
+    def test_managed_spawn_uses_only_explicit_loopback_trust(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {"OPENAI_API_KEY": "PRIVATE_FIXTURE_SENTINEL",
+                                        "CLAUDE_CODEX_LOOPBACK_CA": "stale-untrusted-path"}), \
+                patch.object(runtime_bundle, "safe_file"), patch.object(windows_acl, "lock"), \
+                patch.object(rolling_runtime.subprocess, "Popen") as spawn:
+            root = Path(temporary)
+            ca = root / "fixture-ca.pem"
+            rolling_runtime.start(root / "fixture-binary", [], root / "fixture.log",
+                                  ca=ca, authority="127.0.0.1:12345")
+            environment = spawn.call_args.kwargs["env"]
+            self.assertNotIn("OPENAI_API_KEY", environment)
+            self.assertEqual(environment["CLAUDE_CODEX_LOOPBACK_CA"], str(ca))
+            self.assertEqual(environment["CLAUDE_CODEX_LOOPBACK_AUTHORITY"], "127.0.0.1:12345")
+
     def test_native_compaction_headers_are_retained_in_background_settings(self):
         import rolling_runtime
         with tempfile.TemporaryDirectory() as temporary:
