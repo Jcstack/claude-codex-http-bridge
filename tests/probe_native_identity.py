@@ -80,6 +80,9 @@ def main() -> None:
                 result = subprocess.run([str(binary), str(second.pid), stamp], env=env, stdin=subprocess.DEVNULL,
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
                 if result.returncode == 0: raise RuntimeError("Native fixture accepted a different identity")
+            invalid_pid = subprocess.run([str(binary), str(1 << 40), second_stamp], env=env, stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+            if invalid_pid.returncode == 0: raise RuntimeError("Native fixture accepted an invalid process ID")
             first.terminate()
             first.wait(timeout=5)
             gone = subprocess.run([str(binary), str(first.pid), first_stamp], env=env, stdin=subprocess.DEVNULL,
@@ -87,7 +90,7 @@ def main() -> None:
             if gone.returncode == 0: raise RuntimeError("Native fixture accepted an exited process")
             payload.update(platform=system, unicode_executable_path_matches=True, different_process_rejected=True,
                            same_pid_wrong_birth_rejected=True, same_pid_wrong_executable_rejected=True,
-                           exited_process_rejected=True,
+                           exited_process_rejected=True, oversized_pid_rejected=True,
                            non_utf8_executable_path_matches=True if system == "linux" else "not-run")
             print(json.dumps(payload))
         finally:

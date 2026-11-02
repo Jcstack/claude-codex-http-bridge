@@ -14,6 +14,9 @@ var queryImage = kernel.NewProc("QueryFullProcessImageNameW")
 var mapString = kernel.NewProc("LCMapStringEx")
 
 func identity(pid int) (string, error) {
+	if pid < 1 || uint64(pid) > 1<<32-1 {
+		return "", fmt.Errorf("identity unavailable")
+	}
 	process, err := syscall.OpenProcess(0x1000, false, uint32(pid))
 	if err != nil {
 		return "", fmt.Errorf("identity unavailable")

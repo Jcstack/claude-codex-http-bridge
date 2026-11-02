@@ -37,18 +37,21 @@ func main() {
 	if err != nil || pid < 1 {
 		os.Exit(2)
 	}
-	samples := make([]float64, 1000)
+	const checksPerSample = 32
+	samples := make([]float64, 100)
 	for i := range samples {
 		start := time.Now()
-		if !matches(pid, os.Args[2]) {
-			os.Exit(1)
+		for j := 0; j < checksPerSample; j++ {
+			if !matches(pid, os.Args[2]) {
+				os.Exit(1)
+			}
 		}
-		samples[i] = float64(time.Since(start).Nanoseconds()) / 1e6
+		samples[i] = float64(time.Since(start).Nanoseconds()) / 1e6 / checksPerSample
 	}
 	sort.Float64s(samples)
 	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"synthetic_local_process_only": true, "native_matches_python_identity": true,
-		"samples": len(samples), "milliseconds": map[string]float64{
+		"samples": len(samples), "checks_per_sample": checksPerSample, "milliseconds_per_check": map[string]float64{
 			"median": samples[len(samples)/2], "p95": samples[len(samples)*95/100]},
 	})
 }

@@ -16,6 +16,17 @@ import runtime_bundle
 
 
 class ProcessIdentityTests(unittest.TestCase):
+    def test_linux_truncated_utf8_process_name_does_not_hide_start_tick(self):
+        boot = "12345678-1234-1234-1234-123456789abc"
+        fields = [b"S"] + [b"0"] * 18 + [b"12345"] + [b"0"] * 3
+        raw_stat = b"321 (fixture-\xce) " + b" ".join(fields)
+        executable = "/synthetic/fixture-\udcff"
+        with patch.object(process_identity.platform, "system", return_value="Linux"), \
+             patch.object(Path, "read_text", return_value=boot), \
+             patch.object(Path, "read_bytes", return_value=raw_stat), \
+             patch.object(os, "readlink", return_value=executable):
+            self.assertEqual(process_identity.capture(321), (boot + ":12345", executable))
+
     def test_origin_environment_omits_unrelated_secrets_and_store_overrides(self):
         sentinel = "SYNTHETIC_PRIVATE_FIXTURE"
         values = {"OPENAI_API_KEY": sentinel, "GITHUB_TOKEN": sentinel, "HOME_JWT": sentinel,

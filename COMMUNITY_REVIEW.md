@@ -217,8 +217,9 @@ and do not support cross-machine speed rankings.
 A separate local [native identity experiment](tests/probe_native_identity.py)
 matched the Python controller's identity for an owned process whose executable
 path contains Unicode on macOS. It rejected a different process, changed birth time,
-changed executable and an exited process. Across 1,000 local samples its median
-was 0.002709 ms and p95 was 0.005 ms. The check is not integrated into the
+changed executable and an exited process. Across 100 local batches of 32 checks,
+the median batch-average was 0.002523 ms per check and p95 was 0.004921 ms.
+The check is not integrated into the
 gateway, the negative controls do not reproduce an actual reused PID, and the
 measurement is not an end-to-end request or portability guarantee.
 Linux procfs and Windows API variants cross-compiled locally; their native

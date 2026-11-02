@@ -31,6 +31,9 @@ import (
 )
 
 func identity(pid int) (string, error) {
+	if pid < 1 || int64(pid) > 1<<31-1 {
+		return "", fmt.Errorf("identity unavailable")
+	}
 	var birth [16]byte
 	var path [4096]byte
 	n := C.fixture_identity(C.int(pid), (*C.uchar)(unsafe.Pointer(&birth[0])),

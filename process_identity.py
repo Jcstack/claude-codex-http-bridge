@@ -29,11 +29,14 @@ def capture(pid: int) -> tuple[str, str]:
             birth, executable = info.raw[120:136].hex(), os.fsdecode(path.value)
         elif system == "Linux":
             boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-            stat = Path(f"/proc/{pid}/stat").read_text()
-            fields = stat[stat.rindex(")") + 1:].split()
+            # The kernel limits comm by bytes, so a Unicode executable name
+            # can be cut inside a UTF-8 sequence. Only the ASCII fields after
+            # its final closing parenthesis are needed for the start tick.
+            stat = Path(f"/proc/{pid}/stat").read_bytes()
+            fields = stat[stat.rindex(b")") + 1:].split()
             if not re.fullmatch(r"[a-fA-F0-9-]{36}", boot) or len(fields) <= 19 or not fields[19].isdigit():
                 raise RuntimeError("Local process identity is unavailable")
-            birth = boot.lower() + ":" + fields[19]
+            birth = boot.lower() + ":" + fields[19].decode("ascii")
             executable = os.readlink(f"/proc/{pid}/exe").removesuffix(" (deleted)")
         elif system == "Windows":
             import ctypes.wintypes as W
