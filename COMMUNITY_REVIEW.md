@@ -273,3 +273,21 @@ client, with no bridge context correction for that status line. Local synthetic 
 covered ordinary project/local files and a real linked Git worktree with its
 local setting in the main checkout. Mid-session file changes, `/cd`, unusual Git
 layouts, authenticated Windows interaction and arbitrary plugins remain open.
+
+Claude's [status-line documentation](https://code.claude.com/docs/en/statusline#workspace-trust-required)
+states that status-line commands follow workspace trust. A closed
+[ccstatusline report](https://github.com/sirmalloc/ccstatusline/issues/552)
+describes a version-specific nested-repository trust symptom; its closure does
+not establish behavior in this installation. The active ccstatusline project
+had a recent push on 2026-11-02, but its popularity and that report do not prove
+compatibility or safety for this bridge.
+
+[statusline-injector](https://github.com/agfpd/statusline-injector#how-it-works)
+documents a different approach: a `SessionStart` hook rewrites a project
+`statusLine.command` to add a wrapper. As of 2026-11-02 its repository was not
+archived, had last pushed on 2026-10-17, and had no open issues; the absence of
+issues is not a maintenance or security audit. Its README claims local-only
+storage, which was not independently verified here. The project was inspected
+read-only and not installed or executed. Automatically editing project settings
+would introduce trust, concurrency, rollback and `/cd` questions, so the bridge
+does not adopt that mechanism as a default.
