@@ -226,9 +226,12 @@ preference was enabled locally; it is disabled by default in a new installation.
 The separately patched HUD and installed adapter passed a synthetic display
 check. No actual user-session refresh or real inference was forced. Use
 `claude-codex cache telemetry status` or `claude-codex cache telemetry disable`
-to inspect or change the shared preference; an explicit session override wins.
-This was a targeted two-file update, not an atomic general-purpose controller
-installer. See [CACHE_AUDIT.md](CACHE_AUDIT.md) for interpretation and limits.
+to inspect or change the shared preference; an override recorded in a session
+profile wins. Older launchers did not record an explicit `0`, so that value
+cannot be recovered from an existing profile. A candidate adapter checks the
+inherited session environment; it has not yet been installed locally. This was
+a targeted two-file update, not an atomic general-purpose controller installer. See
+[CACHE_AUDIT.md](CACHE_AUDIT.md) for interpretation and limits.
 
 The installed diagnostics now retain a managed backend when its only recognized
 in-window event is an incomplete-stream sentinel. They also expose its coverage

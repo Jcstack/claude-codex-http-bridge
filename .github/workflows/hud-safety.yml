@@ -58,4 +58,4 @@ jobs:
         run: python tests/claude_fixture.py
       - name: Exercise the real Claude status line with fake cache reports and the reviewed HUD
         if: runner.os != 'Windows'
-        run: python tests/probe_statusline_cache.py --hud-dir external-hud
+        run: python tests/probe_statusline_cache.py --hud-dir external-hud --legacy-env-check

@@ -537,7 +537,7 @@ Model ID: `gpt-6.1-sol`
     def test_cache_telemetry_preference_refreshes_existing_statusline(self) -> None:
         payload = {"prompt_cache": {"caching_observed": True, "requests": 2, "hit_ratio": .375,
                                    "ttl": "5m", "warm": True}}
-        with tempfile.TemporaryDirectory() as directory:
+        with patch.dict(os.environ, {"CLAUDE_CODEX_STATUSLINE_CACHE_METRICS": ""}), tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             profile = root / "profile.json"
             profile.write_text(json.dumps({"context_windows": {}, "route": "subscription"}))
@@ -579,6 +579,35 @@ Model ID: `gpt-6.1-sol`
                 pref.unlink()
                 os.mkfifo(pref)
                 self.assertFalse(statusline_adapter.cache_metrics_preference(root))
+
+    def test_legacy_cache_environment_override_in_adapter_subprocess(self) -> None:
+        payload = {"prompt_cache": {"caching_observed": True, "requests": 2, "hit_ratio": .375}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api_profile.write_private(root / statusline_adapter.CACHE_PREFERENCE,
+                                      '{"version": 1, "enabled": true}\n')
+            profile = root / "profile.json"
+            bootstrap = ("import sys;from pathlib import Path;sys.path.insert(0,sys.argv[1]);"
+                         "import statusline_adapter as a;a.ROOT=Path(sys.argv[2]);"
+                         "sys.argv=['adapter',sys.argv[3]];raise SystemExit(a.main())")
+            env = {name: os.environ[name] for name in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP") if name in os.environ}
+            env["HOME"] = directory
+            if os.name == "nt": env["USERPROFILE"] = directory
+            source = str(Path(statusline_adapter.__file__).resolve().parent)
+            for inherited, explicit, expected in ((None, None, True), ("0", None, False), ("1", None, True),
+                                                  ("0", True, True), ("1", False, False), ("other", None, True)):
+                with self.subTest(inherited=inherited, explicit=explicit):
+                    current = {"context_windows": {}, "route": "subscription"}
+                    if explicit is not None: current["expose_cache_metrics"] = explicit
+                    profile.write_text(json.dumps(current))
+                    local_env = dict(env)
+                    if inherited is not None: local_env["CLAUDE_CODEX_STATUSLINE_CACHE_METRICS"] = inherited
+                    result = subprocess.run([sys.executable, "-I", "-B", "-c", bootstrap, source, str(root), str(profile)],
+                        input=json.dumps(payload), text=True, capture_output=True, timeout=10, check=True,
+                        env=local_env, cwd=directory)
+                    value = json.loads(result.stdout)
+                    self.assertNotIn("prompt_cache", value)
+                    self.assertEqual("claude_codex_bridge" in value, expected)
 
     def test_cache_telemetry_command_parsing(self) -> None:
         self.assertEqual(launcher.parse_args(["cache", "telemetry", "enable"]),

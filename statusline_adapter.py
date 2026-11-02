@@ -42,6 +42,11 @@ def cache_metrics_enabled(profile: dict, root: Path | None = None) -> bool:
     selected = profile.get("expose_cache_metrics")
     if type(selected) is bool:
         return selected
+    # Older launchers recorded an explicit opt-in but not an explicit opt-out.
+    # A status-line subprocess can still inherit that session's original choice.
+    inherited = os.environ.get("CLAUDE_CODEX_STATUSLINE_CACHE_METRICS")
+    if inherited in ("0", "1"):
+        return inherited == "1"
     return profile.get("route", "subscription") == "subscription" and cache_metrics_preference(root or ROOT)
 
 

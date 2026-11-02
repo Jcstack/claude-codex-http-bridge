@@ -58,6 +58,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hud-dir", type=Path, help="Optional reviewed HUD source for a full display check")
+    parser.add_argument("--legacy-env-check", action="store_true", help="Check that Claude passes the session opt-out to the status line")
     args = parser.parse_args()
     if os.name == "nt":
         print(json.dumps({"synthetic_only": True, "skipped": "Windows interactive console not covered"}))
@@ -79,11 +80,12 @@ def main() -> None:
             "projects": {str(work): {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
         marker = root / "frames.jsonl"
         recorder = root / "record.py"
-        recorder.write_text("import json,sys\nfrom pathlib import Path\n"
+        recorder.write_text("import json,os,sys\nfrom pathlib import Path\n"
             "value=json.load(sys.stdin); cache=value.get('prompt_cache'); context=value.get('context_window') or {}\n"
             "usage=context.get('current_usage'); keys=('requests','hit_ratio','caching_observed','ttl','warm','expires_at')\n"
             "row={'cache':{key:cache.get(key) for key in keys} if isinstance(cache,dict) else None,"
-            "'usage':usage if isinstance(usage,dict) else None}\n"
+            "'usage':usage if isinstance(usage,dict) else None,"
+            "'opt_out_inherited':os.environ.get('CLAUDE_CODEX_STATUSLINE_CACHE_METRICS')=='0'}\n"
             "with Path(sys.argv[1]).open('a',encoding='utf-8') as out: out.write(json.dumps(row)+'\\n')\n"
             "print(json.dumps(value) if len(sys.argv)>2 else 'fixture')\n", encoding="utf-8")
         status_command = shlex.join([sys.executable, str(recorder), str(marker)])
@@ -124,6 +126,8 @@ def main() -> None:
         env.update(CLAUDE_CONFIG_DIR=str(config), ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
                    ANTHROPIC_AUTH_TOKEN="fixture-only", ANTHROPIC_DEFAULT_SONNET_MODEL="gpt-6.1-sol",
                    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1", TERM="xterm-256color")
+        if args.legacy_env_check:
+            env["CLAUDE_CODEX_STATUSLINE_CACHE_METRICS"] = "0"
         command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                    "--settings", str(settings), "--permission-mode", "dontAsk", "--model", "gpt-6.1-sol", "--tools", ""]
         wrapper = ("import fcntl,os,sys,termios;fcntl.ioctl(0,termios.TIOCSCTTY,0);"
@@ -166,6 +170,7 @@ def main() -> None:
                 "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")))
             hud_rows = [json.loads(line) for line in hud_marker.read_text(encoding="utf-8").splitlines()] if hud_marker.exists() else []
             hud_correct = any(row.get("fraction") is True and row.get("timer") is False for row in hud_rows)
+            opt_out_inherited = bool(frames and all(frame.get("opt_out_inherited") is True for frame in frames))
             print(json.dumps({"synthetic_only": True, "fake_message_requests": len(server.requests), "frames": len(frames), "frames_with_usage": len(usages),
                 "frames_with_prompt_cache": len(caches), "cache_read_fraction_matches_reported_tokens": correct_counters,
                 "client_inferred_five_minute_ttl_without_provider_ttl": inferred_ttl,
@@ -173,11 +178,14 @@ def main() -> None:
                 "opt_in_omits_inferred_ttl": bool(filtered and "ttl" not in filtered and "expires_at" not in filtered),
                 "last_usage_has_all_input_counters": full_usage,
                 "hud_display_checked": args.hud_dir is not None,
-                "hud_reported_fraction_without_timer": hud_correct if args.hud_dir is not None else None}, sort_keys=True))
+                "hud_reported_fraction_without_timer": hud_correct if args.hud_dir is not None else None,
+                "session_opt_out_inherited": opt_out_inherited if args.legacy_env_check else None}, sort_keys=True))
             if len(server.requests) != 2 or not (full_usage and correct_counters and inferred_ttl and "prompt_cache" not in default):
                 raise RuntimeError("Synthetic status-line control did not complete")
             if args.hud_dir is not None and not hud_correct:
                 raise RuntimeError("Synthetic HUD cache display did not complete")
+            if args.legacy_env_check and not opt_out_inherited:
+                raise RuntimeError("Synthetic session opt-out was not inherited")
         finally:
             cleanup_ok = True
             if process is not None and process.poll() is None:
