@@ -114,7 +114,7 @@ jobs:
           python tests/probe_dynamic_toolsearch.py --hold-refresh --require-discovery --require-prefix --translator "${{ matrix.binary }}"
           python tests/probe_dynamic_toolsearch.py --hold-refresh --natural-query --require-discovery --require-prefix --translator "${{ matrix.binary }}"
           python tests/probe_dynamic_toolsearch.py --description-change --fresh-description --translator "${{ matrix.binary }}"
-          python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --translator "${{ matrix.binary }}"
+          python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --require-resume-structure --translator "${{ matrix.binary }}"
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --repair-synthetic-record --translator "${{ matrix.binary }}"
           python tests/probe_mcp_schema_change.py --fresh --translator "${{ matrix.binary }}"
           python tests/probe_mcp_schema_change.py --resume --translator "${{ matrix.binary }}"

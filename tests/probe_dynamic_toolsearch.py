@@ -58,6 +58,34 @@ def description_flags(body, alias, responses):
     return "Synthetic fixture" in descriptions, UPDATED_DESCRIPTION in descriptions
 
 
+def cache_resume_facts(initial, resumed):
+    """Compare synthetic request structure only; never return a key or body."""
+    if not initial or not resumed:
+        return {"complete": False, "provider_cache_not_tested": True}
+    initial_raw, initial_body = initial[0]
+    resumed_raw, resumed_body = resumed[0]
+    initial_key, resumed_key = initial_body.get("prompt_cache_key"), resumed_body.get("prompt_cache_key")
+    initial_valid = isinstance(initial_key, str) and bool(initial_key)
+    resumed_valid = isinstance(resumed_key, str) and bool(resumed_key)
+    initial_first = raw_json_array_items(raw_json_field(initial_raw, "input"))
+    initial_last = raw_json_array_items(raw_json_field(initial[-1][0], "input"))
+    resumed_first = raw_json_array_items(raw_json_field(resumed_raw, "input"))
+    def prefix(older, newer):
+        return older is not None and newer is not None and newer[:len(older)] == older
+    def equal_field(name):
+        left, right = raw_json_field(initial_raw, name), raw_json_field(resumed_raw, name)
+        return left is not None and right is not None and left == right
+    return {"complete": True, "provider_cache_not_tested": True,
+            "initial_cache_key_present": initial_valid, "resumed_cache_key_present": resumed_valid,
+            "cache_key_same_across_resume": initial_valid and resumed_valid and initial_key == resumed_key,
+            "initial_cache_key_stable": initial_valid and all(body.get("prompt_cache_key") == initial_key for _, body in initial),
+            "resumed_cache_key_stable": resumed_valid and all(body.get("prompt_cache_key") == resumed_key for _, body in resumed),
+            "initial_and_resumed_tools_identical": equal_field("tools"),
+            "initial_and_resumed_instructions_identical": equal_field("instructions"),
+            "initial_first_input_prefix_of_resumed": prefix(initial_first, resumed_first),
+            "initial_last_input_prefix_of_resumed": prefix(initial_last, resumed_first)}
+
+
 def synthetic_deferred_records(config, session_id):
     """Summarize only this fixture's disposable session records, never their contents."""
     try:
@@ -292,6 +320,7 @@ def main():
     parser.add_argument("--hold-refresh", action="store_true")
     parser.add_argument("--require-discovery", action="store_true")
     parser.add_argument("--require-prefix", action="store_true")
+    parser.add_argument("--require-resume-structure", action="store_true")
     parser.add_argument("--translator", type=Path, help="Reviewed translator for a synthetic Responses origin")
     parser.add_argument("--description-change", action="store_true")
     parser.add_argument("--fresh-description", action="store_true")
@@ -309,6 +338,8 @@ def main():
         raise RuntimeError("The synthetic record experiment requires the resume control")
     if args.audit_synthetic and (not args.resume_observation or args.repair_synthetic_record):
         raise RuntimeError("The synthetic audit needs the unchanged resume observation")
+    if args.require_resume_structure and (not args.resume_observation or args.translator is None):
+        raise RuntimeError("The resume structure check requires the fake Responses translator route")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("The locked Claude fixture is required")
@@ -382,6 +413,7 @@ def main():
                 initial["hold_timed_out"] = Path(str(marker) + ".hold-timeout").exists()
                 resumed = None
                 audit_result = None
+                resumed_captured = None
                 if args.resume_observation and sessions:
                     initial_records = synthetic_deferred_records(config, sessions[-1])
                     if args.audit_synthetic:
@@ -410,6 +442,7 @@ def main():
                     server.old_result_seen = server.old_reference = server.search_offered = False
                     resumed_ok = run_dynamic_client([*command, "--resume", sessions[-1]], work, env,
                         Path(str(marker) + ".forwarded"), prompt=prompt, delay=0.5)
+                    resumed_captured = list(server.captured)
                     resumed = {"completed": resumed_ok,
                         "current_list_forwarded": Path(str(marker) + ".forwarded").exists(),
                         "search_result_seen": server.old_result_seen, "alias_discovered": server.old_reference,
@@ -439,6 +472,12 @@ def main():
                               old_description_later_requests=initial["old_description_later_seen"],
                               updated_description_seen=initial["updated_description_seen"],
                               original_called_once=calls == [ORIGINALS[0]])
+            if server.responses and args.resume_observation:
+                result["resume_cache_structure"] = cache_resume_facts(captured, resumed_captured)
+                if not result["resume_cache_structure"]["complete"]:
+                    raise RuntimeError("Synthetic initial or resumed translator requests were not captured")
+                if args.require_resume_structure and not all(result["resume_cache_structure"].values()):
+                    raise RuntimeError("Synthetic resume cache-key or prefix structure changed")
             if server.responses and len(captured) >= 2:
                 first_raw, first_body = captured[0]
                 last_raw, _ = captured[-1]

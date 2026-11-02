@@ -78,6 +78,14 @@ test provider cache hits.
 Stable request prefixes alone do not prove tool-definition correctness. A
 separate synthetic changed-description observation retained the old definition
 inside the same Claude conversation even after resume; see [MCP_NAMING.md](MCP_NAMING.md).
+In that same isolated macOS observation through the selected translator and a
+fake API-compatible Responses server, the initial and resumed requests used
+the same nonempty cache key and byte-identical initial tool/instruction fields;
+the resumed first input retained the final pre-resume input as a prefix. The
+fixture reports booleans without returning keys or request bodies. This is one
+synthetic resume with a stale tool description, not proof of a provider cache
+hit, correct plugin semantics, real subscription behavior, fork behavior or
+cross-account isolation.
 Correct current tool semantics take priority over preserving a cache prefix.
 
 ## Live dynamic-tool cache observations

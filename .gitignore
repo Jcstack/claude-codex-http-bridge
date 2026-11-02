@@ -113,3 +113,4 @@
 !.github/workflows/session-metadata-gate.yml
 !.github/workflows/ws-keepalive-observation.yml
 !.github/workflows/controller-layout-observation.yml
+!.github/workflows/cache-resume-observation.yml
