@@ -20,6 +20,7 @@ class UsageEnvironmentTest(unittest.TestCase):
             cache = Path(temporary) / "usage.json"
             supplied = {"OPENAI_API_KEY": "SYNTHETIC_PRIVATE_KEY", "ANTHROPIC_AUTH_TOKEN": "SYNTHETIC_TOKEN",
                         "AWS_SECRET_ACCESS_KEY": "SYNTHETIC_AWS", "PYTHONPATH": "SYNTHETIC_IMPORT_PATH",
+                        "NODE_OPTIONS": "SYNTHETIC_NODE_OPTIONS", "DYLD_INSERT_LIBRARIES": "SYNTHETIC_LIBRARY",
                         "CODEX_HOME": str(Path(temporary) / "codex"), "HTTPS_PROXY": "http://proxy.invalid:1234",
                         "NO_PROXY": "localhost,example.invalid"}
             with patch.dict(os.environ, supplied), patch.object(codex_usage, "read_cache", return_value=None), \
@@ -33,7 +34,8 @@ class UsageEnvironmentTest(unittest.TestCase):
             self.assertEqual(env["CODEX_HOME"], supplied["CODEX_HOME"])
             self.assertEqual(env["HTTPS_PROXY"], supplied["HTTPS_PROXY"])
             self.assertEqual(env["NO_PROXY"], supplied["NO_PROXY"])
-            for key in ("OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "AWS_SECRET_ACCESS_KEY", "PYTHONPATH"):
+            for key in ("OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "AWS_SECRET_ACCESS_KEY", "PYTHONPATH",
+                        "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES"):
                 self.assertNotIn(key, env)
             self.assertNotIn("SYNTHETIC_PRIVATE_KEY", json.dumps(command))
 
@@ -88,7 +90,8 @@ for line in sys.stdin:
         self.assertEqual(result.returncode, 2)
         self.assertEqual((result.stdout, result.stderr), ("", ""))
 
-    @unittest.skipIf(os.name == "nt", "This detached executable fixture uses a POSIX shebang")
+    @unittest.skipIf(os.name == "nt" and not os.environ.get("BRIDGE_TEST_FAKE_CODEX_EXE"),
+                     "The compiled Windows fake Codex fixture is unavailable")
     def test_detached_refresh_writes_only_a_synthetic_matching_account_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -96,7 +99,7 @@ for line in sys.stdin:
             for directory in (controller, native, bin_dir, runtime, controller / "auth"):
                 directory.mkdir(mode=0o700)
             project = Path(codex_usage.__file__).resolve().parent
-            for name in ("accounts.py", "api_profile.py"):
+            for name in ("accounts.py", "api_profile.py", "windows_acl.py"):
                 shutil.copyfile(project / name, controller / name)
             source = (project / "codex_usage.py").read_text(encoding="utf-8")
             # Refuse the fallback HTTPS path even if this fixture is malformed.
@@ -110,8 +113,11 @@ for line in sys.stdin:
                                 (native / "auth.json", {"tokens": account})):
                 path.write_text(json.dumps(value), encoding="utf-8")
                 path.chmod(0o600)
-            fake = bin_dir / "codex"
-            fake.write_text(f'''#!{sys.executable}
+            fake = bin_dir / ("codex.exe" if os.name == "nt" else "codex")
+            if os.name == "nt":
+                shutil.copyfile(os.environ["BRIDGE_TEST_FAKE_CODEX_EXE"], fake)
+            else:
+                fake.write_text(f'''#!{sys.executable}
 import json,os,sys
 safe=all(name not in os.environ for name in ("OPENAI_API_KEY","PYTHONPATH"))
 safe=safe and os.environ.get("CODEX_HOME")=={str(native)!r} and os.environ.get("HTTPS_PROXY")=="http://proxy.invalid:1234"
@@ -126,11 +132,17 @@ for line in sys.stdin:
         continue
     print(json.dumps({{"id":message["id"],"result":result}}),flush=True)
 ''', encoding="utf-8")
-            fake.chmod(0o700)
+                fake.chmod(0o700)
             cache = runtime / "usage.json"
             environment = {"PATH": str(bin_dir), "HOME": str(root), "CODEX_HOME": str(native),
                            "HTTPS_PROXY": "http://proxy.invalid:1234", "OPENAI_API_KEY": "SYNTHETIC_PRIVATE_KEY",
                            "PYTHONPATH": "SYNTHETIC_IMPORT_PATH"}
+            if os.name == "nt":
+                for name in ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"):
+                    if name in os.environ:
+                        environment[name] = os.environ[name]
+                environment["USERPROFILE"] = str(root)
+                environment["PATH"] += os.pathsep + str(Path(os.environ["SYSTEMROOT"]) / "System32")
             command = [sys.executable, "-I", "-c",
                        "import sys; sys.path.insert(0,sys.argv[1]); import codex_usage; from pathlib import Path; codex_usage.start_refresh(Path(sys.argv[2]))",
                        str(controller), str(cache)]
