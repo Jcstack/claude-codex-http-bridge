@@ -568,6 +568,17 @@ Model ID: `gpt-6.1-sol`
                 api_profile.write_private(pref, '{"version": 1, "enabled": true}')
                 pref.chmod(0o644)
                 self.assertFalse(statusline_adapter.cache_metrics_preference(root))
+                pref.unlink()
+                target = root / "other.json"
+                target.write_text('{"version": 1, "enabled": true}')
+                pref.symlink_to(target)
+                self.assertFalse(statusline_adapter.cache_metrics_preference(root))
+                with self.assertRaises(RuntimeError):
+                    statusline_adapter.cache_metrics_command(root, ["telemetry", "enable"])
+                self.assertEqual(target.read_text(), '{"version": 1, "enabled": true}')
+                pref.unlink()
+                os.mkfifo(pref)
+                self.assertFalse(statusline_adapter.cache_metrics_preference(root))
 
     def test_cache_telemetry_command_parsing(self) -> None:
         self.assertEqual(launcher.parse_args(["cache", "telemetry", "enable"]),
