@@ -51,6 +51,8 @@ The tracked session's anonymous marker is stored locally in the private installa
 - [x] Restore a dead managed endpoint using its existing loopback port, CA, and client key, while refusing occupied ports and avoiding signals to stale PIDs. A disposable synthetic-origin fixture covers a changed origin, recovery failure rollback, and requests after recovery.
 - [x] Add opt-in current-user login recovery on macOS and Windows, with local-only healthy checks, serialized manual stop, and retry after transient startup failure. A macOS launch agent was loaded and observed a healthy existing service; no actual computer reboot was performed.
 - [ ] Exercise an actual macOS reboot and an authenticated Windows login on their respective hosts, and investigate Linux user-service support. Neither synthetic recovery nor a loaded login entry proves post-reboot behavior on every host.
+- [x] Implement controller-side process creation identity for new origin state and verify the executable before adopting legacy state. Local synthetic tests cover a reused PID/port, a changed creation identity, and an unrelated listener without exposing local keys; cross-platform checks and local deployment remain to be verified.
+- [ ] Extend process birth verification to each Go ingress-to-origin request without disrupting existing streams. The current ingress checks only PID and port at that boundary.
 
 Acceptance: reproduce successful requests and genuine quota-exhaustion negative cases; automatically recover after a reset; avoid duplicate tool effects; preserve the original account, listener, keys, sessions, and already-started streams.
 

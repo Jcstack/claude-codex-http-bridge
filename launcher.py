@@ -368,8 +368,16 @@ def read_state(runtime: Path) -> dict | None:
     if (not isinstance(state, dict) or type(state.get("pid")) is not int or state["pid"] < 1 or
         type(state.get("port")) is not int or not 1 <= state["port"] <= 65535):
         raise RuntimeError("Invalid local bridge state")
+    if "process_identity" in state and (not isinstance(state["process_identity"], str) or
+            not re.fullmatch(r"[a-f0-9]{64}", state["process_identity"])):
+        raise RuntimeError("Invalid local bridge process identity")
     state_paths(runtime, state)
     return state
+
+
+def service_proxy(runtime: Path) -> Path:
+    """Resolve the owner binary from the state root, even in offline tools."""
+    return runtime.parent / "bin" / ("cli-proxy-api.exe" if platform.system() == "Windows" else "cli-proxy-api")
 
 
 def state_is_live(runtime: Path, state: dict) -> bool:
@@ -384,9 +392,24 @@ def state_is_live(runtime: Path, state: dict) -> bool:
         raise RuntimeError("Local bridge service files have unsafe permissions")
     if listener_pids(state["port"]) != {state["pid"]}:
         return False
+    import process_identity
+    try:
+        identity = process_identity.capture(state["pid"])
+        current = process_identity.stamp(state["pid"], identity)
+        expected = state.get("process_identity")
+        if expected is not None:
+            if current != expected:
+                return False
+        elif not process_identity.executable_matches(identity, service_proxy(runtime)):
+            # Legacy state has no birth marker. Check the actual executable
+            # before ever sending its localhost key or adopting the process.
+            return False
+    except RuntimeError:
+        return False
     try:
         with socket.create_connection(("127.0.0.1", state["port"]), timeout=0.5):
-            return True
+            return (listener_pids(state["port"]) == {state["pid"]} and
+                    process_identity.matches(state["pid"], current))
     except OSError:
         return False
 
@@ -421,6 +444,15 @@ def ensure_service(require_catalog: bool = True, route: str = "subscription") ->
         state = read_state(runtime)
         if state is not None:
             if state_is_live(runtime, state):
+                if "process_identity" not in state:
+                    import api_profile
+                    import process_identity
+                    identity = process_identity.capture(state["pid"])
+                    if (not process_identity.executable_matches(identity, service_proxy(runtime)) or
+                            listener_pids(state["port"]) != {state["pid"]}):
+                        raise RuntimeError("Legacy bridge owner changed; no key was sent")
+                    state = {**state, "process_identity": process_identity.stamp(state["pid"], identity)}
+                    api_profile.write_private(runtime / "service.json", json.dumps(state) + "\n")
                 return runtime, state, False
             owners = listener_pids(state["port"])
             if owners:
@@ -451,7 +483,12 @@ def ensure_service(require_catalog: bool = True, route: str = "subscription") ->
                 proxy = subprocess.Popen([str(PROXY), "-config", str(config)], stdin=subprocess.DEVNULL,
                                          stdout=log_handle, stderr=subprocess.STDOUT, cwd=directory, **detached)
             wait_for_private_listener(proxy, port)
-            state = {"pid": proxy.pid, "port": port, "session": directory.name}
+            import process_identity
+            identity = process_identity.capture(proxy.pid)
+            if not process_identity.executable_matches(identity, PROXY) or proxy.poll() is not None:
+                raise RuntimeError("New bridge process identity changed; no key was sent")
+            state = {"pid": proxy.pid, "port": port, "session": directory.name,
+                     "process_identity": process_identity.stamp(proxy.pid, identity)}
             if require_catalog:
                 wait_for_catalog(proxy, service_environment(state, runtime, route), True, route)
             private_json(runtime / "service.json", state)

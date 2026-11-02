@@ -41,6 +41,7 @@
 !api_profile.py
 !accounts.py
 !autostart.py
+!process_identity.py
 !rolling_runtime.py
 !runtime_bundle.py
 !capabilities.py

@@ -15,6 +15,7 @@ from live_compare_translators import stream
 from smoke_managed_runtime import MODEL, SPEC, Upstream
 import accounts
 import api_profile
+import process_identity
 import launcher
 import rolling_runtime
 import runtime_bundle
@@ -41,7 +42,7 @@ def main() -> None:
             runtime_bundle.private_dir(source)
             for name, text in (("config.yaml", "synthetic"), ("key", "a" * 64), ("proxy.log", "")):
                 api_profile.write_private(source / name, text)
-            base = {"pid": os.getpid(), "port": server.server_port, "session": source.name}
+            base = {"process_identity": process_identity.stamp(os.getpid()), "pid": os.getpid(), "port": server.server_port, "session": source.name}
             management = SimpleNamespace(state=base)
             with patch.object(launcher, "ROOT", root):
                 runtime_bundle.activate(root, bundle)

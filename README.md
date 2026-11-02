@@ -163,7 +163,7 @@ On macOS/Linux/WSL, the launcher replaces its Python process with the Claude Cod
 
 ## Security and privacy
 
-- The proxy binds `127.0.0.1` and requires a random local key stored in the private runtime directory for the service lifetime. The launcher verifies the listener PID before sending the key or reusing the service. On Windows it checks with `netstat`; on POSIX it uses `lsof`.
+- The proxy binds `127.0.0.1` and requires a random local key stored in the private runtime directory for the service lifetime. The controller checks the listener PID and process creation identity before reusing a service. A legacy state is adopted only after verifying its executable; the process identity is then stored as a hash in private state. On Windows listener ownership uses `netstat`; on POSIX it uses `lsof`. The ingress's individual origin requests currently check PID and port, not process birth time; see [SECURITY.md](SECURITY.md).
 - On POSIX, OAuth and runtime directories are `0700`; credentials, config, key, and checksum files are `0600`. On Windows, NTFS ACLs restrict installation and runtime files to the current user and are verified before launch. The proxy binary is checked against the installation's verified release hash at each launch.
 - Proxy debug logging, request logging, usage statistics, the management panel, and the auto-update panel are disabled. Claude Code itself can still save local transcripts and communicate with services required by its own features.
 - The `.gitignore` is a source allowlist. Before pushing changes, inspect staged files and run `gitleaks git --redact .`.

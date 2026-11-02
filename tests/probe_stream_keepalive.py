@@ -23,6 +23,7 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import api_profile
+import process_identity
 import launcher
 import rolling_runtime
 import runtime_bundle
@@ -185,7 +186,7 @@ def managed_tls(bundle: Path, origin) -> None:
         runtime_bundle.private_dir(source)
         for name, value in (("config.yaml", "synthetic"), ("key", "a" * 64), ("proxy.log", "")):
             api_profile.write_private(source / name, value)
-        base = {"pid": os.getpid(), "port": origin.server_port, "session": source.name}
+        base = {"process_identity": process_identity.stamp(os.getpid()), "pid": os.getpid(), "port": origin.server_port, "session": source.name}
         original_config = rolling_runtime.backend_config
 
         def fixture_config(*args):

@@ -23,6 +23,15 @@ Model restoration keeps only a model ID, a workspace-path hash and a timestamp i
 
 The optional [managed runtime](RUNTIME.md) uses a private loopback TLS identity, a stable frontend key and a separate origin guard key. The translator's configured credential is only the guard key; the ingress verifies the original listener PID before sending its localhost key. It keeps OpenAI OAuth in the original service. New runtime binaries are checked against a platform/source lock and their hashes, and are installed into immutable directories. Those hashes do not replace trusted build provenance. Private CA keys, per-launch environment settings, certificates and runtime logs are never part of the source bundle. Proxy children start from private runtime directories so a project `.env` is not loaded incidentally.
 
+The Python service controller additionally identifies the process creation
+instance when creating or reusing an origin. Its private state retains only a
+hash of the PID, creation identity and executable path. Legacy state without
+that hash is adopted only after the listener's executable matches this
+installation; identity or listener mismatches fail closed. This narrows PID
+reuse risk after reboot for controller operations. It does not yet add process
+birth verification to each origin request in the already-running Go ingress;
+that hop still checks PID and port before sending the localhost key.
+
 The read-only diagnostic report never opens key files or contacts an endpoint. It emits only allowlisted counters, timing, hashed tags and compaction metadata. Origin and translator observations may describe the same request and are not additive. It does not export raw transcripts, error bodies or project paths.
 
 Review updates to the pinned proxy release and its security advisories before changing the version or hashes. Do not enable LAN binding, request body logging, or the management interface without a separate security review.

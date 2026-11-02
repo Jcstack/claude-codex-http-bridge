@@ -144,6 +144,20 @@ class AutostartTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unrelated"): autostart.disable_windows(self.root)
         write.assert_not_called()
 
+    @unittest.skipUnless(os.name == "nt", "Windows user registry required")
+    def test_windows_user_registry_roundtrip_is_scoped_to_fixture(self):
+        value = autostart.windows_command(self.root, r"C:\fixture\pythonw.exe")
+        if autostart.windows_value(self.root) is not None:
+            self.fail("Fixture startup name unexpectedly exists")
+        try:
+            autostart.windows_write(self.root, value)
+            self.assertEqual(autostart.windows_value(self.root), value)
+            autostart.disable_windows(self.root)
+            self.assertIsNone(autostart.windows_value(self.root))
+        finally:
+            current = autostart.windows_value(self.root)
+            if current == value: autostart.windows_write(self.root, None)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,7 @@ from unittest.mock import patch
 from live_compare_translators import stream
 from smoke_managed_runtime import MODEL, SPEC, Upstream
 import api_profile
+import process_identity
 import launcher
 import rolling_runtime
 import runtime_bundle
@@ -42,7 +43,7 @@ def main() -> None:
             runtime_bundle.private_dir(source)
             for name, value in (("config.yaml", "synthetic"), ("key", "a" * 64), ("proxy.log", "")):
                 api_profile.write_private(source / name, value)
-            base = {"pid": os.getpid(), "port": server.server_port, "session": source.name}
+            base = {"process_identity": process_identity.stamp(os.getpid()), "pid": os.getpid(), "port": server.server_port, "session": source.name}
             with patch.object(launcher, "ROOT", root):
                 runtime_bundle.activate(root, bundle)
                 value = None
