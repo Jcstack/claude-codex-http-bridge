@@ -185,6 +185,28 @@ class AutostartTests(unittest.TestCase):
             self.assertEqual(autostart.run_once(self.root), 0)
         self.assertEqual((self.root / "runtime" / "autostart-status.json").read_bytes(), previous)
 
+    def test_login_check_rechecks_enablement_after_waiting_for_lock(self):
+        enabled = threading.Event()
+        enabled.set()
+        done = threading.Event()
+        results = []
+
+        def check():
+            results.append(autostart.run_once(self.root, enabled=enabled.is_set))
+            done.set()
+
+        with patch.object(autostart, "healthy", side_effect=AssertionError("disabled recovery must not run")) as health:
+            with autostart.operation_lock(self.root):
+                worker = threading.Thread(target=check)
+                worker.start()
+                self.assertFalse(done.wait(.3))
+                enabled.clear()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [0])
+        health.assert_not_called()
+        self.assertFalse((self.root / "runtime" / "autostart-status.json").exists())
+
     def test_login_definition_contains_paths_but_no_inherited_keys(self):
         sentinel = "PRIVATE_FIXTURE_SENTINEL"
         with patch.dict(os.environ, {"OPENAI_API_KEY": sentinel, "HTTPS_PROXY": sentinel}):
@@ -371,11 +393,16 @@ class AutostartTests(unittest.TestCase):
 
     def test_windows_watch_checks_registry_each_cycle(self):
         value = autostart.windows_command(self.root, r"C:\Python\pythonw.exe")
-        with patch.object(autostart, "windows_value", side_effect=[value, None]), \
-             patch.object(autostart, "run_once", return_value=0) as check, \
+        observations = []
+        def check(root, *, enabled):
+            observations.append((root == self.root, enabled()))
+            return 0
+        with patch.object(autostart, "windows_value", side_effect=[value, None, None]), \
+             patch.object(autostart, "run_once", side_effect=check) as run, \
              patch.object(autostart.time, "sleep") as sleep:
             self.assertEqual(autostart.windows_watch(self.root), 0)
-        check.assert_called_once_with(self.root)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(observations, [(True, False)])
         sleep.assert_called_once_with(120)
 
     def test_windows_enable_spawns_with_sanitized_environment(self):
@@ -393,6 +420,87 @@ class AutostartTests(unittest.TestCase):
         self.assertTrue(autostart.windows_is_ours(self.root, write.call_args.args[1]))
         self.assertNotIn("OPENAI_API_KEY", spawn.call_args.kwargs["env"])
         self.assertNotIn("HTTPS_PROXY", spawn.call_args.kwargs["env"])
+
+    def test_windows_enable_serializes_the_startup_registry_write(self):
+        observed = []
+        def write(root, value):
+            try:
+                with autostart.operation_lock(root, wait_seconds=0): pass
+            except autostart.OperationBusy:
+                observed.append(True)
+            else:
+                observed.append(False)
+
+        with patch.object(autostart, "windows_pythonw", return_value=r"C:\Python\pythonw.exe"), \
+             patch.object(autostart, "windows_value", return_value=None), \
+             patch.object(autostart, "windows_write", side_effect=write), \
+             patch.object(windows_acl, "lock"), \
+             patch.object(autostart.subprocess, "DETACHED_PROCESS", 8, create=True), \
+             patch.object(autostart.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True), \
+             patch.object(autostart.subprocess, "Popen"):
+            autostart.enable_windows(self.root)
+        self.assertEqual(observed, [True])
+
+    def test_windows_failed_enable_restores_registry_and_previous_pause(self):
+        autostart.pause(self.root)
+        state = {"value": None}
+        def write(_root, value):
+            state["value"] = value
+
+        with patch.object(autostart, "windows_pythonw", return_value=r"C:\Python\pythonw.exe"), \
+             patch.object(autostart, "windows_value", side_effect=lambda _root: state["value"]), \
+             patch.object(autostart, "windows_write", side_effect=write), \
+             patch.object(windows_acl, "lock"), \
+             patch.object(autostart.subprocess, "DETACHED_PROCESS", 8, create=True), \
+             patch.object(autostart.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True), \
+             patch.object(autostart.subprocess, "Popen", side_effect=OSError("synthetic spawn failure")):
+            with self.assertRaises(OSError):
+                autostart.enable_windows(self.root)
+        self.assertIsNone(state["value"])
+        self.assertTrue((self.root / "runtime" / "autostart-paused").exists())
+
+    def test_windows_disable_waits_for_enable_and_removes_its_entry(self):
+        state = {"value": None}
+        entered_spawn, finish_spawn, disabled = threading.Event(), threading.Event(), threading.Event()
+        errors = []
+        def write(_root, value):
+            state["value"] = value
+        def spawn(*_args, **_kwargs):
+            entered_spawn.set()
+            if not finish_spawn.wait(5):
+                raise RuntimeError("Synthetic spawn did not finish")
+        def enable():
+            try: autostart.enable_windows(self.root)
+            except Exception as error: errors.append(type(error).__name__)
+        def disable():
+            try:
+                with autostart.operation_lock(self.root): autostart.disable_windows(self.root)
+            except Exception as error: errors.append(type(error).__name__)
+            finally: disabled.set()
+
+        with patch.object(autostart, "windows_pythonw", return_value=r"C:\Python\pythonw.exe"), \
+             patch.object(autostart, "windows_value", side_effect=lambda _root: state["value"]), \
+             patch.object(autostart, "windows_write", side_effect=write), \
+             patch.object(windows_acl, "lock"), \
+             patch.object(autostart.subprocess, "DETACHED_PROCESS", 8, create=True), \
+             patch.object(autostart.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True), \
+             patch.object(autostart.subprocess, "Popen", side_effect=spawn):
+            start_thread = threading.Thread(target=enable)
+            stop_thread = threading.Thread(target=disable)
+            start_thread.start()
+            try:
+                self.assertTrue(entered_spawn.wait(5))
+                stop_thread.start()
+                self.assertFalse(disabled.wait(.3))
+            finally:
+                finish_spawn.set()
+                start_thread.join(5)
+                if stop_thread.ident is not None: stop_thread.join(5)
+        self.assertFalse(start_thread.is_alive())
+        self.assertFalse(stop_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(disabled.is_set())
+        self.assertIsNone(state["value"])
 
     def test_windows_foreign_startup_value_is_untouched(self):
         with patch.object(autostart, "windows_value", return_value="unrelated fixture"), \

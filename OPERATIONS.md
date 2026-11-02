@@ -199,6 +199,16 @@ waited for the lock all passed. The fixture used no real account or service and
 cleaned up its own job. It does not establish behavior after logout, sleep,
 reboot, Windows login, or a successful real model call.
 
+The longer lock wait also exposed a Windows watcher race in a synthetic
+concurrency test: a watcher that had already checked its startup registry entry
+could otherwise continue after `autostart disable` removed it. The watcher now
+rechecks the owned entry after taking the operation lock, before checking or
+starting a service. Windows enable serializes its registry update with disable
+and attempts to restore the previous registry value and pause marker when its
+child process cannot be started. Those restorations passed a synthetic spawn
+failure; a separate registry-write failure is not covered. Actual
+Windows user-login and crash behavior remain separate acceptance work.
+
 The verified-runtime rollback controller passed the [three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41440397811) and was installed without restarting the existing origin or ingress. Its private previous-version record was reconstructed from the uniquely matching prior source-locked bundle and verified with the selected bundle's immutable hashes. The actual `bridge rollback` transition was exercised only in isolated fixtures with a fake origin and a continuing Claude client; it was not run on the live session.
 
 The status-line adapter's unknown-usage correction passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41446391248) and was installed as a standalone file. A synthetic child process verified that an unknown `current_usage` remains unknown and that the standard cache object is still withheld. The origin, managed ingress and Claude processes were not restarted. Individual plugins can still choose their own fallback for unknown usage; the local HUD 0.8.0 sample is documented in [COMPATIBILITY.md](COMPATIBILITY.md).

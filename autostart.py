@@ -279,7 +279,7 @@ def record(root: Path, result: str, reason: str | None = None) -> None:
                               json.dumps(state) + "\n")
 
 
-def run_once(root: Path) -> int:
+def run_once(root: Path, *, enabled=None) -> int:
     """A quiet bounded login/health check; no raw errors or payloads are logged."""
     try:
         # RunAtLoad can start while enable is still publishing the network
@@ -287,6 +287,10 @@ def run_once(root: Path) -> int:
         # of missing the initial check or recording ordinary contention as a
         # failed recovery. The periodic job can try again if it stays busy.
         with operation_lock(root):
+            # A Windows watcher can enter this check before disable removes
+            # its registry entry, then wait for disable to release the lock.
+            if enabled is not None and not enabled():
+                return 0
             if (root / "runtime" / "autostart-paused").exists():
                 record(root, "paused")
                 return 0
@@ -421,20 +425,27 @@ def windows_write(root: Path, value: str | None) -> None:
 
 def enable_windows(root: Path) -> None:
     command = windows_command(root)
-    old = windows_value(root)
-    if old is not None and not windows_is_ours(root, old):
-        raise RuntimeError("An unrelated Windows startup value uses this name")
-    windows_write(root, command)
-    try:
-        with operation_lock(root): unpause(root)
-        executable = windows_pythonw()
-        subprocess.Popen([executable, "-I", "-B", str(root / "autostart.py"), "watch", "--root", str(root)],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         cwd=root, env=rolling_runtime.process_environment(), close_fds=True,
-                         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
-    except BaseException:
-        if windows_value(root) == command: windows_write(root, old)
-        raise
+    with operation_lock(root):
+        old = windows_value(root)
+        if old is not None and not windows_is_ours(root, old):
+            raise RuntimeError("An unrelated Windows startup value uses this name")
+        was_paused = (root / "runtime" / "autostart-paused").exists()
+        unpaused = False
+        windows_write(root, command)
+        try:
+            unpause(root)
+            unpaused = True
+            executable = windows_pythonw()
+            subprocess.Popen([executable, "-I", "-B", str(root / "autostart.py"), "watch", "--root", str(root)],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             cwd=root, env=rolling_runtime.process_environment(), close_fds=True,
+                             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        except BaseException:
+            try:
+                if windows_value(root) == command: windows_write(root, old)
+            finally:
+                if unpaused and was_paused: pause(root)
+            raise
 
 
 def disable_windows(root: Path) -> None:
@@ -448,7 +459,7 @@ def windows_watch(root: Path) -> int:
     try:
         with operation_lock(root, wait_seconds=0, watcher=True):
             while windows_is_ours(root, windows_value(root)):
-                run_once(root)
+                run_once(root, enabled=lambda: windows_is_ours(root, windows_value(root)))
                 time.sleep(INTERVAL_SECONDS)
     except RuntimeError:
         # Another watcher already owns this installation, or the startup
