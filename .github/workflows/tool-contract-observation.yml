@@ -1,0 +1,56 @@
+name: isolated-tool-contract-observation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            binary: cli-proxy-api
+          - os: ubuntu-latest
+            binary: cli-proxy-api
+          - os: windows-latest
+            binary: cli-proxy-api.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Build and test the isolated request-guard candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          for patch in 12d97cf-inline-tools-backport 12d97cf-deferred-tools web-search-replay loopback-tls url-citations native-compaction-v2 incomplete-tool-guard effort-downgrade-guard midconversation-effort tool-contract-guard-candidate; do
+            git -C upstream-source apply "../upstream/patches/$patch.patch"
+          done
+          cp tests/native_tool_contract_fixture.go upstream-source/internal/runtime/executor/bridge_native_tool_contract_local_test.go
+          cd upstream-source
+          go mod verify
+          go test ./internal/translator/codex/claude
+          go test -timeout 60s -run '^TestCodexBridgeNativeToolContract$' ./internal/runtime/executor
+          go build -o "../${{ matrix.binary }}" ./cmd/server
+      - name: Observe synthetic streaming and nonstreaming tool contracts
+        run: python tests/probe_tool_contract.py --require-preflight-guard --translator ${{ matrix.binary }}
+      - name: Verify existing dynamic tool and API contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/smoke_api_contract.py "${{ matrix.binary }}"
+          python tests/probe_proxy_features.py "${{ matrix.binary }}"

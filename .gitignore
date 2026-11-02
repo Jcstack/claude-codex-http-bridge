@@ -22,6 +22,7 @@
 !CACHE_AUDIT.md
 !SESSION_AUDIT.md
 !MCP_NAMING.md
+!TOOL_CONTRACT.md
 !NESTED_AGENTS.md
 !SECURITY.md
 !LICENSE
@@ -69,6 +70,8 @@
 !tests/native_identity_probe_windows.go
 !tests/native_identity_probe.go
 !tests/native_cache_fixture.go
+!tests/native_tool_contract_fixture.go
+!tests/tool_contract_benchmark.go
 !tests/native_gateway_names_fixture.go
 !tests/native_incomplete_fixture.go
 !tests/translator_incomplete_fixture.go
@@ -95,6 +98,7 @@
 !upstream/patches/effort-downgrade-guard.patch
 !upstream/patches/midconversation-effort.patch
 !upstream/patches/midconversation-system-fidelity.patch
+!upstream/patches/tool-contract-guard-candidate.patch
 !upstream/patches/claude-hud-v0.15-git-safety.patch
 !upstream/patches/claude-hud-v0.15-bun-node-fallback.patch
 !upstream/patches/claude-hud-v0.15-windows-fixture.patch
@@ -115,3 +119,4 @@
 !.github/workflows/controller-layout-observation.yml
 !.github/workflows/cache-resume-observation.yml
 !.github/workflows/autostart-gate.yml
+!.github/workflows/tool-contract-observation.yml
