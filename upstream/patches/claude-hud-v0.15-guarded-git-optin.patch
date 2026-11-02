@@ -1,0 +1,42 @@
+--- a/collector.mjs
++++ b/collector.mjs
+@@ -260,6 +260,9 @@
+ }
+ 
+ // ---- git
++
++// This marker is present only in the reviewed fail-closed collector.
++export const BRIDGE_GIT_GUARD_VERSION = 'bridge-v1';
+ 
+ export class GitTimeoutError extends Error {}
+ 
+--- a/hud.mjs
++++ b/hud.mjs
+@@ -180,7 +180,9 @@
+ 
+   return new Promise((resolve, reject) => {
+     const child = spawn(process.execPath, cageArgs({ grants, dataDir, entry, audit }), {
+-      env: { ...cageEnv(env), ...(stripped ? { CLAUDE_HUD_STRIPPED: JSON.stringify({ dir: path.join(stripped.dir, path.sep), files: stripped.files }) } : {}) },
++      env: { ...cageEnv(env),
++        ...(collector.BRIDGE_GIT_GUARD_VERSION === 'bridge-v1' ? { CLAUDE_CODEX_HUD_GIT_GUARD: 'bridge-v1' } : {}),
++        ...(stripped ? { CLAUDE_HUD_STRIPPED: JSON.stringify({ dir: path.join(stripped.dir, path.sep), files: stripped.files }) } : {}) },
+       stdio: ['pipe', 'pipe', 'pipe'],
+       windowsHide: true,
+     });
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -610,8 +610,13 @@
+   });
+   const merged = override ? mergeOverrides(base ?? {}, override) : base ?? {};
+   const baseFile = files[0][1];
++  const config = mergeConfig(merged as Partial<HudConfig>);
++  // Keep the standard Git switch off for old and future HUD versions. Only a
++  // reviewed collector can attest that this process has the guarded adapter.
++  if (merged.claudeCodexGuardedGit === true && process.env.CLAUDE_CODEX_HUD_GIT_GUARD === 'bridge-v1' &&
++      isPlainObject(merged.gitStatus) && merged.gitStatus.enabled === false) config.gitStatus.enabled = true;
+   return {
+-    config: mergeConfig(merged as Partial<HudConfig>),
++    config,
+     base: base ?? {},
+     baseUnreadable: typeof baseFile === 'string' ? `config.json ${baseFile}` : null,
+     override: override ?? {},

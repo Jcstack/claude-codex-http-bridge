@@ -34,10 +34,13 @@ jobs:
         run: |
           git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-git-safety.patch"
           git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-bun-node-fallback.patch"
+          git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-guarded-git-optin.patch"
       - name: Check Node resolution for existing Bun launchers
         run: python tests/probe_hud_node_fallback.py --hud-dir external-hud
       - name: Exercise synthetic bridge status, activity, quota and post-compaction displays
         run: python tests/probe_hud_render.py --hud-dir external-hud
+      - name: Verify version-gated Git display and untrusted configuration controls
+        run: python tests/probe_hud_guarded_git.py --hud-dir external-hud
       - name: Normalize the synthetic positive-control marker path on Windows
         if: runner.os == 'Windows'
         shell: bash
