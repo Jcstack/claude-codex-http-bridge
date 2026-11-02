@@ -90,7 +90,10 @@ both without caller policies and with an explicit direct policy on every tool.
 That comparison does not establish real provider cache hits.
 The corresponding protocol, native-executor, real-client and synthetic
 cache-structure controls without caller policies passed on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41526176567);
-the explicit-direct cache comparison has so far run locally on macOS.
+a later [three-platform comparison](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41529298769)
+also retained the prompt fields and cache key with an explicit direct policy,
+using a candidate that combines this guard with the separate browser-state
+experiment. No browser-state content appeared in that comparison.
 
 An additional [handoff fixture](tests/probe_caller_handoff.py) used separate
 baseline and candidate executables, a temporary TLS ingress and a fake origin.
