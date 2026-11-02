@@ -251,6 +251,13 @@ three platform runners, then installed as one file without restarting the
 bridge or any client. It is a pattern, not proof that a task is still running
 or that it belongs to the calling agent. See [NESTED_AGENTS.md](NESTED_AGENTS.md).
 
+An isolated real-client fixture found that an extra `--settings` could replace
+the bridge-generated launch settings and direct a synthetic inherited local
+key to a second fake endpoint. A temporary guard now refuses that extra option
+before starting a new session. The targeted launcher update preserved the
+running origin, ingress and rollback record. Existing user settings files still
+load normally; safe extra-settings composition is unfinished. See [SECURITY.md](SECURITY.md).
+
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
 Remaining work, updated 2026-11-01; execution order and acceptance gates are in [PLAN.md](PLAN.md):

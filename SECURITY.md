@@ -148,11 +148,11 @@ An isolated locked-client test found that a second `--settings` argument
 replaced the bridge-generated launch settings. When that second file changed
 only the destination, Claude sent the synthetic inherited local key to the
 second synthetic endpoint. No real key or external endpoint was used. The
-source now temporarily rejects an extra `--settings` argument before launching
-a session; the local guard is not yet installed. Until it is verified and
-installed, do not pass an extra `--settings` to `claude-codex`. Ordinary Claude
-settings files remain available. Secure composition of custom settings remains
-open; the guard must not be represented as full compatibility.
+source temporarily rejects an extra `--settings` argument before launching a
+session. The exact guard passed the [three-platform unit-test steps](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41463928859)
+and was installed locally without restarting the origin, ingress or clients.
+Ordinary Claude settings files remain available. Secure composition of custom
+settings remains open; the guard must not be represented as full compatibility.
 
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 
