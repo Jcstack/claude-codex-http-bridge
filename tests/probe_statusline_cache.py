@@ -59,7 +59,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hud-dir", type=Path, help="Optional reviewed HUD source for a full display check")
     parser.add_argument("--legacy-env-check", action="store_true", help="Check that Claude passes the session opt-out to the status line")
+    parser.add_argument("--legacy-opt-out-check", action="store_true", help="Check the inherited opt-out against an enabled synthetic shared preference")
     args = parser.parse_args()
+    if args.legacy_opt_out_check and args.hud_dir is None:
+        parser.error("--legacy-opt-out-check requires --hud-dir")
     if os.name == "nt":
         print(json.dumps({"synthetic_only": True, "skipped": "Windows interactive console not covered"}))
         return
@@ -90,6 +93,7 @@ def main() -> None:
             "print(json.dumps(value) if len(sys.argv)>2 else 'fixture')\n", encoding="utf-8")
         status_command = shlex.join([sys.executable, str(recorder), str(marker)])
         hud_marker = root / "hud-results.jsonl"
+        adapted_marker = root / "adapted-results.jsonl"
         if args.hud_dir is not None:
             hud = args.hud_dir.resolve()
             package = json.loads((hud / "package.json").read_text(encoding="utf-8"))
@@ -101,20 +105,40 @@ def main() -> None:
             (hud_config / "config.json").write_text(json.dumps({"gitStatus": {"enabled": False},
                 "display": {"showPromptCache": True, "showUsage": False}}), encoding="utf-8")
             profile = root / "profile.json"
-            profile.write_text(json.dumps({"context_windows": {"gpt-6.1-sol": 872_000},
-                                           "expose_cache_metrics": True}), encoding="utf-8")
+            profile_data = {"context_windows": {"gpt-6.1-sol": 872_000}}
+            if not args.legacy_opt_out_check:
+                profile_data["expose_cache_metrics"] = True
+            profile.write_text(json.dumps(profile_data), encoding="utf-8")
+            adapter = [sys.executable, str(Path(statusline_adapter.__file__)), str(profile)]
+            if args.legacy_opt_out_check:
+                preference = root / "statusline-cache-metrics.json"
+                preference.write_text('{"version":1,"enabled":true}\n', encoding="utf-8")
+                preference.chmod(0o600)
+                bootstrap = root / "adapter-bootstrap.py"
+                bootstrap.write_text("import sys\nfrom pathlib import Path\n"
+                    "sys.path.insert(0,sys.argv[1])\nimport statusline_adapter as adapter\n"
+                    "adapter.ROOT=Path(sys.argv[2])\nassert adapter.cache_metrics_preference(adapter.ROOT)\n"
+                    "sys.argv=['adapter',sys.argv[3]]\n"
+                    "raise SystemExit(adapter.main())\n", encoding="utf-8")
+                adapter = [sys.executable, str(bootstrap), str(Path(statusline_adapter.__file__).parent), str(root), str(profile)]
+                adapted_recorder = root / "record-adapted.py"
+                adapted_recorder.write_text("import json,sys\nfrom pathlib import Path\n"
+                    "value=json.load(sys.stdin); row={'extension': 'claude_codex_bridge' in value,"
+                    "'model': (value.get('model') or {}).get('id')=='gpt-6.1-sol'}\n"
+                    "with Path(sys.argv[1]).open('a',encoding='utf-8') as out: out.write(json.dumps(row)+'\\n')\n"
+                    "print(json.dumps(value))\n", encoding="utf-8")
             output_recorder = root / "record-hud.py"
             output_recorder.write_text("import json,sys\nfrom pathlib import Path\n"
-                "text=sys.stdin.read(); row={'fraction': 'Reported cache-read input (main)' in text and '37.5%' in text,"
+                "text=sys.stdin.read(); label='Reported cache-read input (main)';"
+                "row={'shown': label in text, 'fraction': label in text and '37.5%' in text,"
                 "'timer': any(word in text.lower() for word in ('expired','until','5m'))}\n"
                 "with Path(sys.argv[1]).open('a',encoding='utf-8') as out: out.write(json.dumps(row)+'\\n')\n"
                 "sys.stdout.write(text)\n", encoding="utf-8")
-            status_command = " | ".join((
-                shlex.join([sys.executable, str(recorder), str(marker), "passthrough"]),
-                shlex.join([sys.executable, str(Path(statusline_adapter.__file__)), str(profile)]),
-                shlex.join([node, str(hud / "hud.mjs")]),
-                shlex.join([sys.executable, str(output_recorder), str(hud_marker)]),
-            ))
+            commands = [[sys.executable, str(recorder), str(marker), "passthrough"], adapter]
+            if args.legacy_opt_out_check:
+                commands.append([sys.executable, str(adapted_recorder), str(adapted_marker)])
+            commands.extend(([node, str(hud / "hud.mjs")], [sys.executable, str(output_recorder), str(hud_marker)]))
+            status_command = " | ".join(shlex.join(command) for command in commands)
         settings = root / "settings.json"
         settings.write_text(json.dumps({"modelPicker": {"options": [{"model": "gpt-6.1-sol", "label": "Fixture",
             "behavesAs": "claude-sonnet-5-5"}], "replaceBuiltInOptions": True},
@@ -126,7 +150,7 @@ def main() -> None:
         env.update(CLAUDE_CONFIG_DIR=str(config), ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
                    ANTHROPIC_AUTH_TOKEN="fixture-only", ANTHROPIC_DEFAULT_SONNET_MODEL="gpt-6.1-sol",
                    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1", TERM="xterm-256color")
-        if args.legacy_env_check:
+        if args.legacy_env_check or args.legacy_opt_out_check:
             env["CLAUDE_CODEX_STATUSLINE_CACHE_METRICS"] = "0"
         command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                    "--settings", str(settings), "--permission-mode", "dontAsk", "--model", "gpt-6.1-sol", "--tools", ""]
@@ -169,7 +193,11 @@ def main() -> None:
             full_usage = bool(usages and all(type(usages[-1].get(key)) is int for key in (
                 "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")))
             hud_rows = [json.loads(line) for line in hud_marker.read_text(encoding="utf-8").splitlines()] if hud_marker.exists() else []
+            adapted_rows = [json.loads(line) for line in adapted_marker.read_text(encoding="utf-8").splitlines()] if adapted_marker.exists() else []
             hud_correct = any(row.get("fraction") is True and row.get("timer") is False for row in hud_rows)
+            hud_opted_out = bool(len(hud_rows) >= len(caches) > 0 and len(adapted_rows) >= len(caches)
+                and all(row.get("shown") is False for row in hud_rows)
+                and all(row.get("model") is True and row.get("extension") is False for row in adapted_rows))
             opt_out_inherited = bool(frames and all(frame.get("opt_out_inherited") is True for frame in frames))
             print(json.dumps({"synthetic_only": True, "fake_message_requests": len(server.requests), "frames": len(frames), "frames_with_usage": len(usages),
                 "frames_with_prompt_cache": len(caches), "cache_read_fraction_matches_reported_tokens": correct_counters,
@@ -178,13 +206,16 @@ def main() -> None:
                 "opt_in_omits_inferred_ttl": bool(filtered and "ttl" not in filtered and "expires_at" not in filtered),
                 "last_usage_has_all_input_counters": full_usage,
                 "hud_display_checked": args.hud_dir is not None,
-                "hud_reported_fraction_without_timer": hud_correct if args.hud_dir is not None else None,
-                "session_opt_out_inherited": opt_out_inherited if args.legacy_env_check else None}, sort_keys=True))
+                "hud_reported_fraction_without_timer": hud_correct if args.hud_dir is not None and not args.legacy_opt_out_check else None,
+                "legacy_opt_out_hides_hud_cache": hud_opted_out if args.legacy_opt_out_check else None,
+                "session_opt_out_inherited": opt_out_inherited if args.legacy_env_check or args.legacy_opt_out_check else None}, sort_keys=True))
             if len(server.requests) != 2 or not (full_usage and correct_counters and inferred_ttl and "prompt_cache" not in default):
                 raise RuntimeError("Synthetic status-line control did not complete")
-            if args.hud_dir is not None and not hud_correct:
+            if args.hud_dir is not None and not args.legacy_opt_out_check and not hud_correct:
                 raise RuntimeError("Synthetic HUD cache display did not complete")
-            if args.legacy_env_check and not opt_out_inherited:
+            if args.legacy_opt_out_check and not hud_opted_out:
+                raise RuntimeError("Synthetic legacy opt-out did not hide the HUD cache")
+            if (args.legacy_env_check or args.legacy_opt_out_check) and not opt_out_inherited:
                 raise RuntimeError("Synthetic session opt-out was not inherited")
         finally:
             cleanup_ok = True

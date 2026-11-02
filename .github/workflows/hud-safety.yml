@@ -59,3 +59,6 @@ jobs:
       - name: Exercise the real Claude status line with fake cache reports and the reviewed HUD
         if: runner.os != 'Windows'
         run: python tests/probe_statusline_cache.py --hud-dir external-hud --legacy-env-check
+      - name: Honor an inherited legacy opt-out through the real client and HUD
+        if: runner.os != 'Windows'
+        run: python tests/probe_statusline_cache.py --hud-dir external-hud --legacy-opt-out-check
