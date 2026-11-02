@@ -172,7 +172,7 @@ def compare(old, old_ambiguous, current, current_ambiguous, records, skipped, *,
 
 
 def main(arguments=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="claude-codex mcp-definitions", description=__doc__)
     parser.add_argument("--session-file", required=True, type=Path, help="Explicit local Claude session JSONL")
     parser.add_argument("--inventory", required=True, type=Path, help="Offline snapshot of exact Claude tool definitions")
     parser.add_argument("--show-names", action="store_true", help="Print changed tool names locally")
