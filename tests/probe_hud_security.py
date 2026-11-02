@@ -72,6 +72,17 @@ def owner_failures(output: str) -> list[str]:
     return categories
 
 
+def filter_failure_detail(output: str) -> str | None:
+    # Only these fixed phrases from the synthetic upstream fixture leave the
+    # process. Its other assertion messages can contain temporary paths.
+    for label in ('not-utf8', 'equals'):
+        for phrase, detail in (('the filter ran', 'executed'), ('git still ran', 'not_blocked'),
+                               ('the planted filter never runs', 'positive_control_missing')):
+            if f'{label}: {phrase}' in output:
+                return f'{label}:{detail}'
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--hud-dir', type=Path, required=True)
@@ -100,7 +111,8 @@ def main() -> None:
         print(json.dumps({'synthetic_only': True, 'hud_version': '0.15.0',
                           'native_owner_security_fixture_passed': owner.returncode == 0,
                           'config_failure_blocks_git_mock_passed': failure.returncode == 0,
-                          'owner_failure_categories': failures},
+                          'owner_failure_categories': failures,
+                          'filter_failure_detail': filter_failure_detail(owner.stdout)},
                          sort_keys=True))
         if owner.returncode or failure.returncode:
             raise RuntimeError('HUD safety fixture failed; raw output withheld')
