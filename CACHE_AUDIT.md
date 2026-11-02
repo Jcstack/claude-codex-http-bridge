@@ -65,6 +65,12 @@ headers through a backend switch. These checks do not verify forwarding by
 every Claude client version, actual provider cache hits, or isolation between
 real accounts.
 
+The executor fixture has also been extended to add a deferred tool that was
+absent from the first request, reveal it, and then remove it. The new controls
+check the cache key, prefix bytes, discovery, and removal separately. This
+extension is awaiting its cross-platform executor gate; it does not run a
+Claude client or test provider cache hits.
+
 ## Live dynamic-tool cache observations
 
 On 2026-11-02, two independent synthetic histories were sent sequentially

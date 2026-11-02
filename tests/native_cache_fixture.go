@@ -46,19 +46,28 @@ func TestCodexBridgeNativeDynamicToolCachePrefix(t *testing.T) {
 	}
 	fixture := func(session, model, effort, phase string) []byte {
 		messages := []any{map[string]any{"role": "user", "content": "Search synthetic tools"}}
-		if phase != "before" {
-			messages = append(messages,
-				map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "toolu_search", "name": "ToolSearch", "input": map[string]any{"query": "mcp__demo__lookup"}}}},
-				map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_search", "content": []any{map[string]any{"type": "tool_reference", "tool_name": "mcp__demo__lookup"}}}}})
+		added := strings.HasPrefix(phase, "added-")
+		selected := "mcp__demo__lookup"
+		if added {
+			selected = "mcp__demo__extra"
 		}
-		if phase == "removed" {
-			messages = append(messages, map[string]any{"role": "system", "content": []any{map[string]any{"type": "tool_removal", "tool": map[string]any{"type": "tool_reference", "name": "mcp__demo__lookup"}}}})
+		if phase == "revealed" || phase == "removed" || phase == "added-revealed" || phase == "added-removed" {
+			messages = append(messages,
+				map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "toolu_search", "name": "ToolSearch", "input": map[string]any{"query": selected}}}},
+				map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_search", "content": []any{map[string]any{"type": "tool_reference", "tool_name": selected}}}}})
+		}
+		if phase == "removed" || phase == "added-removed" {
+			messages = append(messages, map[string]any{"role": "system", "content": []any{map[string]any{"type": "tool_removal", "tool": map[string]any{"type": "tool_reference", "name": selected}}}})
+		}
+		tools := []any{tool("ToolSearch", false), tool("Read", false), tool("mcp__demo__lookup", true)}
+		if added {
+			tools = append(tools, tool("mcp__demo__extra", true))
 		}
 		metadata, _ := json.Marshal(map[string]string{"session_id": session})
 		body, err := json.Marshal(map[string]any{"model": model, "max_tokens": 1024, "system": "Synthetic stable prefix.",
 			"metadata": map[string]any{"user_id": string(metadata)}, "thinking": map[string]any{"type": "adaptive"},
 			"output_config": map[string]any{"effort": effort}, "messages": messages,
-			"tools": []any{tool("ToolSearch", false), tool("Read", false), tool("mcp__demo__lookup", true)}})
+			"tools": tools})
 		if err != nil {
 			t.Fatal("fixture serialization failed")
 		}
@@ -87,6 +96,9 @@ func TestCodexBridgeNativeDynamicToolCachePrefix(t *testing.T) {
 	otherAgent := send(sessionA, sol, "max", "before", "child-fixture")
 	otherModel := send(sessionA, "gpt-6.1-terra", "max", "before", "")
 	otherEffort := send(sessionA, sol, "high", "before", "")
+	addedBefore := send(sessionA, sol, "max", "added-before", "")
+	addedRevealed := send(sessionA, sol, "max", "added-revealed", "")
+	addedRemoved := send(sessionA, sol, "max", "added-removed", "")
 
 	for _, field := range []string{"instructions", "tools"} {
 		first := gjson.GetBytes(before, field)
@@ -140,6 +152,25 @@ func TestCodexBridgeNativeDynamicToolCachePrefix(t *testing.T) {
 		allowed["mcp__demo__lookup"] || !allowed["ToolSearch"] || !allowed["Read"] {
 		t.Fatal("native fixture did not preserve dynamic tool semantics")
 	}
+	for _, field := range []string{"instructions", "tools"} {
+		first := gjson.GetBytes(before, field)
+		if !first.Exists() || first.Raw != gjson.GetBytes(addedBefore, field).Raw ||
+			first.Raw != gjson.GetBytes(addedRevealed, field).Raw || first.Raw != gjson.GetBytes(addedRemoved, field).Raw {
+			t.Fatalf("added native tool changed the %s prefix", field)
+		}
+	}
+	addedChoice := gjson.GetBytes(addedRemoved, "tool_choice")
+	addedAllowed := map[string]bool{}
+	for _, tool := range addedChoice.Get("tools").Array() {
+		addedAllowed[tool.Get("name").String()] = true
+	}
+	if !prefix(before, addedBefore) || !prefix(addedBefore, addedRevealed) || !prefix(addedRevealed, addedRemoved) ||
+		toolNames(addedBefore)["mcp__demo__extra"] || inlineNames(addedBefore)["mcp__demo__extra"] ||
+		!inlineNames(addedRevealed)["mcp__demo__extra"] || !inlineNames(addedRemoved)["mcp__demo__extra"] ||
+		addedChoice.Get("type").String() != "allowed_tools" || addedAllowed["mcp__demo__extra"] ||
+		!addedAllowed["ToolSearch"] || !addedAllowed["Read"] {
+		t.Fatal("native fixture did not preserve newly added deferred tool semantics")
+	}
 	for _, field := range []string{"model", "instructions", "tools", "input"} {
 		original := gjson.GetBytes(before, field)
 		if !original.Exists() || original.Raw != gjson.GetBytes(otherSession, field).Raw {
@@ -148,6 +179,7 @@ func TestCodexBridgeNativeDynamicToolCachePrefix(t *testing.T) {
 	}
 	key := func(body []byte) string { return gjson.GetBytes(body, "prompt_cache_key").String() }
 	if key(before) == "" || key(before) != key(revealed) || key(before) != key(removed) ||
+		key(before) != key(addedBefore) || key(before) != key(addedRevealed) || key(before) != key(addedRemoved) ||
 		key(before) != key(otherEffort) || key(before) == key(otherSession) ||
 		key(before) == key(otherAgent) || key(before) == key(otherModel) ||
 		key(otherSession) == "" || key(otherAgent) == "" || key(otherModel) == "" {
