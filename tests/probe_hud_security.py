@@ -80,6 +80,19 @@ def filter_failure_detail(output: str) -> str | None:
                                ('the planted filter never runs', 'positive_control_missing')):
             if f'{label}: {phrase}' in output:
                 return f'{label}:{detail}'
+    lines = output.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith('FAIL a repo filter whose name'):
+            continue
+        detail = lines[index + 1] if index + 1 < len(lines) else ''
+        if 'spawnSync' in detail and 'ENOENT' in detail:
+            return 'git_spawn_missing'
+        if detail.startswith('Command failed:'):
+            for command in ('init', 'add', 'commit', 'config'):
+                if re.search(r'\b' + command + r'\b', detail):
+                    return f'git_command_failed:{command}'
+            return 'git_command_failed:other'
+        return 'unclassified_fixture_failure'
     return None
 
 

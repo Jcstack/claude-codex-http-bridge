@@ -58,6 +58,14 @@ cover every UI layout or other plugin versions. The post-token hint
 is not a provider usage report. The probe executes the explicitly supplied HUD
 JavaScript with a temporary home and configuration; it is not an OS sandbox.
 
+An isolated [0.15.0 render fixture](tests/probe_hud_render.py) also exercises
+the bridge status adapter and a synthetic transcript. On this Mac, the selected
+candidate displayed the model, discovered context, weekly usage, Git branch,
+tool, MCP, skill, agent and todo; after a synthetic compact boundary with
+51,271 post-tokens, it displayed `6% (51k/872k)` rather than `6% (0/872k)`.
+The hint is not a provider report. This does not establish every plugin or
+session behavior, and the candidate's security and rollout are separate gates.
+
 A community [mixed-model subagent report](https://github.com/anthropics/claude-code/issues/83355)
 describes an older client using the parent's compact window for a smaller
 subagent. In a separate local [synthetic probe](tests/probe_subagent_compaction.py)

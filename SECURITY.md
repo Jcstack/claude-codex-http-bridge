@@ -80,6 +80,9 @@ of its own owner security fixture failed on this Mac. The separate
 [fail-closed experiment](upstream/patches/claude-hud-v0.15-git-safety.patch)
 passed the fixture and a synthetic config-enumeration failure check locally;
 it is not an upstream fix, a complete security audit, or an installed plugin.
+The first [platform run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41451134573)
+passed on macOS and Linux but failed one Git-filter fixture on Windows. Its
+cause remains under investigation; a passing Unix run does not validate Windows.
 The [fixture runner](tests/probe_hud_security.py) runs reviewed plugin code with
 a temporary home and filtered environment, not an OS sandbox. The user's
 existing HUD command selects plugin versions dynamically, so changing the cache
