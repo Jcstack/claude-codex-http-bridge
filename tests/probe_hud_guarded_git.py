@@ -59,10 +59,11 @@ def main() -> None:
                  'model': {'id': 'gpt-fixture', 'display_name': 'GPT fixture'},
                  'context_window': {'context_window_size': 872_000, 'used_percentage': 10,
                                     'current_usage': {'input_tokens': 87_000}}}
-        def render(directory: Path, opted_in: bool, *, injected: bool = False) -> str:
-            settings = {'lineLayout': 'expanded', 'gitStatus': {'enabled': False},
-                        'claudeCodexGuardedGit': opted_in, 'display': {'showUsage': False, 'showProject': True}}
-            (plugin_config / 'config.json').write_text(json.dumps(settings), encoding='utf-8')
+        def render(directory: Path, opted_in: bool | None, *, injected: bool = False) -> str:
+            if opted_in is not None:
+                settings = {'lineLayout': 'expanded', 'gitStatus': {'enabled': False},
+                            'claudeCodexGuardedGit': opted_in, 'display': {'showUsage': False, 'showProject': True}}
+                (plugin_config / 'config.json').write_text(json.dumps(settings), encoding='utf-8')
             child_env = dict(env)
             if injected:
                 child_env['CLAUDE_CODEX_HUD_GIT_GUARD'] = 'bridge-v1'
@@ -78,12 +79,28 @@ def main() -> None:
             raise RuntimeError('The reviewed collector marker is not present exactly once')
         collector.write_text(text.replace(GUARD_EXPORT, '', 1), encoding='utf-8')
         missing_guard_output = render(no_marker, True, injected=True)
+        def set_git(value: str) -> dict:
+            subprocess.run([node, str(hud / 'hud.mjs'), 'set', value], cwd=work, env=env,
+                           capture_output=True, text=True, encoding='utf-8', timeout=30, check=True)
+            return json.loads((plugin_config / 'config.json').read_text(encoding='utf-8'))
+        off = set_git('gitStatus.enabled=false')
+        off_output = render(hud, None)
+        on = set_git('gitStatus.enabled=true')
+        on_output = render(hud, None)
+        undo = set_git('--undo')
+        undo_output = render(hud, None)
         guarded_avoided_hook = not marker.exists()
         run_git('status', '--porcelain')
         ordinary_git_control = marker.is_file()
         checks = {'disabled_without_opt_in': 'fixture-branch' not in default_output,
                   'enabled_with_reviewed_guard_and_opt_in': 'fixture-branch' in guarded_output,
                   'missing_guard_ignores_injected_environment': 'fixture-branch' not in missing_guard_output,
+                  'native_set_and_undo_keep_other_versions_disabled':
+                      off.get('claudeCodexGuardedGit') is False and off.get('gitStatus', {}).get('enabled') is False
+                      and on.get('claudeCodexGuardedGit') is True and on.get('gitStatus', {}).get('enabled') is False
+                      and undo.get('claudeCodexGuardedGit') is False and undo.get('gitStatus', {}).get('enabled') is False
+                      and 'fixture-branch' not in off_output and 'fixture-branch' in on_output
+                      and 'fixture-branch' not in undo_output,
                   'guarded_hud_avoids_repo_command': guarded_avoided_hook,
                   'ordinary_git_executes_fixture_positive_control': ordinary_git_control,
                   'model_retained': all('GPT fixture' in item for item in (default_output, guarded_output, missing_guard_output)),

@@ -40,3 +40,24 @@
      base: base ?? {},
      baseUnreadable: typeof baseFile === 'string' ? `config.json ${baseFile}` : null,
      override: override ?? {},
+--- a/src/commands.ts
++++ b/src/commands.ts
+@@ -220,8 +220,16 @@
+   if (problems.length > 0) return fail([...problems, "Nothing was changed."]);
+   const config = structuredClone(loaded.base);
+   const lines = assignments.map(([key, value]) => {
+-    const was = getPath(mergeOverrides(loaded.base, loaded.override), key);
+-    setPath(config, key, value);
++    const guardedGit = key === "gitStatus.enabled" && typeof value === "boolean" &&
++      typeof config.claudeCodexGuardedGit === "boolean" && process.env.CLAUDE_CODEX_HUD_GIT_GUARD === "bridge-v1";
++    const was = guardedGit ? loaded.config.gitStatus.enabled : getPath(mergeOverrides(loaded.base, loaded.override), key);
++    if (guardedGit) {
++      // Keep the ordinary switch off for any other plugin version.
++      config.claudeCodexGuardedGit = value;
++      setPath(config, key, false);
++    } else {
++      setPath(config, key, value);
++    }
+     const shadowed = getPath(loaded.override, key) !== undefined ? " claude-hud.json also sets it, and its value wins." : "";
+     return `Set ${key} = ${JSON.stringify(value)} (was ${JSON.stringify(was ?? configKey(key)?.default)}).${shadowed}`;
+   });
