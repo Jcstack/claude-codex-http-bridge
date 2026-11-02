@@ -15,6 +15,13 @@ import codex_usage
 
 
 class UsageEnvironmentTest(unittest.TestCase):
+    def test_windows_environment_has_no_case_duplicate_proxies(self):
+        with patch.object(codex_usage.os, "name", "nt"), \
+             patch.object(codex_usage.os, "environ", {"HTTPS_PROXY": "http://proxy.invalid", "https_proxy": "http://other.invalid"}):
+            environment = codex_usage.usage_environment()
+        self.assertEqual(environment["HTTPS_PROXY"], "http://proxy.invalid")
+        self.assertNotIn("https_proxy", environment)
+
     def test_background_refresh_does_not_inherit_unrelated_keys(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / "usage.json"

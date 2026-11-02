@@ -41,7 +41,10 @@ USAGE_ENVIRONMENT = (
 
 def usage_environment() -> dict[str, str]:
     """Preserve native-account and network settings without unrelated secrets."""
-    return {name: os.environ[name] for name in USAGE_ENVIRONMENT if name in os.environ}
+    # Windows environment names are case-insensitive; do not construct two
+    # differently cased entries for the same proxy in a child environment.
+    return {name: os.environ[name] for name in USAGE_ENVIRONMENT
+            if (os.name != "nt" or name == name.upper()) and name in os.environ}
 
 
 def _private_json(path: Path) -> dict | None:
