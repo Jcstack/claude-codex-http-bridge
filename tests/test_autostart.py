@@ -12,6 +12,7 @@ from unittest.mock import patch
 import autostart
 import launcher
 import runtime_bundle
+import windows_acl
 
 
 class AutostartTests(unittest.TestCase):
@@ -128,6 +129,7 @@ class AutostartTests(unittest.TestCase):
              patch.object(autostart, "windows_pythonw", return_value=pythonw), \
              patch.object(autostart, "windows_value", return_value=None), \
              patch.object(autostart, "windows_write") as write, \
+             patch.object(windows_acl, "lock"), \
              patch.object(autostart.subprocess, "DETACHED_PROCESS", 8, create=True), \
              patch.object(autostart.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True), \
              patch.object(autostart.subprocess, "Popen") as spawn:
