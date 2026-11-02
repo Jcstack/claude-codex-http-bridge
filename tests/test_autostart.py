@@ -6,10 +6,13 @@ import os
 from pathlib import Path
 import plistlib
 import socket
+import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stdout
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import autostart
@@ -74,6 +77,113 @@ class AutostartTests(unittest.TestCase):
         with autostart.operation_lock(self.root):
             with self.assertRaisesRegex(RuntimeError, "in progress"):
                 with autostart.operation_lock(self.root, wait_seconds=0): pass
+
+    def test_macos_enable_publishes_policy_before_loading_agent(self):
+        desired = {"format": 1, "source": "system", "schemes": ["https"], "bypass": "fixture.local"}
+        agent = self.root / "fixture.plist"
+        observed = {}
+
+        def bootstrap(*arguments):
+            observed["arguments"] = arguments
+            observed["policy"] = autostart.read_macos_network_policy(self.root)
+            observed["paused"] = (self.root / "runtime" / "autostart-paused").exists()
+            try:
+                with autostart.operation_lock(self.root, wait_seconds=0): pass
+            except RuntimeError:
+                observed["locked"] = True
+            return SimpleNamespace(returncode=0)
+
+        with patch.object(autostart.platform, "system", return_value="Darwin"), \
+             patch.object(autostart.os, "getuid", return_value=1000, create=True), \
+             patch.object(autostart, "agent_path", return_value=agent), \
+             patch.object(autostart, "capture_macos_network_policy", return_value=desired), \
+             patch.object(autostart, "agent_loaded", side_effect=[False, True]), \
+             patch.object(autostart, "launchctl", side_effect=bootstrap):
+            autostart.enable(self.root)
+        self.assertEqual(observed["arguments"][0], "bootstrap")
+        self.assertEqual(observed["policy"], desired)
+        self.assertTrue(observed["paused"])
+        self.assertTrue(observed.get("locked"))
+        self.assertFalse((self.root / "runtime" / "autostart-paused").exists())
+        self.assertTrue(autostart.agent_is_ours(agent, self.root))
+
+    def test_macos_failed_bootstrap_leaves_retryable_agent_paused(self):
+        desired = {"format": 1, "source": "system", "schemes": ["https"], "bypass": "fixture.local"}
+        agent = self.root / "fixture.plist"
+        with patch.object(autostart.platform, "system", return_value="Darwin"), \
+             patch.object(autostart.os, "getuid", return_value=1000, create=True), \
+             patch.object(autostart, "agent_path", return_value=agent), \
+             patch.object(autostart, "capture_macos_network_policy", return_value=desired), \
+             patch.object(autostart, "agent_loaded", return_value=False), \
+             patch.object(autostart, "launchctl", return_value=SimpleNamespace(returncode=1)) as command:
+            with self.assertRaisesRegex(RuntimeError, "Could not load"):
+                autostart.enable(self.root)
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[0], "bootstrap")
+        self.assertTrue(autostart.agent_is_ours(agent, self.root))
+        self.assertTrue((self.root / "runtime" / "autostart-paused").exists())
+        self.assertEqual(autostart.read_macos_network_policy(self.root), desired)
+        with patch.object(autostart, "healthy", side_effect=AssertionError("must stay paused")):
+            self.assertEqual(autostart.run_once(self.root), 0)
+        self.assertEqual(self.result()["result"], "paused")
+
+    def test_macos_policy_write_failure_does_not_bootstrap(self):
+        desired = {"format": 1, "source": "system", "schemes": ["https"], "bypass": "fixture.local"}
+        old = {"format": 1, "source": "system", "schemes": ["http"], "bypass": "old.fixture"}
+        agent = self.root / "fixture.plist"
+        runtime_bundle.write_file(self.root / "runtime" / "autostart-network.json",
+                                  runtime_bundle.canonical(old), 0o600)
+        with patch.object(autostart.platform, "system", return_value="Darwin"), \
+             patch.object(autostart, "agent_path", return_value=agent), \
+             patch.object(autostart, "capture_macos_network_policy", return_value=desired), \
+             patch.object(runtime_bundle, "write_file", side_effect=OSError("synthetic write failure")), \
+             patch.object(autostart, "launchctl") as command:
+            with self.assertRaises(OSError):
+                autostart.enable(self.root)
+        command.assert_not_called()
+        self.assertFalse(agent.exists())
+        self.assertTrue((self.root / "runtime" / "autostart-paused").exists())
+        self.assertEqual(autostart.read_macos_network_policy(self.root), old)
+
+    def test_macos_timed_out_bootstrap_also_stays_paused(self):
+        desired = {"format": 1, "source": "system", "schemes": ["https"], "bypass": "fixture.local"}
+        agent = self.root / "fixture.plist"
+        with patch.object(autostart.platform, "system", return_value="Darwin"), \
+             patch.object(autostart.os, "getuid", return_value=1000, create=True), \
+             patch.object(autostart, "agent_path", return_value=agent), \
+             patch.object(autostart, "capture_macos_network_policy", return_value=desired), \
+             patch.object(autostart, "agent_loaded", return_value=False), \
+             patch.object(autostart, "launchctl", side_effect=subprocess.TimeoutExpired("fixture", 1)):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                autostart.enable(self.root)
+        self.assertTrue(autostart.agent_is_ours(agent, self.root))
+        self.assertTrue((self.root / "runtime" / "autostart-paused").exists())
+        self.assertEqual(autostart.read_macos_network_policy(self.root), desired)
+
+    def test_login_check_waits_for_an_in_progress_operation(self):
+        done = threading.Event()
+        results = []
+
+        def check():
+            results.append(autostart.run_once(self.root))
+            done.set()
+
+        with patch.object(autostart, "healthy", return_value=True):
+            with autostart.operation_lock(self.root):
+                worker = threading.Thread(target=check)
+                worker.start()
+                self.assertFalse(done.wait(.3))
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [0])
+        self.assertEqual(self.result()["result"], "healthy")
+
+    def test_busy_login_check_does_not_overwrite_previous_status(self):
+        autostart.record(self.root, "healthy")
+        previous = (self.root / "runtime" / "autostart-status.json").read_bytes()
+        with patch.object(autostart, "operation_lock", side_effect=autostart.OperationBusy("busy")):
+            self.assertEqual(autostart.run_once(self.root), 0)
+        self.assertEqual((self.root / "runtime" / "autostart-status.json").read_bytes(), previous)
 
     def test_login_definition_contains_paths_but_no_inherited_keys(self):
         sentinel = "PRIVATE_FIXTURE_SENTINEL"

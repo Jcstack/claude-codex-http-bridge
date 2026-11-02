@@ -142,8 +142,12 @@ same hold. Each platform also passed the unmodified bounded sample, the patched
 normal sample, and the separate immediate-terminal test. This demonstrates a
 possible fixture race but does not prove what caused the earlier failed run.
 The candidate workflow applies the barrier only to the pinned upstream test
-file; production code and binaries do not include it. These checks do not
-establish real WebSocket behavior.
+file; production code and binaries do not include it. The [full candidate
+run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41490731389)
+subsequently passed on macOS, Linux and Windows with that test-only barrier;
+the [earlier failed attempt](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487752563/attempts/1)
+remains part of the record. These checks do not establish real WebSocket
+behavior.
 
 A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
 on Claude Code 2.1.201 reported an additional content-progress timeout that

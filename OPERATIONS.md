@@ -185,6 +185,20 @@ A safe upgrade needs a stable authenticated listener, a ready replacement backen
 
 On 2026-11-02 the managed ingress and translator were found stopped while the original subscription service was still running. The existing TLS port, CA and keys were retained when the managed endpoint was restored; the selected account and original service were not changed. The recovery implementation now validates the selected runtime and account catalog, prepares a new backend, checks listener ownership, and can rebind the old ingress port after a process or computer restart. It refuses an occupied port or missing private identity, does not signal historical PIDs, and does not replay interrupted work. [The isolated recovery fixture](tests/probe_managed_recovery.py) covers a changed origin port, foreign-port refusal, a failed catalog recheck, old-backend preservation, periodic recovery, and a synthetic model message. One Windows fixture initially returned 502 after recovery; a later run that also checked the guarded origin catalog first passed, but the reason for the earlier failure is not established. The current readiness check verifies both local catalog routes; it does not prove a successful model inference. The macOS user login agent was loaded and reported an already-running service healthy; the machine was not rebooted for this test. The Windows login mechanism requires a separate real-host login test.
 
+On 2026-11-03, a synthetic enable-order test showed that macOS `RunAtLoad`
+could run before the private network policy was saved. The corrected controller
+publishes the policy while recovery is paused and holds the same lock used by
+manual start and stop until the login entry is ready. A bounded lock wait lets
+the initial check proceed after publication; an occupied lock does not replace
+the previous status with a false failure. If bootstrap fails or times out, the
+owned entry is retained and recovery stays paused for inspection or retry. A
+[local opt-in fixture](tests/probe_launchd_fixture.py) used a disposable macOS
+launchd job, private temporary HOME and fake verifier: periodic and paused runs,
+a verifier failure followed by a pause, a deliberately delayed bootstrap, and disabling a job while it
+waited for the lock all passed. The fixture used no real account or service and
+cleaned up its own job. It does not establish behavior after logout, sleep,
+reboot, Windows login, or a successful real model call.
+
 The verified-runtime rollback controller passed the [three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41440397811) and was installed without restarting the existing origin or ingress. Its private previous-version record was reconstructed from the uniquely matching prior source-locked bundle and verified with the selected bundle's immutable hashes. The actual `bridge rollback` transition was exercised only in isolated fixtures with a fake origin and a continuing Claude client; it was not run on the live session.
 
 The status-line adapter's unknown-usage correction passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41446391248) and was installed as a standalone file. A synthetic child process verified that an unknown `current_usage` remains unknown and that the standard cache object is still withheld. The origin, managed ingress and Claude processes were not restarted. Individual plugins can still choose their own fallback for unknown usage; the local HUD 0.8.0 sample is documented in [COMPATIBILITY.md](COMPATIBILITY.md).

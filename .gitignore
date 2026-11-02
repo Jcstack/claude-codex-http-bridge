@@ -114,3 +114,4 @@
 !.github/workflows/ws-keepalive-observation.yml
 !.github/workflows/controller-layout-observation.yml
 !.github/workflows/cache-resume-observation.yml
+!.github/workflows/autostart-gate.yml

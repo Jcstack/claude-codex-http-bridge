@@ -35,6 +35,10 @@ class NetworkPolicyError(RuntimeError):
     """The login network policy cannot be applied without changing its scope."""
 
 
+class OperationBusy(RuntimeError):
+    """Another start, stop, or login-recovery operation still owns the lock."""
+
+
 def macos_proxy_settings() -> tuple[dict, dict]:
     """Read explicit macOS proxy settings, never evaluating a PAC script."""
     try:
@@ -223,7 +227,7 @@ def operation_lock(root: Path, *, wait_seconds: float = 60, watcher: bool = Fals
                 break
             except OSError:
                 if time.monotonic() >= deadline:
-                    raise RuntimeError("Another bridge start or stop is in progress") from None
+                    raise OperationBusy("Another bridge start or stop is in progress") from None
                 time.sleep(.1)
         try:
             yield
@@ -278,7 +282,11 @@ def record(root: Path, result: str, reason: str | None = None) -> None:
 def run_once(root: Path) -> int:
     """A quiet bounded login/health check; no raw errors or payloads are logged."""
     try:
-        with operation_lock(root, wait_seconds=0):
+        # RunAtLoad can start while enable is still publishing the network
+        # policy. Wait for that transaction (and manual start/stop) instead
+        # of missing the initial check or recording ordinary contention as a
+        # failed recovery. The periodic job can try again if it stays busy.
+        with operation_lock(root):
             if (root / "runtime" / "autostart-paused").exists():
                 record(root, "paused")
                 return 0
@@ -295,6 +303,8 @@ def run_once(root: Path) -> int:
             if not healthy(root): raise RuntimeError("Bridge did not become healthy")
             record(root, "recovered")
             return 0
+    except OperationBusy:
+        return 0
     except NetworkPolicyError:
         try: record(root, "failed", "network_configuration")
         except Exception: pass
@@ -454,27 +464,36 @@ def enable(root: Path) -> None:
     if platform.system() != "Darwin":
         raise RuntimeError("Automatic login startup is available on macOS and Windows; use bridge start on this platform")
     network_policy = capture_macos_network_policy()
-    path = agent_path(root)
-    if path.parent.is_symlink(): raise RuntimeError("LaunchAgents directory must not be a symlink")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    created = False
-    if path.exists() or path.is_symlink():
-        if not agent_is_ours(path, root): raise RuntimeError("An unrelated login agent uses this path")
-    else:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "wb") as handle: handle.write(agent_definition(root))
-        created = True
-    try:
-        if not agent_loaded(root):
-            if launchctl("bootstrap", f"gui/{os.getuid()}", str(path)).returncode != 0 or not agent_loaded(root):
-                raise RuntimeError("Could not load the user login agent; check that a graphical macOS login is active")
-    except BaseException:
-        if created: path.unlink(missing_ok=True)
-        raise
     with operation_lock(root):
-        runtime_bundle.write_file(root / "runtime" / "autostart-network.json",
-                                  runtime_bundle.canonical(network_policy), 0o600)
-        unpause(root)
+        path = agent_path(root)
+        if path.parent.is_symlink(): raise RuntimeError("LaunchAgents directory must not be a symlink")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        created = False
+        if path.exists() or path.is_symlink():
+            if not agent_is_ours(path, root): raise RuntimeError("An unrelated login agent uses this path")
+        else:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as handle: handle.write(agent_definition(root))
+            created = True
+        attempted_bootstrap = False
+        try:
+            # A bootstrap may start the job before launchctl returns, or may
+            # report failure after partially loading it. Keep recovery paused
+            # until both the policy and the login entry have been published.
+            pause(root)
+            runtime_bundle.write_file(root / "runtime" / "autostart-network.json",
+                                      runtime_bundle.canonical(network_policy), 0o600)
+            if not agent_loaded(root):
+                attempted_bootstrap = True
+                if launchctl("bootstrap", f"gui/{os.getuid()}", str(path)).returncode != 0 or not agent_loaded(root):
+                    raise RuntimeError("Could not load the user login agent; check that a graphical macOS login is active")
+            unpause(root)
+        except BaseException:
+            # A failed or timed-out bootstrap can still have loaded the job.
+            # Retain its owned entry and pause marker so it can be inspected,
+            # disabled, or retried without starting under a stale policy.
+            if created and not attempted_bootstrap: path.unlink(missing_ok=True)
+            raise
 
 
 def disable(root: Path) -> None:
