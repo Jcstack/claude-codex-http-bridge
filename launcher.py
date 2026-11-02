@@ -272,6 +272,8 @@ def session_settings(base: Path, windows: dict[str, int], directory: Path,
     settings_path = directory / "settings.json"
     profile = {"context_windows": windows}
     profile.update({"remember_model": True, "route": route})
+    if os.environ.get("CLAUDE_CODEX_STATUSLINE_CACHE_METRICS") == "1":
+        profile["expose_cache_metrics"] = True
     if route == "subscription":
         profile["usage_cache"] = str(directory.parent / "codex-usage.json")
     private_json(profile_path, profile)

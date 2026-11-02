@@ -13,7 +13,8 @@ import codex_usage
 MAX_STDIN_BYTES = 1024 * 1024
 
 
-def corrected_payload(payload: dict, context_windows: dict[str, int], codex_limits: dict | None = None) -> dict:
+def corrected_payload(payload: dict, context_windows: dict[str, int], codex_limits: dict | None = None,
+                      *, expose_cache_metrics: bool = False) -> dict:
     result = dict(payload)
     model = result.get("model")
     model_id = model.get("id") if isinstance(model, dict) else None
@@ -51,13 +52,13 @@ def corrected_payload(payload: dict, context_windows: dict[str, int], codex_limi
     # Claude derives these counters from reported input/cache tokens. Its cache
     # lifetime, warmth and miss diagnoses assume provider-specific semantics.
     cache = result.pop("prompt_cache", None)
-    if isinstance(cache, dict):
+    if expose_cache_metrics and isinstance(cache, dict) and "claude_codex_bridge" not in result:
         safe_cache = {}
         observed, requests, ratio = cache.get("caching_observed"), cache.get("requests"), cache.get("hit_ratio")
         if type(observed) is bool: safe_cache["caching_observed"] = observed
         if type(requests) is int and requests >= 0: safe_cache["requests"] = requests
         if type(ratio) in (int, float) and 0 <= ratio <= 1: safe_cache["hit_ratio"] = ratio
-        if safe_cache: result["prompt_cache"] = safe_cache
+        if safe_cache: result["claude_codex_bridge"] = {"reported_main_cache": safe_cache}
     # Rate limits here describe Anthropic billing, not this Codex route.
     result.pop("rate_limits", None)
     if codex_limits:
@@ -94,7 +95,9 @@ def main() -> int:
                     session_models.record(Path(__file__).resolve().parent, payload, windows, profile.get("route", "subscription"))
                 except (OSError, RuntimeError, ValueError):
                     pass
-            raw = (json.dumps(corrected_payload(payload, windows, limits), separators=(",", ":")) + "\n").encode()
+            corrected = corrected_payload(payload, windows, limits,
+                                          expose_cache_metrics=profile.get("expose_cache_metrics") is True)
+            raw = (json.dumps(corrected, separators=(",", ":")) + "\n").encode()
     except (UnicodeDecodeError, ValueError):
         pass
     sys.stdout.buffer.write(raw)

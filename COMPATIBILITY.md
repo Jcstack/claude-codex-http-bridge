@@ -37,9 +37,11 @@ Sources: [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/
 
 Claude Code documents that `current_usage` may be null before the first API
 response and immediately after `/compact`. The existing adapter can turn that
-unknown state into `0%`. A source candidate preserves null percentages until
-all three input counters are available, while retaining a discovered context
-size. It has not yet been installed into the running status-line path.
+unknown state into `0%`. The adapter now preserves null percentages until all
+three input counters are available, while retaining a discovered context size.
+The [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41446391248)
+passed, and this adapter was installed on the local status-line path without
+restarting the origin, ingress, or Claude clients.
 
 An isolated [HUD observation](tests/probe_hud_compaction.py) with the locally
 installed Claude HUD 0.8.0 used only synthetic frames. Its percentage helper

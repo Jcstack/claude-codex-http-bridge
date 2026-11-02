@@ -124,7 +124,9 @@ def main() -> None:
             caches = [frame["cache"] for frame in frames if isinstance(frame.get("cache"), dict)]
             usages = [frame["usage"] for frame in frames if isinstance(frame.get("usage"), dict)]
             reported = caches[-1] if caches else None
-            filtered = statusline_adapter.corrected_payload({"prompt_cache": reported}, {}).get("prompt_cache")
+            default = statusline_adapter.corrected_payload({"prompt_cache": reported}, {})
+            extended = statusline_adapter.corrected_payload({"prompt_cache": reported}, {}, expose_cache_metrics=True)
+            filtered = extended.get("claude_codex_bridge", {}).get("reported_main_cache")
             expected = {"caching_observed": True, "requests": 2, "hit_ratio": .375}
             correct_counters = filtered == expected
             inferred_ttl = bool(reported and reported.get("ttl") == "5m" and reported.get("warm") is True
@@ -134,9 +136,10 @@ def main() -> None:
             print(json.dumps({"synthetic_only": True, "fake_message_requests": len(server.requests), "frames": len(frames), "frames_with_usage": len(usages),
                 "frames_with_prompt_cache": len(caches), "cache_read_fraction_matches_reported_tokens": correct_counters,
                 "client_inferred_five_minute_ttl_without_provider_ttl": inferred_ttl,
-                "bridge_omits_inferred_ttl": bool(filtered and "ttl" not in filtered and "expires_at" not in filtered),
+                "bridge_omits_standard_cache_by_default": "prompt_cache" not in default and "claude_codex_bridge" not in default,
+                "opt_in_omits_inferred_ttl": bool(filtered and "ttl" not in filtered and "expires_at" not in filtered),
                 "last_usage_has_all_input_counters": full_usage}, sort_keys=True))
-            if len(server.requests) != 2 or not (full_usage and correct_counters and inferred_ttl):
+            if len(server.requests) != 2 or not (full_usage and correct_counters and inferred_ttl and "prompt_cache" not in default):
                 raise RuntimeError("Synthetic status-line control did not complete")
         finally:
             cleanup_ok = True

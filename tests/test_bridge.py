@@ -498,7 +498,7 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(corrected["context_window"]["context_window_size"], 500_000)
         self.assertEqual(corrected["context_window"]["used_percentage"], 23)
         self.assertNotIn("total_cost_usd", corrected["cost"])
-        self.assertEqual(corrected["prompt_cache"], {"caching_observed": True})
+        self.assertNotIn("prompt_cache", corrected)
         self.assertNotIn("rate_limits", corrected)
         self.assertEqual(corrected["workspace"], payload["workspace"])
         payload["model"]["id"] = "gpt-6-sol"
@@ -510,19 +510,29 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(future["context_window"]["context_window_size"], 4_000_000)
         self.assertEqual(future["context_window"]["used_percentage"], 3)
 
-    def test_statusline_forwards_cache_read_counters_without_assumed_ttl(self) -> None:
+    def test_statusline_cache_extension_is_opt_in_and_omits_assumed_ttl(self) -> None:
         payload = {"prompt_cache": {"caching_observed": True, "requests": 2, "hit_ratio": .375,
                    "ttl": "5m", "warm": True, "expires_at": 123, "misses": 3, "unknown": "private"}}
-        corrected = statusline_adapter.corrected_payload(payload, {})
-        self.assertEqual(corrected["prompt_cache"], {"caching_observed": True, "requests": 2, "hit_ratio": .375})
+        default = statusline_adapter.corrected_payload(payload, {})
+        self.assertNotIn("prompt_cache", default)
+        self.assertNotIn("claude_codex_bridge", default)
+        corrected = statusline_adapter.corrected_payload(payload, {}, expose_cache_metrics=True)
+        self.assertNotIn("prompt_cache", corrected)
+        self.assertEqual(corrected["claude_codex_bridge"]["reported_main_cache"],
+                         {"caching_observed": True, "requests": 2, "hit_ratio": .375})
         self.assertIn("ttl", payload["prompt_cache"])
         for bad in ({"caching_observed": 1, "requests": True, "hit_ratio": float("nan")},
                     {"caching_observed": "true", "requests": -1, "hit_ratio": 1.1},
                     {"hit_ratio": float("inf")}, {"ttl": "5m"}):
-            self.assertNotIn("prompt_cache", statusline_adapter.corrected_payload({"prompt_cache": bad}, {}))
+            self.assertNotIn("claude_codex_bridge", statusline_adapter.corrected_payload(
+                {"prompt_cache": bad}, {}, expose_cache_metrics=True))
         zero = statusline_adapter.corrected_payload({"prompt_cache": {"caching_observed": False,
-                                                     "requests": 0, "hit_ratio": 0}}, {})
-        self.assertEqual(zero["prompt_cache"], {"caching_observed": False, "requests": 0, "hit_ratio": 0})
+                                                     "requests": 0, "hit_ratio": 0}}, {}, expose_cache_metrics=True)
+        self.assertEqual(zero["claude_codex_bridge"]["reported_main_cache"],
+                         {"caching_observed": False, "requests": 0, "hit_ratio": 0})
+        existing = statusline_adapter.corrected_payload({"prompt_cache": payload["prompt_cache"],
+                    "claude_codex_bridge": {"existing": True}}, {}, expose_cache_metrics=True)
+        self.assertEqual(existing["claude_codex_bridge"], {"existing": True})
 
     def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
         name = "gpt-6-astra"
@@ -545,6 +555,27 @@ Model ID: `gpt-6.1-sol`
         values["cache_read_input_tokens"] = 10**400
         huge = statusline_adapter.corrected_payload(payload, {name: 872_000})
         self.assertEqual(huge["context_window"]["used_percentage"], 100)
+
+    def test_statusline_cache_extension_flows_through_the_real_adapter_process(self) -> None:
+        payload = {"prompt_cache": {"caching_observed": True, "requests": 2, "hit_ratio": .375,
+                   "ttl": "5m", "warm": True, "expires_at": 123}}
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory) / "profile.json"
+            environment = {name: os.environ[name] for name in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP") if name in os.environ}
+            environment["HOME"] = directory
+            if os.name == "nt": environment["USERPROFILE"] = directory
+            for opted in (False, True):
+                profile.write_text(json.dumps({"context_windows": {}, "expose_cache_metrics": opted}))
+                result = subprocess.run([sys.executable, str(Path(statusline_adapter.__file__)), str(profile)],
+                                        input=json.dumps(payload), text=True, capture_output=True, timeout=10, check=True,
+                                        env=environment, cwd=directory)
+                result = json.loads(result.stdout)
+                self.assertNotIn("prompt_cache", result)
+                if opted:
+                    self.assertEqual(result["claude_codex_bridge"]["reported_main_cache"],
+                                     {"caching_observed": True, "requests": 2, "hit_ratio": .375})
+                else:
+                    self.assertNotIn("claude_codex_bridge", result)
 
     def test_codex_quota_maps_only_real_windows_and_requires_matching_account(self) -> None:
         response = {"rateLimitsByLimitId": {"codex": {
@@ -594,7 +625,8 @@ Model ID: `gpt-6.1-sol`
             base.write_text(json.dumps({"modelPicker": {"options": []}}))
             session_dir = root / "session"
             session_dir.mkdir()
-            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude_dir)}, clear=False):
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude_dir),
+                                        "CLAUDE_CODEX_STATUSLINE_CACHE_METRICS": "0"}, clear=False):
                 settings_path, files = launcher.session_settings(base, {"gpt-6.1-sol": 500_000}, session_dir)
             result = json.loads(settings_path.read_text())
             self.assertIn("statusline_adapter.py", result["statusLine"]["command"])
@@ -603,6 +635,13 @@ Model ID: `gpt-6.1-sol`
             self.assertEqual(json.loads(files[0].read_text())["context_windows"], {"gpt-6.1-sol": 500_000})
             self.assertEqual(json.loads(files[0].read_text())["usage_cache"], str(root / "codex-usage.json"))
             self.assertEqual(json.loads(user_settings.read_text())["statusLine"]["command"], "echo HUD")
+            self.assertNotIn("expose_cache_metrics", json.loads(files[0].read_text()))
+            opted_dir = root / "opted-session"
+            opted_dir.mkdir()
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude_dir),
+                                        "CLAUDE_CODEX_STATUSLINE_CACHE_METRICS": "1"}, clear=False):
+                _, opted_files = launcher.session_settings(base, {"gpt-6.1-sol": 500_000}, opted_dir)
+            self.assertIs(json.loads(opted_files[0].read_text())["expose_cache_metrics"], True)
             api_dir = root / "api-session"
             api_dir.mkdir()
             with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude_dir)}, clear=False):

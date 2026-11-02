@@ -233,12 +233,22 @@ even though the fake service supplied no lifetime. The [reproducible probe](test
 uses a temporary home and no provider. Its interactive path has been tested
 locally on macOS; Windows console behavior remains unverified.
 
-A source candidate preserves the validated `requests`, `caching_observed` and
-`hit_ratio` fields while withholding inferred warmth, expiry, lifetime, miss
-diagnosis and cache-write accounting. An absent cache report is not proof that
-caching is off. These values describe counters reported to Claude for the main
-conversation, not a provider-wide hit rate, a guaranteed cache lifetime, or a
-bill. The candidate has not yet been installed in the live status-line path.
+A source candidate continues to remove the standard `prompt_cache` object by
+default. In an opt-in extension, it passes the validated `requests`,
+`caching_observed` and `hit_ratio` fields under
+`claude_codex_bridge.reported_main_cache`, while withholding inferred warmth,
+expiry, lifetime, miss diagnosis and cache-write accounting. An absent cache
+report is not proof that caching is off. These values describe counters
+reported to Claude for the main conversation, not a provider-wide hit rate, a
+guaranteed cache lifetime, or a bill. Existing plugins need explicit support
+for the extension; it has not yet been installed in the live status-line path.
+
+Passing a partial object as the standard `prompt_cache` is unsafe for some
+plugins. For example, [this status-line implementation](https://github.com/tsalkin/claude-code-statusline/blob/17396d0bb11a47b184c7eb3709088dac36d7c91d/statusline.sh)
+defaults a missing `warm` value to false and displays cold when a `hit_ratio`
+is present. That is a source-code observation for one version, not a survey
+of every plugin. It motivates the separate opt-in namespace rather than an
+unsupported claim that the provider cache is cold or warm.
 
 ## Next gates
 
