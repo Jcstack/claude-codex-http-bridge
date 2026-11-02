@@ -82,6 +82,13 @@ and [three-platform candidate translator gate](https://github.com/Jcstack/claude
 passed for these synthetic cases. They do not test real plugins, a real
 Windows account, or production transport behavior.
 
+The same test-only adapter later failed once in the [macOS client job](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41444475594/job/125274061156)
+without a recorded case or failure category; its source was unchanged from an
+earlier passing run. A separate local run passed. Neither observation identifies
+the cause. The fixture now reports synthetic per-case boolean controls and
+exception types on failure, while continuing to withhold raw client output,
+request bodies, paths and tool arguments. The candidate remains experimental.
+
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,
 real plugins, MCP protocol changes, and Windows. The test adapter does not

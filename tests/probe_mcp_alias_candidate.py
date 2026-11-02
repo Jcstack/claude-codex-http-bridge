@@ -148,15 +148,29 @@ def main():
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("The locked Claude fixture is required")
-    ok, offered, calls, _ = run_case(claude, None, resume=True)
-    denied_ok, denied_offered, denied_calls, _ = run_case(claude, ALIASES[0])
-    dynamic_ok, dynamic_offered, dynamic_calls, refreshed = run_case(claude, None, dynamic=True)
-    if not ok or not set(ALIASES).issubset(offered) or calls != list(ORIGINALS) * 2:
-        raise RuntimeError("Distinct synthetic original tools were not each called once per session turn")
-    if not denied_ok or ALIASES[1] not in denied_offered or denied_calls != [ORIGINALS[1]]:
-        raise RuntimeError("Synthetic scoped deny control failed")
-    if not dynamic_ok or not refreshed or DYNAMIC_ALIAS not in dynamic_offered or dynamic_calls != [ORIGINALS[0], "lookup.extra"]:
-        raise RuntimeError("Synthetic dynamic tool refresh did not complete")
+    def observed(label, *args, **kwargs):
+        try:
+            return run_case(claude, *args, **kwargs)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            print(json.dumps({"synthetic_only": True, "case": label, "exception_type": type(error).__name__}), flush=True)
+            raise
+
+    ok, offered, calls, _ = observed("resume", None, resume=True)
+    denied_ok, denied_offered, denied_calls, _ = observed("deny", ALIASES[0])
+    dynamic_ok, dynamic_offered, dynamic_calls, refreshed = observed("dynamic", None, dynamic=True)
+    checks = {
+        "resume": {"completed": ok, "both_offered": set(ALIASES).issubset(offered),
+                   "expected_calls": calls == list(ORIGINALS) * 2},
+        "deny": {"completed": denied_ok, "allowed_offered": ALIASES[1] in denied_offered,
+                 "expected_calls": denied_calls == [ORIGINALS[1]]},
+        "dynamic": {"completed": dynamic_ok, "refreshed": refreshed, "new_offered": DYNAMIC_ALIAS in dynamic_offered,
+                    "expected_calls": dynamic_calls == [ORIGINALS[0], "lookup.extra"]},
+    }
+    if any(not all(case.values()) for case in checks.values()):
+        # Only synthetic boolean observations leave the fixture; do not emit
+        # client output, request bodies, paths, or tool arguments on failure.
+        print(json.dumps({"synthetic_only": True, "failed_checks": checks}, sort_keys=True), flush=True)
+        raise RuntimeError("Synthetic MCP alias candidate did not meet all controls")
     print(json.dumps({"synthetic_only": True, "test_only_transport": True,
                       "distinct_originals_called_once_per_run_including_resume": True,
                       "dynamic_list_changed_refreshed_and_called_new_original": True,
