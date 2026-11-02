@@ -25,6 +25,8 @@ HELPER = ROOT / "bridge_models.py"
 
 
 def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
+    if arguments and arguments[0] == "cache":
+        return "cache", "", arguments[1:]
     if arguments and arguments[0] == "account":
         return "account", "", arguments[1:]
     if arguments and arguments[0] == "quota":
@@ -274,6 +276,8 @@ def session_settings(base: Path, windows: dict[str, int], directory: Path,
     profile.update({"remember_model": True, "route": route})
     if os.environ.get("CLAUDE_CODEX_STATUSLINE_CACHE_METRICS") == "1":
         profile["expose_cache_metrics"] = True
+    elif os.environ.get("CLAUDE_CODEX_STATUSLINE_CACHE_METRICS") == "0":
+        profile["expose_cache_metrics"] = False
     if route == "subscription":
         profile["usage_cache"] = str(directory.parent / "codex-usage.json")
     private_json(profile_path, profile)
@@ -741,6 +745,7 @@ def main() -> int:
         print("Opt-in scoped computer use: claude-codex desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
         print("Read-only metadata: claude-codex diagnostics [--hours 2 | --lifetime] [--session UUID | --tracked] [--include-children].")
         print("Partial offline MCP name check: claude-codex mcp-audit [--config FILE] [--inventory FILE] [--show-names].")
+        print("Reported cache tokens: claude-codex cache telemetry enable | disable | status.")
         print("Reconcile a stale local quota gate after an upstream reset: claude-codex quota recover.")
         return 0
     if mode == "diagnostics":
@@ -749,6 +754,10 @@ def main() -> int:
     if mode == "mcp-audit":
         import mcp_name_audit
         return mcp_name_audit.main(claude_args)
+    if mode == "cache":
+        if route != "subscription": raise ValueError("The shared cache telemetry preference uses the subscription route")
+        import statusline_adapter
+        return statusline_adapter.cache_metrics_command(ROOT, claude_args)
     helper_output("verify")
     if mode == "autostart":
         if route != "subscription": raise ValueError("Login recovery uses the Codex subscription profile")

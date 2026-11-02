@@ -4,13 +4,61 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import stat
 import sys
 
 import codex_usage
 
 
 MAX_STDIN_BYTES = 1024 * 1024
+ROOT = Path(__file__).resolve().parent
+CACHE_PREFERENCE = "statusline-cache-metrics.json"
+
+
+def cache_metrics_preference(root: Path) -> bool:
+    """Read the local opt-in without following symlinks or accepting partial data."""
+    path = root / CACHE_PREFERENCE
+    try:
+        if root.is_symlink() or not stat.S_ISREG(path.lstat().st_mode): return False
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 4096:
+                return False
+            if os.name != "nt" and (info.st_mode & 0o077 or info.st_uid != os.getuid()):
+                return False
+            value = json.loads(handle.read(4097))
+        return (isinstance(value, dict) and set(value) == {"version", "enabled"} and
+                type(value["version"]) is int and value["version"] == 1 and value["enabled"] is True)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def cache_metrics_enabled(profile: dict, root: Path | None = None) -> bool:
+    """A per-session choice wins over the subscription-wide local opt-in."""
+    selected = profile.get("expose_cache_metrics")
+    if type(selected) is bool:
+        return selected
+    return profile.get("route", "subscription") == "subscription" and cache_metrics_preference(root or ROOT)
+
+
+def cache_metrics_command(root: Path, arguments: list[str]) -> int:
+    if len(arguments) != 2 or arguments[0] != "telemetry" or arguments[1] not in ("enable", "disable", "status"):
+        raise ValueError("Usage: claude-codex cache telemetry enable | disable | status")
+    action = arguments[1]
+    if action != "status":
+        import api_profile
+        api_profile.write_private(root / CACHE_PREFERENCE,
+                                  json.dumps({"version": 1, "enabled": action == "enable"}) + "\n")
+    enabled = cache_metrics_preference(root)
+    if action != "status" and enabled != (action == "enable"):
+        raise RuntimeError("Could not verify the cache telemetry preference")
+    print("Reported main-session cache telemetry: " + ("enabled" if enabled else "disabled") +
+          " by local preference; explicit per-session settings take precedence.")
+    return 0
 
 
 def corrected_payload(payload: dict, context_windows: dict[str, int], codex_limits: dict | None = None,
@@ -96,7 +144,7 @@ def main() -> int:
                 except (OSError, RuntimeError, ValueError):
                     pass
             corrected = corrected_payload(payload, windows, limits,
-                                          expose_cache_metrics=profile.get("expose_cache_metrics") is True)
+                                          expose_cache_metrics=cache_metrics_enabled(profile))
             raw = (json.dumps(corrected, separators=(",", ":")) + "\n").encode()
     except (UnicodeDecodeError, ValueError):
         pass

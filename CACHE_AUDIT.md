@@ -243,9 +243,11 @@ reported to Claude for the main conversation, not a provider-wide hit rate, a
 guaranteed cache lifetime, or a bill. A continuing session can span account or
 model changes, so the counters do not establish account-level cache isolation.
 The extension passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41447807601)
-and is installed locally. Set `CLAUDE_CODEX_STATUSLINE_CACHE_METRICS=1` before
-starting a new session to enable it for that session; existing session profiles
-are unchanged. Plugins need explicit support for the extension to display it.
+and is installed locally. A candidate local preference can enable or disable
+the extension on the next status-line refresh for existing and future
+subscription sessions. An explicit per-session environment setting takes
+precedence. The preference implementation has not yet been installed; plugins
+still need explicit support for the extension to display it.
 
 An experimental [HUD adapter patch](upstream/patches/claude-hud-v0.15-reported-cache.patch)
 teaches the reviewed HUD version to display the extension as “Reported

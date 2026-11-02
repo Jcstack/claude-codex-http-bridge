@@ -1,7 +1,7 @@
 """Security and model-selection checks with no live credential or network use."""
 
 from contextlib import redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 import json
 import os
 from pathlib import Path
@@ -534,6 +534,45 @@ Model ID: `gpt-6.1-sol`
                     "claude_codex_bridge": {"existing": True}}, {}, expose_cache_metrics=True)
         self.assertEqual(existing["claude_codex_bridge"], {"existing": True})
 
+    def test_cache_telemetry_preference_refreshes_existing_statusline(self) -> None:
+        payload = {"prompt_cache": {"caching_observed": True, "requests": 2, "hit_ratio": .375,
+                                   "ttl": "5m", "warm": True}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile = root / "profile.json"
+            profile.write_text(json.dumps({"context_windows": {}, "route": "subscription"}))
+
+            def invoke() -> dict:
+                source = TextIOWrapper(BytesIO(json.dumps(payload).encode()), encoding="utf-8")
+                data = BytesIO()
+                target = TextIOWrapper(data, encoding="utf-8", write_through=True)
+                with patch.object(statusline_adapter, "ROOT", root), patch.object(sys, "stdin", source), \
+                        patch.object(sys, "stdout", target), patch.object(sys, "argv", ["adapter", str(profile)]):
+                    self.assertEqual(statusline_adapter.main(), 0)
+                return json.loads(data.getvalue())
+
+            self.assertNotIn("claude_codex_bridge", invoke())
+            with redirect_stdout(StringIO()):
+                statusline_adapter.cache_metrics_command(root, ["telemetry", "enable"])
+            self.assertEqual(invoke()["claude_codex_bridge"]["reported_main_cache"]["hit_ratio"], .375)
+            self.assertFalse(statusline_adapter.cache_metrics_enabled({"route": "api"}, root))
+            self.assertFalse(statusline_adapter.cache_metrics_enabled({"expose_cache_metrics": False}, root))
+            with redirect_stdout(StringIO()):
+                statusline_adapter.cache_metrics_command(root, ["telemetry", "disable"])
+            self.assertNotIn("claude_codex_bridge", invoke())
+            self.assertTrue(statusline_adapter.cache_metrics_enabled({"expose_cache_metrics": True}, root))
+            pref = root / statusline_adapter.CACHE_PREFERENCE
+            api_profile.write_private(pref, '{"version": true, "enabled": 1}')
+            self.assertFalse(statusline_adapter.cache_metrics_preference(root))
+            if os.name != "nt":
+                api_profile.write_private(pref, '{"version": 1, "enabled": true}')
+                pref.chmod(0o644)
+                self.assertFalse(statusline_adapter.cache_metrics_preference(root))
+
+    def test_cache_telemetry_command_parsing(self) -> None:
+        self.assertEqual(launcher.parse_args(["cache", "telemetry", "enable"]),
+                         ("cache", "", ["telemetry", "enable"]))
+
     def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
         name = "gpt-6-astra"
         for usage in (None, {}, {"input_tokens": 100},
@@ -635,7 +674,12 @@ Model ID: `gpt-6.1-sol`
             self.assertEqual(json.loads(files[0].read_text())["context_windows"], {"gpt-6.1-sol": 500_000})
             self.assertEqual(json.loads(files[0].read_text())["usage_cache"], str(root / "codex-usage.json"))
             self.assertEqual(json.loads(user_settings.read_text())["statusLine"]["command"], "echo HUD")
-            self.assertNotIn("expose_cache_metrics", json.loads(files[0].read_text()))
+            self.assertIs(json.loads(files[0].read_text())["expose_cache_metrics"], False)
+            default_dir = root / "default-session"
+            default_dir.mkdir()
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude_dir)}, clear=True):
+                _, default_files = launcher.session_settings(base, {"gpt-6.1-sol": 500_000}, default_dir)
+            self.assertNotIn("expose_cache_metrics", json.loads(default_files[0].read_text()))
             opted_dir = root / "opted-session"
             opted_dir.mkdir()
             with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude_dir),
