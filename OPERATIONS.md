@@ -207,9 +207,11 @@ on macOS, Windows and Linux. The controller alone was atomically installed on th
 local Mac under operation, account and service locks after verifying the exact
 previous source, and a private rollback copy was retained. Service and network
 policy metadata matched before and after; the origin and ingress kept their
-processes and ports, and a request remained active. A subsequent scheduled
-login-agent check reported healthy. No account or inference request was
-changed. A real reboot and Windows user login were not performed.
+processes and ports, and the active-request count was nonzero both before and
+after. That count does not identify or prove continuity of an individual
+stream. A subsequent scheduled login-agent check reported healthy. No account
+was switched and no inference request was sent by the rollout. A real reboot
+and Windows user login were not performed.
 
 The longer lock wait also exposed a Windows watcher race in a synthetic
 concurrency test: a watcher that had already checked its startup registry entry
