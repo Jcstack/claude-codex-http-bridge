@@ -30,29 +30,38 @@ INTERVAL_SECONDS = 120
 PROXY_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 
 
+class NetworkPolicyError(RuntimeError):
+    """The login network policy cannot be applied without changing its scope."""
+
+
 def macos_proxy_settings() -> tuple[dict, dict]:
     """Read explicit macOS proxy settings, never evaluating a PAC script."""
-    from _scproxy import _get_proxy_settings
-    from urllib.request import getproxies_macosx_sysconf
-
-    result = subprocess.run(["/usr/sbin/scutil", "--proxy"], stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                            timeout=5, check=True)
+    try:
+        from _scproxy import _get_proxy_settings
+        from urllib.request import getproxies_macosx_sysconf
+        result = subprocess.run(["/usr/sbin/scutil", "--proxy"], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                                timeout=5, check=True)
+    except (ImportError, OSError, subprocess.SubprocessError):
+        raise NetworkPolicyError("Cannot read macOS system proxy settings") from None
     if re.search(r"(?m)^\s*ProxyAuto(?:Config|Discovery)Enable\s*:\s*1\s*$", result.stdout):
-        raise RuntimeError("Automatic system proxy discovery is not supported for login recovery")
-    return getproxies_macosx_sysconf(), _get_proxy_settings()
+        raise NetworkPolicyError("Automatic system proxy discovery is not supported for login recovery")
+    try:
+        return getproxies_macosx_sysconf(), _get_proxy_settings()
+    except (OSError, RuntimeError, ValueError, TypeError):
+        raise NetworkPolicyError("Cannot read macOS system proxy settings") from None
 
 
 def macos_bypass(settings: dict) -> str:
     """Translate the representable subset of macOS bypass rules to Go NO_PROXY."""
     if settings.get("exclude_simple"):
-        raise RuntimeError("Simple-host system proxy bypass needs an explicit NO_PROXY")
+        raise NetworkPolicyError("Simple-host system proxy bypass needs an explicit NO_PROXY")
     exceptions = settings.get("exceptions", [])
     if not isinstance(exceptions, (list, tuple)):
-        raise RuntimeError("Unsupported system proxy bypass")
+        raise NetworkPolicyError("Unsupported system proxy bypass")
     result = []
     for value in exceptions:
-        if not isinstance(value, str): raise RuntimeError("Unsupported system proxy bypass")
+        if not isinstance(value, str): raise NetworkPolicyError("Unsupported system proxy bypass")
         value = value.strip()
         if value == "*":
             result.append(value)
@@ -65,7 +74,7 @@ def macos_bypass(settings: dict) -> str:
             # send additional traffic outside the configured proxy.
             if value.lower() != "localhost" and not re.fullmatch(
                     r"\*\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*(?::[0-9]{1,5})?", value):
-                raise RuntimeError("Unsupported system proxy bypass") from None
+                raise NetworkPolicyError("Unsupported system proxy bypass") from None
         result.append(value)
     return ",".join(result)
 
@@ -74,26 +83,26 @@ def capture_macos_network_policy() -> dict:
     """Remember the invoking shell's bypass rules, never its proxy URLs."""
     proxies, settings = macos_proxy_settings()
     if not isinstance(proxies, dict) or not isinstance(settings, dict):
-        raise RuntimeError("Unsupported system proxy settings")
+        raise NetworkPolicyError("Unsupported system proxy settings")
     explicit = any(name in os.environ for name in PROXY_NAMES)
     if not explicit:
         # Validate now; the dynamic system rules are read again at login.
         if proxies.get("socks") and not proxies.get("https"):
-            raise RuntimeError("SOCKS-only system proxy needs an explicit HTTPS_PROXY")
+            raise NetworkPolicyError("SOCKS-only system proxy needs an explicit HTTPS_PROXY")
         if proxies.get("http") or proxies.get("https"): macos_bypass(settings)
         return {"format": 1, "source": "system", "schemes": None, "bypass": None}
     if os.environ.get("ALL_PROXY") or os.environ.get("all_proxy"):
-        raise RuntimeError("ALL_PROXY cannot be saved for login recovery")
+        raise NetworkPolicyError("ALL_PROXY cannot be saved for login recovery")
     schemes = []
     for scheme in ("http", "https"):
         configured = os.environ.get(scheme.upper() + "_PROXY") or os.environ.get(scheme + "_proxy")
         if configured:
             if configured != proxies.get(scheme):
-                raise RuntimeError("Shell and system proxy settings differ; login recovery cannot reuse them")
+                raise NetworkPolicyError("Shell and system proxy settings differ; login recovery cannot reuse them")
             schemes.append(scheme)
     bypass = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
     if len(bypass) > 8192 or any(c in bypass for c in "\r\n\x00@"):
-        raise RuntimeError("Unsupported shell proxy bypass")
+        raise NetworkPolicyError("Unsupported shell proxy bypass")
     return {"format": 1, "source": "system", "schemes": schemes, "bypass": bypass}
 
 
@@ -111,7 +120,7 @@ def read_macos_network_policy(root: Path) -> dict:
             (value["bypass"] is not None and (not isinstance(value["bypass"], str) or
              len(value["bypass"]) > 8192 or any(c in value["bypass"] for c in "\r\n\x00@"))) or
             ((value["schemes"] is None) != (value["bypass"] is None))):
-        raise RuntimeError("Invalid login network policy")
+        raise NetworkPolicyError("Invalid login network policy")
     return value
 
 
@@ -127,18 +136,21 @@ def startup_network_environment(root: Path):
         return
     proxies, settings = macos_proxy_settings()
     if not isinstance(proxies, dict) or not isinstance(settings, dict):
-        raise RuntimeError("Unsupported system proxy settings")
-    policy = read_macos_network_policy(root)
+        raise NetworkPolicyError("Unsupported system proxy settings")
+    try:
+        policy = read_macos_network_policy(root)
+    except (OSError, RuntimeError, ValueError):
+        raise NetworkPolicyError("Cannot read the private login network policy") from None
     schemes = policy["schemes"]
     additions = {}
     for scheme in ("http", "https"):
         if schemes is not None and scheme not in schemes: continue
         value = proxies.get(scheme)
         if not value:
-            if schemes is not None: raise RuntimeError("Saved system proxy is unavailable")
+            if schemes is not None: raise NetworkPolicyError("Saved system proxy is unavailable")
             continue
         if not isinstance(value, str) or any(c in value for c in "\r\n\x00"):
-            raise RuntimeError("Unsupported system proxy URL")
+            raise NetworkPolicyError("Unsupported system proxy URL")
         try:
             parsed = urlsplit(value)
             if (parsed.scheme not in ("http", "https", "socks5") or not parsed.hostname or
@@ -146,11 +158,11 @@ def startup_network_environment(root: Path):
                 raise ValueError
             _ = parsed.port
         except ValueError:
-            raise RuntimeError("Unsupported system proxy URL") from None
+            raise NetworkPolicyError("Unsupported system proxy URL") from None
         additions[scheme.upper() + "_PROXY"] = value
         additions[scheme + "_proxy"] = value
     if schemes is None and proxies.get("socks") and "HTTPS_PROXY" not in additions:
-        raise RuntimeError("SOCKS-only system proxy needs an explicit HTTPS_PROXY")
+        raise NetworkPolicyError("SOCKS-only system proxy needs an explicit HTTPS_PROXY")
     if additions:
         if "NO_PROXY" in os.environ:
             bypass = os.environ["NO_PROXY"]
@@ -235,11 +247,15 @@ def healthy(root: Path) -> bool:
                 origin.get("pid") == state["pid"] and origin.get("port") == state["port"])
 
 
-def record(root: Path, result: str) -> None:
+def record(root: Path, result: str, reason: str | None = None) -> None:
     if result not in ("healthy", "recovered", "paused", "failed"):
         raise ValueError("Invalid autostart result")
+    if reason not in (None, "network_configuration") or (reason and result != "failed"):
+        raise ValueError("Invalid autostart reason")
+    state = {"result": result, "time": int(time.time())}
+    if reason: state["reason"] = reason
     api_profile.write_private(root / "runtime" / "autostart-status.json",
-                              json.dumps({"result": result, "time": int(time.time())}) + "\n")
+                              json.dumps(state) + "\n")
 
 
 def run_once(root: Path) -> int:
@@ -262,6 +278,10 @@ def run_once(root: Path) -> int:
             if not healthy(root): raise RuntimeError("Bridge did not become healthy")
             record(root, "recovered")
             return 0
+    except NetworkPolicyError:
+        try: record(root, "failed", "network_configuration")
+        except Exception: pass
+        return 1
     except Exception:
         # Do not persist exception text: transports can include private paths
         # or server responses. Manual bridge start gives an actionable error.
@@ -475,8 +495,11 @@ def main(arguments: list[str], *, root: Path) -> int:
         if last.is_file() and not last.is_symlink():
             runtime_bundle.safe_file(last, limit=4096)
             state = json.loads(last.read_text())
-            if state.get("result") in ("healthy", "recovered", "paused", "failed") and type(state.get("time")) is int:
-                result["last"] = state
+            if (isinstance(state, dict) and state.get("result") in ("healthy", "recovered", "paused", "failed")
+                    and type(state.get("time")) is int):
+                result["last"] = {"result": state["result"], "time": state["time"]}
+                if state.get("reason") == "network_configuration":
+                    result["last"]["reason"] = "network_configuration"
         print(json.dumps(result))
     return 0
 

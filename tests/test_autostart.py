@@ -1,12 +1,14 @@
 """Login recovery uses local metadata, respects manual stop, and hides errors."""
 
 import json
+import io
 import os
 from pathlib import Path
 import plistlib
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import autostart
@@ -64,6 +66,7 @@ class AutostartTests(unittest.TestCase):
              patch.object(launcher, "helper_output", side_effect=RuntimeError(sentinel)):
             self.assertEqual(autostart.run_once(self.root), 1)
         self.assertEqual(self.result()["result"], "failed")
+        self.assertNotIn("reason", self.result())
         self.assertNotIn(sentinel, (self.root / "runtime" / "autostart-status.json").read_text())
 
     def test_lock_refuses_a_simultaneous_start_stop(self):
@@ -143,6 +146,7 @@ class AutostartTests(unittest.TestCase):
             self.assertEqual(autostart.run_once(self.root), 1)
             start_mock.assert_not_called()
         self.assertEqual(self.result()["result"], "failed")
+        self.assertEqual(self.result()["reason"], "network_configuration")
 
     def test_macos_proxy_capture_rejects_mismatch_and_unrepresentable_bypass(self):
         with patch.dict(os.environ, {**self.system_environment(), "https_proxy": "http://127.0.0.1:1111"}, clear=True), \
@@ -202,6 +206,18 @@ class AutostartTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unrelated"):
                 autostart.disable(self.root)
         self.assertTrue(path.exists())
+
+    def test_status_only_returns_allowlisted_metadata(self):
+        sentinel = "PRIVATE_FIXTURE_SENTINEL"
+        autostart.api_profile.write_private(self.root / "runtime" / "autostart-status.json",
+            json.dumps({"result": "failed", "time": 1, "reason": "network_configuration", "extra": sentinel}))
+        output = io.StringIO()
+        with patch.object(autostart.platform, "system", return_value="Darwin"), \
+             patch.object(autostart, "agent_path", return_value=self.root / "absent.plist"), \
+             redirect_stdout(output):
+            self.assertEqual(autostart.main(["status"], root=self.root), 0)
+        self.assertNotIn(sentinel, output.getvalue())
+        self.assertEqual(json.loads(output.getvalue())["last"]["reason"], "network_configuration")
 
     def test_manual_commands_serialize_and_pause_only_after_stop(self):
         with patch.object(launcher, "ROOT", self.root), patch.object(launcher, "helper_output"), \
