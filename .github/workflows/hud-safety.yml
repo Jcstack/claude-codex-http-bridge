@@ -38,5 +38,9 @@ jobs:
         run: python tests/probe_hud_node_fallback.py --hud-dir external-hud
       - name: Exercise synthetic bridge status, activity, quota and post-compaction displays
         run: python tests/probe_hud_render.py --hud-dir external-hud
+      - name: Normalize the synthetic positive-control marker path on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-windows-fixture.patch"
       - name: Exercise upstream's owned-repository security controls and failed enumeration
         run: python tests/probe_hud_security.py --hud-dir external-hud

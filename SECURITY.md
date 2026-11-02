@@ -85,7 +85,11 @@ passed the fixture and a synthetic config-enumeration failure check locally;
 it is not an upstream fix, a complete security audit, or an installed plugin.
 The first [platform run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41451134573)
 passed on macOS and Linux but failed one Git-filter fixture on Windows. Its
-cause remains under investigation; a passing Unix run does not validate Windows.
+first classified failure was the fixture's `git add` positive control, not a
+reported command execution by the candidate. A Windows-only test experiment
+normalizes the synthetic marker path to forward slashes while retaining the
+same assertions; its outcome remains to be checked. A passing Unix run does
+not validate Windows.
 The [fixture runner](tests/probe_hud_security.py) runs reviewed plugin code with
 a temporary home and filtered environment, not an OS sandbox. The user's
 existing HUD command selects plugin versions dynamically, so changing the cache

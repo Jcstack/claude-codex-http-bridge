@@ -1,0 +1,11 @@
+--- a/verify/owner.check.mjs
++++ b/verify/owner.check.mjs
+@@ -141,7 +141,7 @@
+   });
+ 
+   await check('a repo filter whose name `-c` cannot express makes the collector skip git, not run it', async () => {
+-    const ran = (what) => path.join(tmp, `ran-name-${what}`);
++    const ran = (what) => path.join(tmp, `ran-name-${what}`).replaceAll('\\', '/');
+     for (const [label, name] of [['not-utf8', Buffer.from([0xff])], ['equals', Buffer.from('a=b')]]) {
+       const dir = path.join(tmp, `name-${label}`);
+       fs.mkdirSync(dir);
