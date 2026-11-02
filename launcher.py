@@ -244,7 +244,10 @@ def configured_status_line() -> dict | None:
     if os.environ.get("CLAUDE_CODEX_STATUSLINE_ADAPTER") == "0":
         return None
     locations = os.environ.get("CLAUDE_CONFIG_DIR")
-    roots = [Path(part) for part in locations.split(os.pathsep) if part] if locations else [Path.home() / ".claude"]
+    try:
+        roots = [Path(part) for part in locations.split(os.pathsep) if part] if locations else [Path.home() / ".claude"]
+    except RuntimeError:
+        return None
     for root in roots:
         settings_file = root / "settings.json"
         if not settings_file.is_file():
@@ -357,8 +360,11 @@ def project_status_line_may_override(arguments: list[str], workspace: Path) -> b
     if "project" in sources:
         shared = workspace / ".claude" / "settings.json"
         locations = os.environ.get("CLAUDE_CONFIG_DIR")
-        user_roots = ([Path(part) for part in locations.split(os.pathsep) if part] if locations
-                      else [Path.home() / ".claude"])
+        try:
+            user_roots = ([Path(part) for part in locations.split(os.pathsep) if part] if locations
+                          else [Path.home() / ".claude"])
+        except RuntimeError:
+            return True
         same_as_user = False
         for root in user_roots:
             try:

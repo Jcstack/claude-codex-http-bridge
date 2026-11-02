@@ -781,6 +781,8 @@ Model ID: `gpt-6.1-sol`
     def test_project_and_worktree_statusline_precedence_is_detected_privately(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
             root = Path(directory); main = root / "main"; main.mkdir()
+            os.environ["HOME"] = str(root)
+            if os.name == "nt": os.environ["USERPROFILE"] = str(root)
             git = main / ".git"; git.mkdir(); nested = main / "nested"; nested.mkdir()
             project = nested / ".claude"; project.mkdir()
             shared = project / "settings.json"
@@ -814,6 +816,9 @@ Model ID: `gpt-6.1-sol`
             if hasattr(os, "mkfifo"):
                 shared.unlink(); os.mkfifo(shared)
                 self.assertTrue(launcher.project_status_line_may_override([], nested))
+            with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", side_effect=RuntimeError("fixture")):
+                self.assertTrue(launcher.project_status_line_may_override([], nested))
+                self.assertIsNone(launcher.configured_status_line())
 
     def test_launcher_passes_statusline_scope_to_session_settings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
