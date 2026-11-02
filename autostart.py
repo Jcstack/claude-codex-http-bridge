@@ -5,15 +5,18 @@ from __future__ import annotations
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import hashlib
 import io
+import ipaddress
 import json
 import os
 from pathlib import Path, PureWindowsPath
 import platform
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 
 # Isolated Python deliberately does not add the script's directory to sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -24,6 +27,146 @@ import runtime_bundle
 
 
 INTERVAL_SECONDS = 120
+PROXY_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
+
+def macos_proxy_settings() -> tuple[dict, dict]:
+    """Read explicit macOS proxy settings, never evaluating a PAC script."""
+    from _scproxy import _get_proxy_settings
+    from urllib.request import getproxies_macosx_sysconf
+
+    result = subprocess.run(["/usr/sbin/scutil", "--proxy"], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                            timeout=5, check=True)
+    if re.search(r"(?m)^\s*ProxyAuto(?:Config|Discovery)Enable\s*:\s*1\s*$", result.stdout):
+        raise RuntimeError("Automatic system proxy discovery is not supported for login recovery")
+    return getproxies_macosx_sysconf(), _get_proxy_settings()
+
+
+def macos_bypass(settings: dict) -> str:
+    """Translate the representable subset of macOS bypass rules to Go NO_PROXY."""
+    if settings.get("exclude_simple"):
+        raise RuntimeError("Simple-host system proxy bypass needs an explicit NO_PROXY")
+    exceptions = settings.get("exceptions", [])
+    if not isinstance(exceptions, (list, tuple)):
+        raise RuntimeError("Unsupported system proxy bypass")
+    result = []
+    for value in exceptions:
+        if not isinstance(value, str): raise RuntimeError("Unsupported system proxy bypass")
+        value = value.strip()
+        if value == "*":
+            result.append(value)
+            continue
+        try:
+            ipaddress.ip_network(value, strict=False)
+        except ValueError:
+            # Go treats a bare domain as that domain AND all subdomains;
+            # macOS treats a bare domain as an exact match. Do not silently
+            # send additional traffic outside the configured proxy.
+            if value.lower() != "localhost" and not re.fullmatch(
+                    r"\*\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*(?::[0-9]{1,5})?", value):
+                raise RuntimeError("Unsupported system proxy bypass") from None
+        result.append(value)
+    return ",".join(result)
+
+
+def capture_macos_network_policy() -> dict:
+    """Remember the invoking shell's bypass rules, never its proxy URLs."""
+    proxies, settings = macos_proxy_settings()
+    if not isinstance(proxies, dict) or not isinstance(settings, dict):
+        raise RuntimeError("Unsupported system proxy settings")
+    explicit = any(name in os.environ for name in PROXY_NAMES)
+    if not explicit:
+        # Validate now; the dynamic system rules are read again at login.
+        if proxies.get("socks") and not proxies.get("https"):
+            raise RuntimeError("SOCKS-only system proxy needs an explicit HTTPS_PROXY")
+        if proxies.get("http") or proxies.get("https"): macos_bypass(settings)
+        return {"format": 1, "source": "system", "schemes": None, "bypass": None}
+    if os.environ.get("ALL_PROXY") or os.environ.get("all_proxy"):
+        raise RuntimeError("ALL_PROXY cannot be saved for login recovery")
+    schemes = []
+    for scheme in ("http", "https"):
+        configured = os.environ.get(scheme.upper() + "_PROXY") or os.environ.get(scheme + "_proxy")
+        if configured:
+            if configured != proxies.get(scheme):
+                raise RuntimeError("Shell and system proxy settings differ; login recovery cannot reuse them")
+            schemes.append(scheme)
+    bypass = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
+    if len(bypass) > 8192 or any(c in bypass for c in "\r\n\x00@"):
+        raise RuntimeError("Unsupported shell proxy bypass")
+    return {"format": 1, "source": "system", "schemes": schemes, "bypass": bypass}
+
+
+def read_macos_network_policy(root: Path) -> dict:
+    path = root / "runtime" / "autostart-network.json"
+    if not path.exists() and not path.is_symlink():
+        return {"format": 1, "source": "system", "schemes": None, "bypass": None}
+    runtime_bundle.safe_file(path, limit=16384)
+    value = json.loads(path.read_text())
+    if (not isinstance(value, dict) or set(value) != {"format", "source", "schemes", "bypass"} or
+            value["format"] != 1 or value["source"] != "system" or
+            (value["schemes"] is not None and (not isinstance(value["schemes"], list) or
+             any(x not in ("http", "https") for x in value["schemes"]) or
+             len(value["schemes"]) != len(set(value["schemes"])))) or
+            (value["bypass"] is not None and (not isinstance(value["bypass"], str) or
+             len(value["bypass"]) > 8192 or any(c in value["bypass"] for c in "\r\n\x00@"))) or
+            ((value["schemes"] is None) != (value["bypass"] is None))):
+        raise RuntimeError("Invalid login network policy")
+    return value
+
+
+@contextmanager
+def startup_network_environment(root: Path):
+    """Inherit explicit macOS system proxies for login starts when no override exists.
+
+    Values stay in memory and are never written to the login entry or a log.
+    Manual launches keep their existing environment and behavior.
+    """
+    if platform.system() != "Darwin" or any(name in os.environ for name in PROXY_NAMES):
+        yield
+        return
+    proxies, settings = macos_proxy_settings()
+    if not isinstance(proxies, dict) or not isinstance(settings, dict):
+        raise RuntimeError("Unsupported system proxy settings")
+    policy = read_macos_network_policy(root)
+    schemes = policy["schemes"]
+    additions = {}
+    for scheme in ("http", "https"):
+        if schemes is not None and scheme not in schemes: continue
+        value = proxies.get(scheme)
+        if not value:
+            if schemes is not None: raise RuntimeError("Saved system proxy is unavailable")
+            continue
+        if not isinstance(value, str) or any(c in value for c in "\r\n\x00"):
+            raise RuntimeError("Unsupported system proxy URL")
+        try:
+            parsed = urlsplit(value)
+            if (parsed.scheme not in ("http", "https", "socks5") or not parsed.hostname or
+                    parsed.query or parsed.fragment or parsed.path not in ("", "/")):
+                raise ValueError
+            _ = parsed.port
+        except ValueError:
+            raise RuntimeError("Unsupported system proxy URL") from None
+        additions[scheme.upper() + "_PROXY"] = value
+        additions[scheme + "_proxy"] = value
+    if schemes is None and proxies.get("socks") and "HTTPS_PROXY" not in additions:
+        raise RuntimeError("SOCKS-only system proxy needs an explicit HTTPS_PROXY")
+    if additions:
+        if "NO_PROXY" in os.environ:
+            bypass = os.environ["NO_PROXY"]
+        elif "no_proxy" in os.environ:
+            bypass = os.environ["no_proxy"]
+        else:
+            bypass = policy["bypass"] if policy["bypass"] is not None else macos_bypass(settings)
+        additions["NO_PROXY"] = additions["no_proxy"] = bypass
+    previous = {key: os.environ.get(key) for key in additions}
+    try:
+        os.environ.update(additions)
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None: os.environ.pop(key, None)
+            else: os.environ[key] = value
 
 
 @contextmanager
@@ -113,7 +256,7 @@ def run_once(root: Path) -> int:
             if ready:
                 record(root, "healthy")
                 return 0
-            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            with startup_network_environment(root), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 launcher.helper_output("verify")
                 launcher.bridge_start()
             if not healthy(root): raise RuntimeError("Bridge did not become healthy")
@@ -273,6 +416,7 @@ def enable(root: Path) -> None:
         return
     if platform.system() != "Darwin":
         raise RuntimeError("Automatic login startup is available on macOS and Windows; use bridge start on this platform")
+    network_policy = capture_macos_network_policy()
     path = agent_path(root)
     if path.parent.is_symlink(): raise RuntimeError("LaunchAgents directory must not be a symlink")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -290,7 +434,10 @@ def enable(root: Path) -> None:
     except BaseException:
         if created: path.unlink(missing_ok=True)
         raise
-    with operation_lock(root): unpause(root)
+    with operation_lock(root):
+        runtime_bundle.write_file(root / "runtime" / "autostart-network.json",
+                                  runtime_bundle.canonical(network_policy), 0o600)
+        unpause(root)
 
 
 def disable(root: Path) -> None:

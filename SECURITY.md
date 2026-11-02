@@ -43,6 +43,14 @@ its original environment until it exits; the current origin was not restarted
 to apply it. A local check found none of the known storage or management
 override variable names in that existing process, without reporting values.
 
+The macOS login policy stores only selected proxy schemes and bypass rules in
+the private runtime directory; proxy addresses and credentials are read from
+system settings in memory. When the saved policy expects a system proxy that is
+no longer configured, login recovery fails instead of silently connecting
+directly. Automatic proxy scripts and system bypass rules that cannot be mapped
+without changing their scope are not evaluated. The local health check verifies
+metadata routes, not upstream Internet connectivity or model inference.
+
 The read-only diagnostic report never opens key files or contacts an endpoint. It emits only allowlisted counters, timing, hashed tags and compaction metadata. Origin and translator observations may describe the same request and are not additive. It does not export raw transcripts, error bodies or project paths.
 
 Review updates to the pinned proxy release and its security advisories before changing the version or hashes. Do not enable LAN binding, request body logging, or the management interface without a separate security review.
