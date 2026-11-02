@@ -109,7 +109,8 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
-def run_dynamic_client(command, work, env, forwarded, *, prompt="Use the synthetic fixture tools.", delay=0.1):
+def run_dynamic_client(command, work, env, forwarded, *, prompt="Use the synthetic fixture tools.", delay=0.1,
+                       session_out=None):
     """Use one client and issue another user turn if refresh is still pending."""
     command = list(command)
     command[command.index("--output-format") + 1] = "stream-json"
@@ -144,6 +145,8 @@ def run_dynamic_client(command, work, env, forwarded, *, prompt="Use the synthet
             if event.get("type") == "fixture_eof" or event.get("is_error"):
                 return None
             if event.get("type") == "result":
+                if session_out is not None and isinstance(event.get("session_id"), str):
+                    session_out.append(event["session_id"])
                 return event.get("result")
 
     try:

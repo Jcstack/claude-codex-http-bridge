@@ -150,6 +150,28 @@ not test interactive mode, arbitrary natural-language ranking, real plugins,
 a real model, or an upstream cache hit. The earlier community report and
 these local observations can coexist.
 
+Another open [Claude Code report](https://github.com/anthropics/claude-code/issues/97369)
+describes a changed definition for an already-loaded deferred tool remaining
+stale through resume on version 2.1.283. On the locked 2.1.316 macOS client,
+an isolated fake server changed the description while retaining the name.
+The first synthetic ToolSearch request preceded the changed list; five later
+user turns after the adapter forwarded that list still exposed the old
+description in the sampled requests.
+After starting a new client with `--resume`, the fake server again forwarded
+the current list, but the sampled request still carried the old description.
+A separate new synthetic conversation received the updated description. The
+observations held both directly at a fake Messages endpoint and through a
+disposable selected translator with a fake API-compatible Responses origin.
+
+This is a narrow noninteractive reproduction, not a test of `/mcp` reconnect,
+real plugins, interactive sessions, changed input schemas, or the actual model's
+behavior. The direct-client observation means the translator is not necessary
+to reproduce this particular stale-description behavior; it does not prove the
+underlying client cause. Do not assume a resumed session has picked up a
+plugin's changed definition. A new conversation worked for the synthetic
+control; actual plugin behavior still needs verification. A stable cache prefix
+in the stale case is not evidence of a correct tool definition.
+
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,
 real plugins, MCP protocol changes, and Windows. The test adapter does not

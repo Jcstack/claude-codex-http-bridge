@@ -66,10 +66,17 @@ every Claude client version, actual provider cache hits, or isolation between
 real accounts.
 
 The executor fixture has also been extended to add a deferred tool that was
-absent from the first request, reveal it, and then remove it. The new controls
-check the cache key, prefix bytes, discovery, and removal separately. This
-extension is awaiting its cross-platform executor gate; it does not run a
-Claude client or test provider cache hits.
+absent from the first request, reveal it, and then remove it. Its new controls
+check the cache key, prefix bytes, discovery, and removal separately. The
+[executor build and test steps](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41478669731)
+passed on macOS, Linux and Windows; the complete candidate gate was still
+running at the time of the observation. This fixture does not run a Claude
+client or test provider cache hits.
+
+Stable request prefixes alone do not prove tool-definition correctness. A
+separate synthetic changed-description observation retained the old definition
+inside the same Claude conversation even after resume; see [MCP_NAMING.md](MCP_NAMING.md).
+Correct current tool semantics take priority over preserving a cache prefix.
 
 ## Live dynamic-tool cache observations
 

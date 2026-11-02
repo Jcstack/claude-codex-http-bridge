@@ -107,6 +107,10 @@ jobs:
         run: python tests/probe_dynamic_toolsearch.py --hold-refresh --require-discovery
       - name: Discover a changed MCP tool through a keyword ToolSearch query
         run: python tests/probe_dynamic_toolsearch.py --hold-refresh --natural-query --require-discovery
+      - name: Check a fresh client sees the current synthetic tool description
+        run: python tests/probe_dynamic_toolsearch.py --description-change --fresh-description
+      - name: Observe a changed tool description in a live and resumed synthetic session
+        run: python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation
       - name: Check tool effects across interrupted Messages streams
         run: python tests/probe_claude_stream_safety.py
   gateway:

@@ -18,10 +18,11 @@ from mcp_alias_policy import AliasPolicy, ProtocolError  # noqa: E402
 
 
 NAMES = ["lookup.fixture", "lookup_fixture"]
+UPDATED_DESCRIPTION = "Synthetic updated fixture description"
 
 
-def fake_server(marker, dynamic=False, hold_refresh=False):
-    changed = False
+def fake_server(marker, dynamic=False, hold_refresh=False, change_description=False, initial_updated=False):
+    changed = initial_updated
     for line in sys.stdin:
         message = json.loads(line)
         method, ident = message.get("method"), message.get("id")
@@ -32,7 +33,7 @@ def fake_server(marker, dynamic=False, hold_refresh=False):
                       "capabilities": {"tools": {"listChanged": True}},
                       "serverInfo": {"name": "fixture", "version": "1"}}
         elif method == "tools/list":
-            names = ["lookup_fixture", "lookup.extra"] if changed else NAMES
+            names = (["lookup_fixture", "lookup.extra"] if changed and not change_description else NAMES)
             if changed:
                 if hold_refresh:
                     deadline = time.monotonic() + 8
@@ -41,7 +42,8 @@ def fake_server(marker, dynamic=False, hold_refresh=False):
                     if not Path(marker + ".second-request").exists():
                         Path(marker + ".hold-timeout").touch()
                 Path(marker + ".refreshed").write_text("yes", encoding="utf-8")
-            result = {"tools": [{"name": name, "description": "Synthetic fixture",
+            result = {"tools": [{"name": name, "description": UPDATED_DESCRIPTION
+                                 if changed and change_description and name == "lookup.fixture" else "Synthetic fixture",
                                  "inputSchema": {"type": "object", "properties": {}}} for name in names]}
         elif method == "tools/call":
             name = message.get("params", {}).get("name")
@@ -58,11 +60,12 @@ def fake_server(marker, dynamic=False, hold_refresh=False):
             print(json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}), flush=True)
 
 
-def fake_adapter(marker, dynamic=False, hold_refresh=False):
+def fake_adapter(marker, dynamic=False, hold_refresh=False, change_description=False, initial_updated=False):
     policy, events = AliasPolicy("gateway"), queue.Queue()
     command = [sys.executable, __file__, "--fake-server", marker]
     if dynamic:
-        command.append("dynamic-barrier" if hold_refresh else "dynamic")
+        command.append(("description-current" if initial_updated else "description-barrier" if hold_refresh else "description") if change_description
+                       else ("dynamic-barrier" if hold_refresh else "dynamic"))
     child = subprocess.Popen(command,
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              text=True, encoding="utf-8", bufsize=1)
@@ -99,7 +102,9 @@ def fake_adapter(marker, dynamic=False, hold_refresh=False):
             if (dynamic and source == "server" and destination == "client"
                     and isinstance(outgoing.get("result"), dict)
                     and isinstance(outgoing["result"].get("tools"), list)
-                    and "lookup.extra" in policy.advertised.values()):
+                    and ((change_description and any(isinstance(tool, dict)
+                         and tool.get("description") == UPDATED_DESCRIPTION for tool in outgoing["result"]["tools"]))
+                         or (not change_description and "lookup.extra" in policy.advertised.values()))):
                 # This proves only that the adapter wrote the changed list,
                 # not that Claude has applied it to a subsequent request.
                 Path(marker + ".forwarded").touch()
@@ -119,12 +124,15 @@ def fake_adapter(marker, dynamic=False, hold_refresh=False):
 
 
 if __name__ == "__main__":
-    valid = len(sys.argv) in (3, 4) and (len(sys.argv) == 3 or sys.argv[3] in ("dynamic", "dynamic-barrier"))
+    valid = len(sys.argv) in (3, 4) and (len(sys.argv) == 3 or sys.argv[3] in (
+        "dynamic", "dynamic-barrier", "description", "description-barrier", "description-current"))
     dynamic = len(sys.argv) == 4
-    hold_refresh = dynamic and sys.argv[3] == "dynamic-barrier"
+    hold_refresh = dynamic and sys.argv[3].endswith("-barrier")
+    change_description = dynamic and sys.argv[3].startswith("description")
+    initial_updated = dynamic and sys.argv[3] == "description-current"
     if valid and sys.argv[1] == "--fake-server":
-        fake_server(sys.argv[2], dynamic, hold_refresh)
+        fake_server(sys.argv[2], dynamic, hold_refresh, change_description, initial_updated)
     elif valid and sys.argv[1] == "--fake-adapter":
-        raise SystemExit(fake_adapter(sys.argv[2], dynamic, hold_refresh))
+        raise SystemExit(fake_adapter(sys.argv[2], dynamic, hold_refresh, change_description, initial_updated))
     else:
         raise SystemExit("This fixture only runs its own synthetic server")
