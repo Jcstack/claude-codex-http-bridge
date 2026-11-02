@@ -220,6 +220,41 @@ describes a different tool/history contract. Route-specific translation and
 backend acceptance must be checked before enabling a control. Public API
 retention and pricing are not assigned to the subscription route by inference.
 
+## Provider cache diagnostics and route boundary
+
+OpenAI's [Responses API cache diagnostics](https://developers.openai.com/api/docs/guides/prompt-caching/diagnostics)
+can compare a request with a recent response from the same organization, using
+`prompt_cache_options.comparison_response_id`. The result can identify a first
+classified difference; `unavailable` and a missing comparison record are not
+cache hits. In a streamed response, the provider places the diagnostic in the
+completed-response event. Reported cache-read counters remain the measure of
+actual reported reuse; a comparison by itself neither changes caching nor
+guarantees a hit. The official feature's availability and retention rules
+describe the public Responses API, not the private Codex subscription route.
+
+On this Mac, [a disposable fake-upstream observation](tests/probe_cache_diagnostics_route.py)
+tested both the original pinned proxy binary and the locally selected reviewed
+translator in their API-profile configuration. For synthetic nonstreaming and
+streaming Messages requests, a synthetic top-level comparison option did not
+reach the fake Responses upstream, and a synthetic diagnostic in the completed
+upstream event did not reach the Messages client. The same samples did expose
+the fake cache-read token count. This does not show that Claude Code sends that
+nonstandard request field, that a real provider supports or rejects diagnostic
+comparisons, or that every future translator has the same behavior. No model,
+account credential or running bridge service was used. The manually dispatched
+[cache observation workflow](.github/workflows/cache-resume-observation.yml)
+can repeat the fixture against the reviewed translator on three platforms.
+
+The previously tested Codex backend rejected explicit and implicit
+`prompt_cache_options` for one account and model; the comparison-only option
+has not been independently tested there. Do not enable diagnostics on the
+subscription route from the API documentation alone. A future implementation
+must verify exact route and model support, preserve diagnostics through both
+streaming and nonstreaming translation, scope baseline IDs to the appropriate
+account and session, avoid exposing them in public logs, and obtain a fresh
+positive and negative control. It must not issue extra requests, enable a
+separate billed API route, or change the user's cache settings implicitly.
+
 After the 2026-11-02 safety-backend handoff, a read-only audit of the tracked
 main session and its children used a window beginning when the new generation
 directory was created, shortly before publication. Four deduplicated responses

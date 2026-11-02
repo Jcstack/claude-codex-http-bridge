@@ -52,6 +52,8 @@ jobs:
           cd upstream-source
           go mod verify
           go build -o "../${{ matrix.binary }}" ./cmd/server
+      - name: Observe synthetic cache-diagnostic translation
+        run: python tests/probe_cache_diagnostics_route.py --translator ${{ matrix.binary }}
       - name: Observe synthetic cache structure across resume
         run: >-
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh
