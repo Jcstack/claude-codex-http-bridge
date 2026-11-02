@@ -116,6 +116,9 @@ def main():
                       "changed_list_forwarded": Path(str(marker) + ".forwarded").exists(),
                       "followup_before_server_prepared_list": server.second_before_list}
             print(json.dumps(result, sort_keys=True))
+            if (os.environ.get("GITHUB_ACTIONS") == "true" and not args.fresh_description
+                    and server.later_old and not server.later_updated):
+                print("::warning::Synthetic eager-tool session retained an old MCP description; inspect the observation.")
             if not (result["old_original_called_once"] and result["changed_list_forwarded"]):
                 raise RuntimeError("Synthetic eager-tool control did not run and refresh")
             if args.fresh_description:

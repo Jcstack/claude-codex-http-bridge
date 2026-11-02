@@ -445,6 +445,10 @@ def main():
                     first_input_prefix_in_last=bool(first_input) and last_input is not None
                         and last_input[:len(first_input)] == first_input)
             print(json.dumps(result, sort_keys=True))
+            if (os.environ.get("GITHUB_ACTIONS") == "true" and args.description_change
+                    and not args.fresh_description and initial["old_description_later_seen"]
+                    and not initial["updated_description_seen"]):
+                print("::warning::Synthetic running session retained an old MCP tool description; inspect the observation.")
             if not (initial["search_offered"] and initial["old_result_seen"] and initial["old_reference"]
                     and calls and calls[0] == ORIGINALS[0] and result["changed_list_forwarded"]):
                 raise RuntimeError("Synthetic ToolSearch control did not exercise the initial tool and refresh")

@@ -192,7 +192,9 @@ validated general workaround.
 The manually dispatched [dynamic observation workflow](.github/workflows/mcp-dynamic-observation.yml)
 repeats these local synthetic client and alias controls on macOS, Linux and
 Windows without an account. Translator and native-executor checks remain in
-the separate candidate-proxy workflow.
+the separate candidate-proxy workflow. A successful observational step is not
+proof that a stale-definition issue is fixed; the workflow emits a warning
+when this specific synthetic stale condition is observed.
 
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,
