@@ -28,7 +28,7 @@ call and changed strict mode; it forwarded the example field to the fake API,
 which does not prove that a real API would accept the field.
 
 An isolated [real Claude Code client fixture](tests/probe_tool_output_client.py)
-adds an effect-level control on macOS. Its deliberately permissive synthetic
+adds an effect-level control. Its deliberately permissive synthetic
 MCP server declares a string input but records a call even when the fake model
 sends a number. The locked Claude Code 2.1.316 client passed that invalid number
 to the synthetic server with a direct fake Messages endpoint, through the
@@ -39,6 +39,8 @@ flag, but the invalid number still reached the synthetic MCP server. The
 client itself had not sent that flag in the tested MCP request. In corresponding
 controls, a valid string reached the fake server once, while an explicit
 `PreToolUse` denial ran and prevented the invalid call from reaching it.
+The selected installed translator was exercised locally on macOS; the direct
+and candidate routes produced the same observations on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41521874679).
 
 This is evidence about a permissive fixture and the tested client/translator
 combination, not evidence that a real provider violates strict mode, that a
@@ -142,6 +144,28 @@ uses Go's regexp engine. This is a synthetic false-acceptance example, not a
 complete regex conformance or security audit. A production guard must explicitly
 resolve dialect fidelity and resource limits; simply enabling this fixture's
 default validator is unsafe.
+
+Using a backtracking engine also requires careful failure handling. The
+validator's [custom-regexp example](https://github.com/santhosh-tekuri/jsonschema/blob/v6.0.3/example_regexp_test.go)
+maps a matcher error to `false`. If a matcher is configured to time out, the
+[regexp2 project](https://github.com/dlclark/regexp2/tree/v2.12.0) describes
+timeout errors and backtracking behavior. A separate synthetic test shows why
+mapping a hypothetical match error to `false` can falsely accept an input under
+`not`: the failed match becomes a successful negation. That test does not run
+regexp2 or demonstrate an actual timeout. A real adapter must propagate a
+bounded, sanitized failure for the entire validation, and evaluate concurrency,
+CPU and memory limits; a regex-engine swap alone is not sufficient.
+
+An independent [synthetic subprocess fixture](tests/validator-fixture/worker_test.go)
+tests one possible building block locally: per-call cancellation, a one-worker
+concurrency gate, bounded request/response framing, fixed result categories,
+and refusal of external schema references. A deliberately hanging child was
+canceled after an explicit readiness signal, a waiting second call timed out,
+and a later call reused the released slot; oversized synthetic output was
+discarded. The process receives a minimal environment and test-only data.
+This fixture has no hard memory or CPU quota, process-tree sandbox, production
+protocol, streamed tool handling, or deployed integration; it does not solve
+the known regex and format differences. Cross-platform tests are pending.
 
 The fixture initially resolved `golang.org/x/text` v0.14.0, for which OSV
 reported [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) and

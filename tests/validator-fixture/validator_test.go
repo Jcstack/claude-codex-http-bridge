@@ -293,6 +293,37 @@ func TestFixtureRegexpDialectObservation(t *testing.T) {
 	t.Log("default fixture regexp accepted two line terminators rejected by the ECMAScript control")
 }
 
+type syntheticRegexpFailure struct{}
+
+func (syntheticRegexpFailure) MatchString(string) bool { return false }
+func (syntheticRegexpFailure) String() string          { return "synthetic" }
+
+func TestFixtureRegexpFailureAsNoMatchObservation(t *testing.T) {
+	const raw = `{"not":{"pattern":"^a$"}}`
+	baseline, err := compile(raw, &denyLoader{})
+	if err != nil || validate(baseline, `"a"`) == nil {
+		t.Fatal("regexp negation control failed")
+	}
+	doc, err := boundedJSON(raw)
+	if err != nil {
+		t.Fatal("fixture schema failed")
+	}
+	compiler := jsonschema.NewCompiler()
+	compiler.DefaultDraft(jsonschema.Draft2020)
+	compiler.UseLoader(&denyLoader{})
+	// Simulates an adapter that converts a match error into the boolean false.
+	// It does not use regexp2 or establish a real timeout.
+	compiler.UseRegexpEngine(func(string) (jsonschema.Regexp, error) { return syntheticRegexpFailure{}, nil })
+	if err := compiler.AddResource("https://fixture.invalid/error", doc); err != nil {
+		t.Fatal("fixture schema failed")
+	}
+	schema, err := compiler.Compile("https://fixture.invalid/error")
+	if err != nil || validate(schema, `"a"`) != nil {
+		t.Fatal("synthetic error-as-no-match observation changed")
+	}
+	t.Log("mapping a synthetic regexp error to false caused acceptance under not")
+}
+
 func TestFixtureBoundsAndDuplicateKeys(t *testing.T) {
 	cases := []string{`{"x":1,"x":2}`, `1e999999999`, `0.` + strings.Repeat("1", maxNumberBytes),
 		strings.Repeat("[", maxDepth+1) + `0` + strings.Repeat("]", maxDepth+1),
