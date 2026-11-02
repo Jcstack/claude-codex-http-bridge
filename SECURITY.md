@@ -166,6 +166,10 @@ not proof for arbitrary plugins, all settings, future clients, or protection fro
 other processes running as the same user. Cross-platform checks and an installed
 rollout remain pending. Editing the original per-launch file after startup is not
 propagated by this snapshot; existing user/project settings remain Claude's own.
+The private `runtime/ui-*` snapshot can contain custom values and remains on
+disk after a client exits. The explicit bridge-stop cleanup removes its known
+settings files when service state is present; it is not a per-session retention
+guarantee, and an already-missing service state needs separate manual cleanup.
 
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 

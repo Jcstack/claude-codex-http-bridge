@@ -585,7 +585,8 @@ def bridge_stop(route: str = "subscription") -> int:
         remove_state_files(runtime, state)
         for directory in runtime.glob("ui-*"):
             if directory.is_dir() and not directory.is_symlink():
-                for name in ("statusline-profile.json", "settings.json", "managed-settings.json", "trusted-ca.pem"):
+                for name in ("statusline-profile.json", "settings.json", "managed-settings.json",
+                             "composed-settings.json", "trusted-ca.pem"):
                     (directory / name).unlink(missing_ok=True)
                 try:
                     directory.rmdir()
@@ -843,6 +844,10 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         if len(model_info) != 5:
             raise RuntimeError("Model helper returned an invalid result")
         model, context, compact, settings, catalog_json = model_info
+        if custom_settings is not None:
+            # Reject structural or window conflicts before any managed handoff
+            # or copying a key into a per-launch settings file.
+            compose_launch_settings(json.loads(Path(settings).read_text()), custom_settings)
         if managed_enabled:
             models, verify = managed_catalog(state)
             verify_prepared_model_settings(catalog_json, Path(settings), models)

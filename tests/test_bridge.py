@@ -1,6 +1,6 @@
 """Security and model-selection checks with no live credential or network use."""
 
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from io import BytesIO, StringIO, TextIOWrapper
 import json
 import os
@@ -657,6 +657,36 @@ Model ID: `gpt-6.1-sol`
             with self.assertRaisesRegex(ValueError, "temporarily unavailable"):
                 launcher.run_session("claude", "sol", ["--settings", "{}"], "fixture-client")
         launcher.reject_extra_settings(["--effort", "high", "--", "--settings", "literal"])
+
+    def test_stop_removes_private_composed_settings_but_not_unrelated_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); ui = root / "ui-fixture"; ui.mkdir()
+            composed = ui / "composed-settings.json"; composed.write_text('{"fixture":"private"}')
+            unrelated = ui / "unrelated-fixture"; unrelated.write_text("keep")
+            state = {"port": 12345}
+            with patch.object(launcher, "service_lock", return_value=nullcontext(root)), \
+                    patch.object(launcher, "read_state", return_value=state), \
+                    patch.object(launcher, "state_is_live", return_value=False), \
+                    patch.object(launcher, "listener_pids", return_value=set()), \
+                    patch.object(launcher, "remove_state_files"), redirect_stdout(StringIO()):
+                self.assertEqual(launcher.bridge_stop("api"), 0)
+            self.assertFalse(composed.exists())
+            self.assertTrue(unrelated.exists())
+
+    def test_invalid_compact_window_is_rejected_before_a_session_key_is_copied(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); runtime = root / "runtime"; runtime.mkdir()
+            base = root / "base.json"
+            base.write_text('{"modelSettings":{"fixture-model":{"autoCompactWindow":300000}}}')
+            prepared = "\t".join(["fixture-model", "500000", "300000", str(base), '{"fixture-model":500000}'])
+            with patch.object(launcher, "ROOT", root), \
+                    patch.object(launcher, "ensure_service", return_value=(runtime, {"port": 12345}, False)), \
+                    patch.object(launcher, "service_environment", return_value={}), \
+                    patch.object(launcher, "helper_output", return_value=prepared):
+                with self.assertRaisesRegex(ValueError, "autoCompactWindow"):
+                    launcher.run_session("claude", "fixture-model", ["--settings", '{"autoCompactWindow":99999}'],
+                                         "fixture-client", route="api", experimental_settings=True)
+            self.assertEqual(list(runtime.glob("ui-*")), [])
 
     def test_custom_settings_preserve_hooks_permissions_models_and_route(self) -> None:
         bridge_hook = {"matcher": "WebFetch", "hooks": [{"type": "command", "command": "bridge-hook"}]}
