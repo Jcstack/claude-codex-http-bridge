@@ -241,9 +241,10 @@ upstream event did not reach the Messages client. The same samples did expose
 the fake cache-read token count. This does not show that Claude Code sends that
 nonstandard request field, that a real provider supports or rejects diagnostic
 comparisons, or that every future translator has the same behavior. No model,
-account credential or running bridge service was used. The manually dispatched
-[cache observation workflow](.github/workflows/cache-resume-observation.yml)
-can repeat the fixture against the reviewed translator on three platforms.
+account credential or running bridge service was used. The [three-platform
+cache observation run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41514331615)
+reported the same synthetic result for the reviewed translator on macOS,
+Windows and Linux. It also ran the separate synthetic resume/fork observations.
 
 The previously tested Codex backend rejected explicit and implicit
 `prompt_cache_options` for one account and model; the comparison-only option
@@ -254,6 +255,29 @@ streaming and nonstreaming translation, scope baseline IDs to the appropriate
 account and session, avoid exposing them in public logs, and obtain a fresh
 positive and negative control. It must not issue extra requests, enable a
 separate billed API route, or change the user's cache settings implicitly.
+
+This boundary is consistent with, but not established solely by, two upstream
+reports. A [Windows Codex OAuth report](https://github.com/router-for-me/CLIProxyAPI/issues/4915)
+describes a 400 for an implicit cache option in a different client and model.
+In a separate [translation proposal](https://github.com/router-for-me/CLIProxyAPI/issues/5156),
+a maintainer declined general cache-hint mapping in August 2026, citing Codex
+backend support and the maintenance cost of inferring capabilities from model
+names. A closed issue does not establish present behavior for all accounts or
+models; the account-specific direct controls above are a separate observation.
+
+The related [CLIProxyAPIPlus proposal](https://github.com/kaitranntt/CLIProxyAPIPlus/pull/215)
+for mapping cache hints was closed without being merged in September; its author
+said it might no longer be relevant. Do not infer the current implementation
+from that proposal. The fork's inspected
+[October 28 source](https://github.com/kaitranntt/CLIProxyAPIPlus/blob/b95819f3757ff2bc226cfecf3c8d5fc53ddebd1f/internal/translator/codex/openai/responses/codex_openai-responses_request.go)
+also removes `prompt_cache_options` and breakpoints on its Codex Responses path.
+Its public [upstream synchronization issue](https://github.com/kaitranntt/CLIProxyAPIPlus/issues/253)
+reports conflicts requiring maintainer resolution, and a separate
+[image availability report](https://github.com/kaitranntt/CLIProxyAPIPlus/issues/262)
+describes missing recent container tags; the registry was not independently
+checked here. These are maintenance observations, not a security audit or a
+blanket judgment of the fork. They do not justify replacing the running bridge
+or claim that its other capabilities were evaluated.
 
 After the 2026-11-02 safety-backend handoff, a read-only audit of the tracked
 main session and its children used a window beginning when the new generation
