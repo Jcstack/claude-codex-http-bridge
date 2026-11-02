@@ -206,6 +206,31 @@ synthetic tool. This tests a server-side protocol option, not a generic client
 fix; do not repeat a real tool call to force a notification, since it may have
 side effects. Real plugin behavior and safe notification delivery remain open.
 
+## Requirements for a future definition guard
+
+No definition guard is enabled. A candidate must compare the definition that
+the model can actually see with the current definition from the same authorized
+server and exact tool identity, including descriptions, input and output
+schemas, and other fields that can affect behavior. Unknown fields, malformed
+data, duplicate keys, name collisions, incomplete pages and missing baselines
+must remain explicit rather than being treated as equal. Fingerprints are not
+proof that a server or tool is trustworthy.
+
+When a previously visible definition changes, a candidate should prevent an
+old-definition call from reaching the changed tool and return an actionable
+error. It must preserve existing permission decisions and tool identities; a
+new hidden alias must not bypass a deny rule. Explicit approval, refresh and
+rejection behavior still needs a design and real-client tests. It must never
+repeat a tool effect to force discovery or refresh.
+
+Resume needs a verified comparison against the definition actually retained by
+that conversation. A missing or ambiguous record is not a successful check.
+Any record inspection must be read-only, bounded and local; do not rewrite a
+user's transcript. Any stored fingerprints require private permissions and
+must not contain raw definitions, prompts, credentials or server responses.
+The existing test-only alias transport does not satisfy these requirements, and
+an already-running client cannot be assumed protected by a new launcher.
+
 The manually dispatched [dynamic observation workflow](.github/workflows/mcp-dynamic-observation.yml)
 repeats these local synthetic client and alias controls on macOS, Linux and
 Windows without an account. Translator and native-executor checks remain in
