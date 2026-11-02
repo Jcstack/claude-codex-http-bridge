@@ -117,6 +117,12 @@ jobs:
         run: python tests/probe_eager_tool_description.py --fresh-description
       - name: Observe a changed synthetic tool description with ToolSearch disabled
         run: python tests/probe_eager_tool_description.py
+      - name: Verify healthy Streamable HTTP MCP notifications
+        run: python tests/probe_mcp_stream_recovery.py
+      - name: Observe Streamable HTTP MCP notification stream recovery
+        run: python tests/probe_mcp_stream_recovery.py --disconnect
+      - name: Check a synthetic request-related MCP notification
+        run: python tests/probe_mcp_stream_recovery.py --disconnect --request-notification
       - name: Check tool effects across interrupted Messages streams
         run: python tests/probe_claude_stream_safety.py
   gateway:

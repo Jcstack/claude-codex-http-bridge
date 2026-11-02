@@ -46,3 +46,6 @@ jobs:
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --repair-synthetic-record
           python tests/probe_eager_tool_description.py --fresh-description
           python tests/probe_eager_tool_description.py
+          python tests/probe_mcp_stream_recovery.py
+          python tests/probe_mcp_stream_recovery.py --disconnect
+          python tests/probe_mcp_stream_recovery.py --disconnect --request-notification

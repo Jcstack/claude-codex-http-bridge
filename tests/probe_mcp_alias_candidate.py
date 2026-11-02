@@ -110,7 +110,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_dynamic_client(command, work, env, forwarded, *, prompt="Use the synthetic fixture tools.", delay=0.1,
-                       session_out=None):
+                       session_out=None, forwarded_timeout=8):
     """Use one client and issue another user turn if refresh is still pending."""
     command = list(command)
     command[command.index("--output-format") + 1] = "stream-json"
@@ -156,7 +156,7 @@ def run_dynamic_client(command, work, env, forwarded, *, prompt="Use the synthet
                 return True
             if result != "REFRESH_PENDING":
                 return False
-            deadline = time.monotonic() + 8
+            deadline = time.monotonic() + forwarded_timeout
             while not forwarded.exists() and process.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.01)
             if not forwarded.exists():

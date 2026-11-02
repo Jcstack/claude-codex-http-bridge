@@ -191,9 +191,20 @@ validated general workaround.
 
 A separate [Claude Code report](https://github.com/anthropics/claude-code/issues/102476)
 describes lost change notifications after the standalone Streamable HTTP MCP
-event stream disconnects and retries fail on version 2.1.296 on Linux. This is
-a user report, not a locally reproduced result. The stdio fixtures above do not
-exercise HTTP notification reconnection or establish its behavior on 2.1.316.
+event stream disconnects and retries fail on version 2.1.296 on Linux. A local
+2.1.316 macOS fixture observed the same short-window pattern: with a healthy
+stream, a newly added synthetic tool was offered and called; after forcing the
+stream closed and rejecting two reconnect attempts, the changed-list notice had
+no open stream and the new tool was not offered in the subsequent bounded
+user turns. This does not prove that the client never reconnects or establish
+behavior for real servers, other platforms or transports.
+
+In a separate positive control, a distinct no-effect synthetic `refresh` tool
+returned the notification on its own HTTP response stream after the standalone
+stream had failed. The client then fetched the updated list and called the new
+synthetic tool. This tests a server-side protocol option, not a generic client
+fix; do not repeat a real tool call to force a notification, since it may have
+side effects. Real plugin behavior and safe notification delivery remain open.
 
 The manually dispatched [dynamic observation workflow](.github/workflows/mcp-dynamic-observation.yml)
 repeats these local synthetic client and alias controls on macOS, Linux and
