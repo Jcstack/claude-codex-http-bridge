@@ -72,6 +72,7 @@
 !tests/native_cache_fixture.go
 !tests/native_tool_contract_fixture.go
 !tests/native_caller_policy_fixture.go
+!tests/native_toolset_contract_fixture.go
 !tests/tool_contract_benchmark.go
 !tests/native_gateway_names_fixture.go
 !tests/native_incomplete_fixture.go

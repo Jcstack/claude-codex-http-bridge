@@ -87,6 +87,8 @@ fake MCP tool in the injected programmatic-only case. A separate API fake and
 dynamic-tool probe passed; three synthetic dynamic-tool stages preserved the
 same prompt fields and session cache key versus the locally selected binary.
 That comparison does not establish real provider cache hits.
+The corresponding protocol, native-executor, real-client and synthetic
+cache-structure controls passed on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41526176567).
 
 An additional [handoff fixture](tests/probe_caller_handoff.py) used separate
 baseline and candidate executables, a temporary TLS ingress and a fake origin.
@@ -101,8 +103,8 @@ lock; this is not provenance verification or a live-session rollout test.
 This narrower candidate deliberately leaves the existing `strict: false`
 translation and dropped `input_examples` unchanged. A fake invalid strict
 argument still becomes a tool call, so it must not be marketed as strict-tool
-support or complete caller-policy support. It requires cross-platform, actual
-client/plugin, provider and safe-handoff acceptance before any rollout.
+support or complete caller-policy support. It requires actual plugin, provider
+and broader safe-handoff acceptance before any rollout.
 
 On this Mac, two short sequential 300 ms samples using a synthetic
 1,000-message, 100-tool request measured 1.313–1.366 ms per conversion for
