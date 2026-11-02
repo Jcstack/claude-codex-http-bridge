@@ -19,9 +19,12 @@ from mcp_alias_policy import AliasPolicy, ProtocolError  # noqa: E402
 
 NAMES = ["lookup.fixture", "lookup_fixture"]
 UPDATED_DESCRIPTION = "Synthetic updated fixture description"
+INITIAL_SCHEMA = {"type": "object", "properties": {}}
+UPDATED_SCHEMA = {"type": "object", "properties": {"revision": {"type": "string"}}, "required": ["revision"]}
 
 
-def fake_server(marker, dynamic=False, hold_refresh=False, change_description=False, initial_updated=False):
+def fake_server(marker, dynamic=False, hold_refresh=False, change_description=False, initial_updated=False,
+                change_schema=False):
     changed = initial_updated
     for line in sys.stdin:
         message = json.loads(line)
@@ -33,7 +36,7 @@ def fake_server(marker, dynamic=False, hold_refresh=False, change_description=Fa
                       "capabilities": {"tools": {"listChanged": True}},
                       "serverInfo": {"name": "fixture", "version": "1"}}
         elif method == "tools/list":
-            names = (["lookup_fixture", "lookup.extra"] if changed and not change_description else NAMES)
+            names = (["lookup_fixture", "lookup.extra"] if changed and not (change_description or change_schema) else NAMES)
             if changed:
                 if hold_refresh:
                     deadline = time.monotonic() + 8
@@ -44,12 +47,19 @@ def fake_server(marker, dynamic=False, hold_refresh=False, change_description=Fa
                 Path(marker + ".refreshed").write_text("yes", encoding="utf-8")
             result = {"tools": [{"name": name, "description": UPDATED_DESCRIPTION
                                  if changed and change_description and name == "lookup.fixture" else "Synthetic fixture",
-                                 "inputSchema": {"type": "object", "properties": {}}} for name in names]}
+                                 "inputSchema": UPDATED_SCHEMA if changed and change_schema and name == "lookup.fixture"
+                                 else INITIAL_SCHEMA} for name in names]}
         elif method == "tools/call":
             name = message.get("params", {}).get("name")
-            with open(marker, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(name) + "\n")
-            result = {"content": [{"type": "text", "text": "OK"}]}
+            arguments = message.get("params", {}).get("arguments", {})
+            if change_schema and changed and name == "lookup.fixture" and (
+                    not isinstance(arguments, dict) or not isinstance(arguments.get("revision"), str)):
+                Path(marker + ".schema-invalid").touch()
+                result = {"isError": True, "content": [{"type": "text", "text": "Synthetic revision is required"}]}
+            else:
+                with open(marker, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(name) + "\n")
+                result = {"content": [{"type": "text", "text": "OK"}]}
         else:
             print(json.dumps({"jsonrpc": "2.0", "id": ident,
                               "error": {"code": -32601, "message": "unknown"}}), flush=True)
@@ -60,12 +70,14 @@ def fake_server(marker, dynamic=False, hold_refresh=False, change_description=Fa
             print(json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}), flush=True)
 
 
-def fake_adapter(marker, dynamic=False, hold_refresh=False, change_description=False, initial_updated=False):
+def fake_adapter(marker, dynamic=False, hold_refresh=False, change_description=False, initial_updated=False,
+                 change_schema=False, guard_schema=False):
     policy, events = AliasPolicy("gateway"), queue.Queue()
+    current_schemas = {}
     command = [sys.executable, __file__, "--fake-server", marker]
     if dynamic:
-        command.append(("description-current" if initial_updated else "description-barrier" if hold_refresh else "description") if change_description
-                       else ("dynamic-barrier" if hold_refresh else "dynamic"))
+        kind = "description" if change_description else "schema" if change_schema else "dynamic"
+        command.append(kind + ("-current" if initial_updated else "-barrier" if hold_refresh else ""))
     child = subprocess.Popen(command,
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              text=True, encoding="utf-8", bufsize=1)
@@ -85,8 +97,34 @@ def fake_adapter(marker, dynamic=False, hold_refresh=False, change_description=F
             if line is None:
                 break
             message = json.loads(line)
-            destination, outgoing = (policy.client_message(message) if source == "client"
-                                     else policy.server_message(message))
+            reject_schema = False
+            if guard_schema and source == "client" and message.get("method") == "tools/call":
+                params = message.get("params")
+                alias = params.get("name") if isinstance(params, dict) else None
+                try:
+                    visible = json.loads(Path(marker + ".model-schema.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    visible = None
+                reject_schema = (not isinstance(alias, str) or not isinstance(visible, dict)
+                    or visible.get("name") != "mcp__gateway__" + alias
+                    or alias not in current_schemas or visible.get("input_schema") != current_schemas[alias])
+            if reject_schema:
+                # Test-only side channel. It is not authenticated or safe for
+                # concurrent requests and must never wrap a real MCP server.
+                destination, outgoing = "client", {"jsonrpc": "2.0", "id": message.get("id"),
+                    "error": {"code": -32602, "message": "Synthetic model-visible schema is stale or unavailable"}}
+                Path(marker + ".schema-guard-rejected").touch()
+            else:
+                destination, outgoing = (policy.client_message(message) if source == "client"
+                                         else policy.server_message(message))
+            if guard_schema and source == "server":
+                if message.get("method") == "notifications/tools/list_changed":
+                    current_schemas.clear()
+                elif (destination == "client" and isinstance(outgoing.get("result"), dict)
+                      and isinstance(outgoing["result"].get("tools"), list)):
+                    current_schemas = {tool["name"]: tool["inputSchema"]
+                        for tool in outgoing["result"]["tools"] if isinstance(tool, dict)
+                        and isinstance(tool.get("name"), str) and isinstance(tool.get("inputSchema"), dict)}
             if (dynamic and source == "client" and message.get("method") == "tools/call"
                     and Path(marker + ".forwarded").exists()
                     and isinstance(message.get("params"), dict)
@@ -104,7 +142,9 @@ def fake_adapter(marker, dynamic=False, hold_refresh=False, change_description=F
                     and isinstance(outgoing["result"].get("tools"), list)
                     and ((change_description and any(isinstance(tool, dict)
                          and tool.get("description") == UPDATED_DESCRIPTION for tool in outgoing["result"]["tools"]))
-                         or (not change_description and "lookup.extra" in policy.advertised.values()))):
+                         or (change_schema and any(isinstance(tool, dict)
+                             and tool.get("inputSchema") == UPDATED_SCHEMA for tool in outgoing["result"]["tools"]))
+                         or (not (change_description or change_schema) and "lookup.extra" in policy.advertised.values()))):
                 # This proves only that the adapter wrote the changed list,
                 # not that Claude has applied it to a subsequent request.
                 Path(marker + ".forwarded").touch()
@@ -125,14 +165,18 @@ def fake_adapter(marker, dynamic=False, hold_refresh=False, change_description=F
 
 if __name__ == "__main__":
     valid = len(sys.argv) in (3, 4) and (len(sys.argv) == 3 or sys.argv[3] in (
-        "dynamic", "dynamic-barrier", "description", "description-barrier", "description-current"))
+        "dynamic", "dynamic-barrier", "description", "description-barrier", "description-current",
+        "schema", "schema-barrier", "schema-current", "schema-guard-barrier", "schema-guard-current"))
     dynamic = len(sys.argv) == 4
     hold_refresh = dynamic and sys.argv[3].endswith("-barrier")
     change_description = dynamic and sys.argv[3].startswith("description")
-    initial_updated = dynamic and sys.argv[3] == "description-current"
+    change_schema = dynamic and sys.argv[3].startswith("schema")
+    guard_schema = dynamic and sys.argv[3].startswith("schema-guard-")
+    initial_updated = dynamic and sys.argv[3].endswith("-current")
     if valid and sys.argv[1] == "--fake-server":
-        fake_server(sys.argv[2], dynamic, hold_refresh, change_description, initial_updated)
+        fake_server(sys.argv[2], dynamic, hold_refresh, change_description, initial_updated, change_schema)
     elif valid and sys.argv[1] == "--fake-adapter":
-        raise SystemExit(fake_adapter(sys.argv[2], dynamic, hold_refresh, change_description, initial_updated))
+        raise SystemExit(fake_adapter(sys.argv[2], dynamic, hold_refresh, change_description, initial_updated,
+                                     change_schema, guard_schema))
     else:
         raise SystemExit("This fixture only runs its own synthetic server")

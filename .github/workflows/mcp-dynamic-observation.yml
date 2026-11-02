@@ -47,6 +47,12 @@ jobs:
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --audit-synthetic
           python tests/probe_eager_tool_description.py --fresh-description
           python tests/probe_eager_tool_description.py
+          python tests/probe_mcp_schema_change.py --fresh
+          python tests/probe_mcp_schema_change.py --resume
+          python tests/probe_mcp_schema_change.py --attempt-stale-call
+          python tests/probe_mcp_schema_change.py --fresh --guard-schema
+          python tests/probe_mcp_schema_change.py --fresh --guard-schema --omit-model-schema
+          python tests/probe_mcp_schema_change.py --attempt-stale-call --guard-schema
           python tests/probe_mcp_stream_recovery.py
           python tests/probe_mcp_stream_recovery.py --disconnect
           python tests/probe_mcp_stream_recovery.py --disconnect --request-notification

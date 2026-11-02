@@ -189,6 +189,38 @@ synthetic client sent the new description. This does not establish behavior
 for real plugins or all client modes, and disabling ToolSearch is not a
 validated general workaround.
 
+### Input-schema change and fixture-only refusal
+
+On the locked 2.1.316 macOS client, a separate noninteractive fixture changed
+one same-name tool from an empty input schema to one with a required synthetic
+`revision` field. After the changed list was forwarded, five later sampled
+ToolSearch turns still exposed the original schema; a resumed synthetic
+session did too. A fresh synthetic session exposed the updated schema. The
+same observations occurred directly with fake Messages and through a separate
+selected translator with a fake API-compatible Responses origin. The
+read-only definition comparison implementation reported the schema difference from that
+fixture's retained record and supplied snapshot. This does not establish how
+interactive clients, real plugins, models, or the subscription executor behave.
+
+An additional fake model sent the old empty arguments after the list changed.
+The unguarded test-only adapter passed that synthetic call to the fake tool
+server, which intentionally returned an error without recording an effect.
+It is the fake server's validation that prevented a synthetic effect; this is
+not evidence that an arbitrary real tool would reject a stale call.
+
+A fixture-only comparison intercepted the same synthetic call and returned an
+error before forwarding it, while retaining the original tool name. Separate
+positive and negative controls permitted a matching current schema and refused
+a missing model-visible schema. This uses an unauthenticated temporary file to
+share a single synthetic model request's schema with the fake stdio adapter.
+It is deliberately unsuitable for real use: it does not securely bind a
+request, session, server, identity, or concurrent tool call; does not guarantee
+that a server has reported its current definitions; and compares only the
+input schema. It is not installed, is not a production guard, and does not
+protect any existing session. The production design and the permission,
+description, other schema fields, pagination, reconnect, and race cases remain
+open.
+
 A separate [Claude Code report](https://github.com/anthropics/claude-code/issues/102476)
 describes lost change notifications after the standalone Streamable HTTP MCP
 event stream disconnects and retries fail on version 2.1.296 on Linux. A local

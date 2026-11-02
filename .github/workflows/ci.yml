@@ -119,6 +119,20 @@ jobs:
         run: python tests/probe_eager_tool_description.py --fresh-description
       - name: Observe a changed synthetic tool description with ToolSearch disabled
         run: python tests/probe_eager_tool_description.py
+      - name: Check fresh and resumed synthetic MCP input schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_mcp_schema_change.py --fresh
+          python tests/probe_mcp_schema_change.py --resume
+          python tests/probe_mcp_schema_change.py --attempt-stale-call
+      - name: Test fixture-only stale and missing-schema refusal
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_mcp_schema_change.py --fresh --guard-schema
+          python tests/probe_mcp_schema_change.py --fresh --guard-schema --omit-model-schema
+          python tests/probe_mcp_schema_change.py --attempt-stale-call --guard-schema
       - name: Verify healthy Streamable HTTP MCP notifications
         run: python tests/probe_mcp_stream_recovery.py
       - name: Observe Streamable HTTP MCP notification stream recovery
