@@ -166,6 +166,7 @@ class Handler(BaseHTTPRequestHandler):
         self.server.leaf_started.wait(8)
         with self.server.lock:
             self.server.agent_id_returned = True
+            self.server.synthetic_task_id = match.group(1)
             self.server.leaf_running_before_stop = self.server.leaf_started.is_set() and not self.server.leaf_finished.is_set()
         return {"type": "tool_use", "id": STOP_CALL, "name": "TaskStop", "input": {"task_id": match.group(1)}}
 
@@ -177,6 +178,11 @@ class Handler(BaseHTTPRequestHandler):
             self.server.stop_is_error = stopped.get("is_error") is True
             self.server.stop_success_text = bool(re.search(r"successfully stopped", output, re.I))
             self.server.ownership_denial = bool(re.search(r"owned.{0,256}agent.{0,256}cannot stop", output, re.I | re.S))
+            owned = output.lower().find("owned")
+            denial = output.lower().find("cannot stop", owned) if owned >= 0 else -1
+            self.server.ownership_mentions_target = bool(
+                self.server.synthetic_task_id and owned >= 0 and denial > owned
+                and self.server.synthetic_task_id in output[owned:denial])
 
     def observe_hook_context(self, body: dict) -> None:
         serialized = json.dumps(body, ensure_ascii=True)
@@ -219,6 +225,7 @@ def run_case(claude: str, mode: str, observe_hooks: bool) -> dict:
         server.parent_agent_offered = server.parent_stop_offered = False
         server.stop_result_seen = server.stop_is_error = server.stop_success_text = server.ownership_denial = False
         server.agent_id_returned = server.leaf_running_before_stop = False
+        server.synthetic_task_id = None; server.ownership_mentions_target = False
         server.failure_hook_context_seen = server.batch_hook_context_seen = False
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         env = isolated_environment(root)
@@ -244,6 +251,7 @@ def run_case(claude: str, mode: str, observe_hooks: bool) -> dict:
                 "leaf_running_before_stop": server.leaf_running_before_stop, "stop_result_seen": server.stop_result_seen,
                 "stop_reported_error": server.stop_is_error, "stop_success_text": server.stop_success_text,
                 "ownership_denial_pattern": server.ownership_denial,
+                "ownership_segment_mentions_target": server.ownership_mentions_target,
                 "leaf_response_written_after_release": server.leaf_response_written.is_set(),
                 "leaf_tool_result_seen": server.leaf_tool_result_seen.is_set(),
                 "leaf_effect_created": server.effect_path.is_file() and server.effect_path.read_text(encoding="utf-8") == EFFECT,

@@ -29,4 +29,4 @@ jobs:
       - name: Select the pinned native client
         run: python tests/claude_fixture.py
       - name: Observe nested and root task-stop ownership against a fake model
-        run: python tests/probe_nested_task_stop.py --observe-hooks
+        run: python tests/probe_nested_task_stop.py --expect-ownership-denial --observe-hooks --expect-hook-observation

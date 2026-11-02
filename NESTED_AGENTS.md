@@ -46,7 +46,9 @@ CLAUDE_CODEX_TEST_BIN="$(python tests/claude_fixture.py)" \
 ```
 
 The explicit expectations are specific to this pinned client and observation;
-omit them to report changed behavior in a future client. Verify a mitigation
+the manually dispatched observation workflow uses them so a change is reviewed
+instead of silently accepted. Omit them to report changed behavior in a future
+client. Verify a mitigation
 with independent task effects, actual notification routing, permission-denial
 controls, resume and interruption before enabling it. A failed `TaskStop` must
 not be treated as successful cancellation. Do not terminate another session's

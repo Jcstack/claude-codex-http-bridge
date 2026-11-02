@@ -244,6 +244,13 @@ the targeted local file update preserved the running processes and recorded
 rollback bundle. A comparison of up to 32 recent shared backend logs did not
 find additional newly visible events. See [SESSION_AUDIT.md](SESSION_AUDIT.md).
 
+The local session audit also classifies bounded ownership-shaped `TaskStop`
+errors without returning their text or task identifiers. The classification was
+verified with synthetic positive, negative, duplicate and truncation cases on
+three platform runners, then installed as one file without restarting the
+bridge or any client. It is a pattern, not proof that a task is still running
+or that it belongs to the calling agent. See [NESTED_AGENTS.md](NESTED_AGENTS.md).
+
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
 Remaining work, updated 2026-11-01; execution order and acceptance gates are in [PLAN.md](PLAN.md):
