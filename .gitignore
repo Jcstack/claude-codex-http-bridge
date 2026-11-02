@@ -30,6 +30,7 @@
 !diagnostics.py
 !session_audit.py
 !mcp_name_audit.py
+!mcp_alias_policy.py
 !statusline_adapter.py
 !session_models.py
 !codex_usage.py

@@ -11,11 +11,11 @@ The repository contains source and an example config only. It does **not** conta
 
 The default installer remains pinned to the reviewed upstream release. A source-locked runtime bundle adds cache-preserving dynamic tools and native search-state replay behind a stable TLS listener. It can be activated without replacing the original service used by existing sessions. CI uses no model credentials, and local live probes use only the existing service's localhost key. See [runtime rollout](RUNTIME.md), the [community review and release gate](COMMUNITY_REVIEW.md), [measured cache and rolling-backend results](OPERATIONS.md), [model-versus-harness evidence](MODEL_HARNESS_EVIDENCE.md), and [local GPT harness pilot](HARNESS_PILOT.md).
 
-## 中文快速开始
+## Quick start
 
-Claude Code 是交互界面和工具执行者；Codex 模型由仅监听本机的 HTTP 代理提供。安装后运行：
+Claude Code provides the interface and executes tools; a loopback-only HTTP proxy supplies Codex models. After installation, run:
 
-macOS、Linux、WSL：
+macOS, Linux, and WSL:
 
 ```bash
 ./install.sh
@@ -25,22 +25,20 @@ claude-codex usage
 claude-codex --model gpt-6.1-sol
 ```
 
-原生 Windows PowerShell：
+Native Windows PowerShell:
 
 ```powershell
 py -3 .\install.py
-# 关闭并重新打开终端后：
+# Close and reopen the terminal first:
 claude-codex codex-login
 claude-codex models
 claude-codex usage
 claude-codex --model gpt-6.1-sol
 ```
 
-在会话中用 `/model` 切换动态发现的模型，用 `/effort` 调整推理强度。`/background` 需要的本机代理会继续运行；任务结束后可运行 `claude-codex bridge stop`。原有 `claude` 命令仍按原来的账号与设置运行。若本机已有 `claude-codex` 命令，安装器会停止；确认要改用这个仓库的版本后运行 `./install.sh --replace-command`。OAuth 文件和运行日志只留在本机安装目录，不进入 Git。
+Use `/model` in a session to select a dynamically discovered model and `/effort` to adjust reasoning effort. The local proxy continues running for `/background`; run `claude-codex bridge stop` after background tasks finish. The existing `claude` command retains its original account and settings. If a `claude-codex` command already exists, the installer stops; use `./install.sh --replace-command` if you intend to replace it with this repository's command. OAuth files and runtime logs stay in the private local installation and are excluded from Git.
 
-子代理默认使用 Claude Code 的模型选择规则；未单独配置时，`opus`、`sonnet`、
-`haiku` 和 `fable` 兼容别名都指向启动时选中的 GPT。可以为新启动的会话指定不同
-的子代理默认模型或别名映射，例如：
+Subagents follow Claude Code's model selection rules by default. Unless configured separately, the `opus`, `sonnet`, `haiku`, and `fable` compatibility aliases all refer to the GPT model selected at startup. A newly launched session can use a different subagent default or alias mapping, for example:
 
 ```bash
 ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-6.1-sol \
@@ -48,39 +46,29 @@ CLAUDE_CODE_SUBAGENT_MODEL=gpt-6.1-terra \
 claude-codex --model gpt-6-astra
 ```
 
-PowerShell 中可先设置 `$env:ANTHROPIC_DEFAULT_SONNET_MODEL` 和
-`$env:CLAUDE_CODE_SUBAGENT_MODEL`，再运行上述启动命令。模型 ID 必须出现在当前
-`claude-codex models` 的可选目录中；不符合时启动器会报错，不会静默替换。调用时
-指定的别名或代理定义可以覆盖子代理默认值；`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`
-可按 Claude Code 规则强制使用默认值。若请求的别名与主模型被识别为同族，
-Claude Code 可能让子代理继续使用主模型，即使该别名另有映射。自定义子代理定义可用
-`model: gpt-6.1-terra` 指定完整模型 ID；Agent 调用自身的 `model` 参数接受的是别名。
-分叉等例外与优先级见
-[Claude Code 子代理文档](https://code.claude.com/docs/en/sub-agents)。已打开的会话不受新启动设置影响。
+In PowerShell, set `$env:ANTHROPIC_DEFAULT_SONNET_MODEL` and `$env:CLAUDE_CODE_SUBAGENT_MODEL` before running the launch command. Model IDs must appear in the current `claude-codex models` catalog; otherwise the launcher reports an error rather than silently substituting another model. An alias passed to an Agent call or a model in an agent definition can override the subagent default. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` forces the default according to Claude Code's rules. If the requested alias and main model are recognized as the same family, Claude Code may keep the main model for the subagent even when the alias has a different mapping. A custom subagent definition can specify a full model ID such as `model: gpt-6.1-terra`; the Agent tool's own `model` argument accepts an alias. See the [Claude Code subagent documentation](https://code.claude.com/docs/en/sub-agents) for precedence and exceptions such as forks. New launch settings do not alter open sessions.
 
-安装包含 V2 补丁的审查运行包后，可用 `claude-codex --native-compaction`
-选择原生 Codex 压缩。它保留主任务 effort，支持 `/compact` 后续接；默认仍使用
-Claude 摘要。已运行会话不会被修改。详见[验证结果与边界](NATIVE_COMPACTION.md)。
+After installing a reviewed runtime bundle containing the V2 patch, `claude-codex --native-compaction` opts into native Codex compaction. It preserves the main task's effort and supports continuation after `/compact`; Claude's summary remains the default. Open sessions are not modified. See the [validation results and limitations](NATIVE_COMPACTION.md).
 
-`--resume 会话ID`、`-r 会话ID` 和 `--continue` 会恢复本地元数据中最后观察到的 GPT 模型；显式 `--model` 始终优先。HUD 中后来选择的模型也会保存在本机的私有记录里，不保存提示词或原文。原生恢复选择器仍由 Claude Code 处理，启动器不会再强行附加默认 Sol；存在重名等歧义时不猜测。恢复后仍按当前账号目录核验模型是否可用。
+`--resume SESSION_ID`, `-r SESSION_ID`, and `--continue` restore the last GPT model observed in local metadata; an explicit `--model` takes precedence. Models selected later through the HUD are also recorded privately on the machine, without storing prompts or transcript text. Claude Code still handles its native resume picker, and the launcher does not force the default Sol model onto it or guess when names are ambiguous. Model availability is checked against the current account catalog on resume.
 
-运行中的会话可[热切换 Codex 账号](ACCOUNTS.md)：`claude-codex account login work` 授权并暂存新账号，`claude-codex account use work` 验证后切换后续请求，`claude-codex account list` 查看与回退。旧账号保留为停用备份，已开始的输出继续完成；服务、Claude 会话和原生 Codex 登录均不重启或替换。共用该代理的会话会一起切换；提示缓存可能需要重新预热。
+For [account switching while sessions run](ACCOUNTS.md), `claude-codex account login work` authorizes and stages an account, `claude-codex account use work` validates and selects it for subsequent requests, and `claude-codex account list` shows the available accounts. The old account remains as a disabled backup and already-started streams can finish; the service, Claude sessions, and native Codex login are not restarted or replaced. Sessions sharing the bridge switch together, and prompt caches may need to warm again. Atomicity between account selection and catalog publication for newly arriving requests remains an open limitation; see [the plan](PLAN.md).
 
-如果用量已重置却仍返回旧的 429，[配额恢复机制](QUOTA_RECOVERY.md)会核对当前桥接账号的真实可用状态，再清除已失效的本地周配额冷却。中转层不再重复缓存来源服务的限流；真实上游 429 仍保留。也可运行 `claude-codex quota recover` 做一次核对，无需关闭会话、切账号或重启推理服务。
+If usage resets but an old 429 persists, the [quota recovery mechanism](QUOTA_RECOVERY.md) checks the selected bridge account's actual availability before clearing an expired local weekly-quota cooldown. The translation layer no longer duplicates the origin's rate-limit state; genuine upstream 429 responses are retained. Run `claude-codex quota recover` for a one-time check without closing sessions, switching accounts, or restarting inference.
 
-可先使用不需要额外项目 API key 的[原生能力包](NATIVE_TOOLS.md)：`claude-codex tools install`，然后正常启动。它通过 MCP 提供图片生成/编辑、PDF 提取和 Realtime 音频；`--no-native-tools` 单次关闭。桌面需另运行 `claude-codex desktop install`、`desktop windows`、`desktop select WINDOW_ID`，仅授权当前项目的指定窗口；`desktop disable` 撤销。Claude Code 继续负责权限，安装不自动开启系统权限、麦克风或全屏采集。当前仍不代表所有 GPT-Live、原生压缩或 Opus 等效能力通过认证。
+The optional [native capability package](NATIVE_TOOLS.md) does not require an additional project API key: run `claude-codex tools install`, then launch normally. It offers image generation/editing, PDF extraction, and Realtime audio through MCP; `--no-native-tools` disables it for one launch. Desktop access requires separate `claude-codex desktop install`, `desktop windows`, and `desktop select WINDOW_ID` commands and authorizes only the selected window for the current project; `desktop disable` revokes that selection. Claude Code continues to control tool permissions. Installation does not grant system permissions or automatically enable the microphone or full-screen capture. These capabilities do not establish complete GPT-Live support, native-compaction coverage, or Opus equivalence.
 
-可选正式 API 路由（目前为 pilot，需自行创建项目密钥并核对账单）：
+Optional public API route (pilot; requires a project key and billing review):
 
 ```text
-claude-codex api key set           # 在终端隐藏输入，密钥只存本机私有目录
-claude-codex api models            # API 可用 ID 与官方模型规格的交集
-claude-codex api --model sol       # Claude Code 仍是 harness
+claude-codex api key set           # Hidden terminal input; key stays in a private local directory
+claude-codex api models            # API-available IDs intersected with official model specifications
+claude-codex api --model sol       # Claude Code remains the harness
 claude-codex api bridge status
-claude-codex api bridge stop       # 待 API 后台任务结束再停止
+claude-codex api bridge stop       # Stop after API background tasks finish
 ```
 
-API 路由与订阅 OAuth、服务端口及配额缓存分开。`api key set` 不接受命令行明文参数；先在 [OpenAI API Platform](https://platform.openai.com/api-keys) 创建项目密钥，并设置[硬性消费上限](https://developers.openai.com/api/docs/guides/production-best-practices)。如果已领取 [ChatGPT 订阅者 API 赠额](https://developers.openai.com/api/docs/guides/chatgpt-api-credits)，请在 API Platform 核实该项目所属组织和余额。API 路由的真实推理、计费和全部工具能力仍需用该项目密钥实测；本仓库的自动测试只使用假上游。
+The API route is separate from subscription OAuth and uses separate service ports and quota state. `api key set` does not accept a plaintext key argument. Create a project key in the [OpenAI API Platform](https://platform.openai.com/api-keys) and configure a [hard spending limit](https://developers.openai.com/api/docs/guides/production-best-practices). If you have claimed [ChatGPT subscriber API credits](https://developers.openai.com/api/docs/guides/chatgpt-api-credits), verify the project's organization and balance in the API Platform. Live inference, billing, and the complete tool set still require validation with that project key; this repository's automated tests use a fake upstream only.
 
 ## Requirements
 

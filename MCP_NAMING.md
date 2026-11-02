@@ -34,6 +34,82 @@ before making a change. A deny of the shared normalized alias covers the alias
 as a whole in this test, so it cannot selectively allow just one original.
 Existing sessions, plugins and MCP servers have not been modified or scanned.
 
+## Experimental pre-client policy
+
+The source tree now contains an **uninstalled experiment**,
+`mcp_alias_policy.py`. It is a name and request policy, not a complete MCP
+transport. Do not put the test fixture in a real MCP configuration. The
+experiment does not start, wrap, or modify any existing server or session.
+
+Within one effective server namespace it preserves ordinary safe names, and
+maps names requiring changes to deterministic, reversible ASCII names. For
+example, `lookup.fixture` becomes `zZ0_lookup_dfixture`, while
+`lookup_fixture` remains unchanged. Original names beginning with the reserved
+`zZ0_` prefix are escaped too. The mapping uses no truncation or hash and
+rejects a full Claude tool name over 128 characters. It preserves tool order
+and the remaining definition fields in the tested messages. This is a
+deliberate fail-closed limit, not support for every valid MCP name.
+
+The policy only forwards calls for currently advertised aliases and translates
+the selected alias back to the original tool name. A fresh list or
+`notifications/tools/list_changed` invalidates the previous list; stale list
+replies and calls to unadvertised tools are rejected. Cancellation is forwarded,
+and a late reply to a cancelled request is discarded. Cancelled request IDs
+cannot be reused during the policy's lifetime; tracking is bounded and fails
+closed on exhaustion. Cancellation does not undo a tool effect already begun.
+Unit tests exercise paginated lists, overlapping refreshes, cancellation,
+server-originated requests in older MCP versions, non-tool messages, and
+preservation of synthetic 2026 request metadata and input responses. These
+tests do not establish complete support for either protocol version.
+
+With the locked real Claude client, a **test-only** stdio adapter, and synthetic
+local servers, both formerly colliding tools were called exactly once each;
+the same held after resuming the synthetic session. A deny for the encoded
+alias blocked that tool while allowing the other. A separate synthetic test
+also observed `tools/list_changed`, fetched a changed list, and called the new
+original tool in the real client. A separate synthetic gateway test exercised
+the reviewed translator, deferred discovery through ToolSearch,
+both tool calls, and preservation of the cache key, initial tool definitions,
+instructions, and previous-input prefix. It did not test a provider cache hit.
+
+The remaining work includes production-grade framing, bounded backpressure,
+process lifecycle, cancellation races, dynamic server behavior, ToolSearch,
+real plugins, MCP protocol changes, and Windows. The test adapter does not
+implement these transport requirements. Server namespaces and complete
+`mcp__<server>__<tool>` names can also collide *across* servers, including
+through separator placement; the per-server mapping cannot resolve those
+collisions. Permission rules, hooks, prompts, and skills that refer to a
+renamed tool may require explicit review and migration. Broad existing
+permissions may still apply. There is no automatic permission migration, and
+an already-open session is not migrated. Servers that change tools without a
+notification or repurpose an unchanged tool name cannot be made trustworthy
+by aliasing alone.
+
+The [2025 MCP stdio specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+uses newline-delimited JSON-RPC and supports server-originated requests. The
+[2026 protocol](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)
+changes the request and subscription model; future compatibility must be
+tested against the actual negotiated versions rather than assumed from a
+passthrough fixture.
+
+### Community options assessed
+
+[Supergateway](https://github.com/supercorp-ai/supergateway) is actively
+maintained and can prefix tool names or translate transports. Applying the
+same prefix to `lookup.fixture` and `lookup_fixture` still leaves them
+identical after Claude's normalization, so that option alone does not resolve
+this case. Its [non-loopback/API-key warning issue](https://github.com/supercorp-ai/supergateway/issues/360)
+is relevant if deploying its server modes; this project did not install it.
+
+[FastMCP's ToolTransform](https://github.com/PrefectHQ/fastmcp/blob/main/docs/servers/transforms/tool-transformation.mdx)
+supports renaming tools from proxies and is a serious maintained alternative.
+Its open reports include [schema defaults changing across transformed-tool calls](https://github.com/PrefectHQ/fastmcp/issues/6183)
+and a [resource-link namespace mismatch](https://github.com/PrefectHQ/fastmcp/issues/4154)
+for a specific namespace transform. These reports do not prove that all
+FastMCP proxies are affected, but they justify testing schemas, resource links,
+dynamic lists, and privacy before adopting a dependency. Neither project has
+yet been shown to meet this repository's complete compatibility requirements.
+
 ## Offline partial audit
 
 `claude-codex mcp-audit` reads server keys from the default local Claude

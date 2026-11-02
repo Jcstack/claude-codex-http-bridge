@@ -1,138 +1,141 @@
-# Claude Code × Codex 能力与稳定性计划
+# Claude Code × Codex capability and reliability plan
 
-更新：2026-11-02。已按用户要求恢复推进。以正在持续使用的实际会话及其子会话记录为依据，每完成一阶段都更新证据、问题和下一步。
+Updated 2026-11-02. Work is guided by the long-running session and its child-session records. Update the evidence, open problems, and next steps after each phase.
 
-## 目标和边界
+## Goals and boundaries
 
-- Claude Code 始终作为 harness，保留本地命令、权限、hooks、skills、MCP、插件、计划模式、子任务及后台工作能力。
-- 通过经过验证的协议适配和本地工具，发挥 Codex/OpenAI 模型的推理、上下文、缓存、检索、视觉、计算机操作及流式能力。
-- 模型列表、上下文、effort 和能力随当前账号及上游元数据发现，不把旧模型参数写成永久规则。
-- 不为了命中缓存而增加无用内容、削弱任务质量、降低用户指定 effort 或放宽权限。
-- 原始日志、提示内容、项目路径、凭证、原生压缩状态和运行配置留在本机。仓库仅保存实现、合成测试和必要结论。
-- 已运行的会话继续工作。替换中转进程必须先准备、验证再切流并排空旧请求；不能把杀掉原监听进程称为无影响重启。
-- Project API 路由继续关闭；没有 Claude 账号时，不编造 Opus/Fable 对照结果。没有私有 Windows 验证环境时，不把无凭证 CI 当成真实账号验证。
+- Claude Code remains the harness and retains local commands, permissions, hooks, skills, MCP, plugins, plan mode, subagents, and background work.
+- Use validated protocol adaptation and local tools to expose Codex/OpenAI reasoning, context, caching, search, vision, computer interaction, and streaming capabilities.
+- Discover model lists, context limits, effort levels, and capabilities from the current account and upstream metadata; do not make historical model parameters permanent rules.
+- Do not add useless content, weaken task quality, lower user-selected effort, or relax permissions to improve cache reuse.
+- Keep raw logs, prompts, project paths, credentials, native compaction state, and runtime configuration on the local machine. The repository contains implementation, synthetic tests, and necessary findings only.
+- Keep existing sessions working. Prepare and validate replacement translators before switching traffic, and allow old requests to drain. Killing the original listener is not a disruption-free restart.
+- Leave the Project API route disabled. Do not invent Opus/Fable comparisons without a Claude account or equate credential-free CI with a real Windows account test.
 
-## 推进方法
+## Method
 
-每个能力建立同一套记录：用户场景、harness 行为、模型/账号/路由、官方依据、社区维护及 issue 证据、协议测试、真实执行结果、隐私边界、已知限制。
+Record the same evidence for each capability: user scenario, harness behavior, model/account/route, official references, community maintenance and issues, protocol tests, actual execution, privacy boundary, and known limitations.
 
-状态分别记录为“已验证”“需要适配”“未验证”“上游或环境前置条件未满足”。不以 HTTP 200、模型名称相似、工具已列出或单个演示成功代替完整验收。
+Classify results as verified, adaptation needed, unverified, or blocked by an upstream or environmental prerequisite. HTTP 200, a similar model name, a listed tool, or one successful demonstration does not establish complete acceptance.
 
-每轮先刷新目标会话和其子会话的只读诊断，再挑选能直接改善真实任务的事项。区分请求失败、SSE 中途失败、正常测试失败、应用自身报错和工具适配问题；同一请求在两层代理的记录不能重复相加。
+Start each iteration with read-only diagnostics of the tracked session and its children, then prioritize improvements relevant to real work. Distinguish request failures, interrupted SSE streams, expected test failures, application errors, and tool adaptation problems. Do not add records of the same request from two proxy layers together.
 
-跟踪对象的匿名标记保存在本机私有安装目录的 `runtime-audit/target.json`，避免后续把临时测试会话误认成目标会话。该文件不进入仓库。
+The tracked session's anonymous marker is stored locally in the private installation's `runtime-audit/target.json`, preventing temporary test sessions from being mistaken for it. That file is not committed.
 
-## P0：线上可用性与取证
+## P0: Availability and investigation
 
-- [x] 定位与当前活跃进程匹配的长期主会话，读取从启动至今的主日志及子会话；只提取必要的结构和统计。
-- [x] 修复“用量已恢复而仍返回旧 429”：核对选中账号的真实可用状态，释放旧的整账号配额冷却，中转层不再重复持有来源的限流状态。
-- [x] 加入单实例后台核对及 `claude-codex quota recover`；不切账号、不续签令牌、不执行推理、不重启推理服务，保留真实限流和认证失败。
-- [x] 收尾 429 修复的三平台完整链路检查；真实会话后续请求继续运行，后台核对正常。
-- [x] 将完整生命周期、子会话、工具调用、请求模型/effort、压缩和错误分类整理为可重复的本地审计流程；报告解析上限、跳过记录及数据缺口，见 [SESSION_AUDIT.md](SESSION_AUDIT.md)。分类不是根因证明，命令记录不是完整支持证明。
-- [x] 从真实会话及两层访问记录识别 HTTP 200 后的流中断；诊断分别保留握手失败和不完整流，避免把 200 当作完整成功。
-- [x] 在隔离的真实 Claude 客户端和当前中转中，覆盖参数半截、参数完成、工具项完成及终止前后的合成流故障；独立 hook 计数证明成功场景写入恰好一次、续接携带工具结果，健康对照必须成功。加入三平台门禁；这不等于全部 socket/并行工具场景已验收。
-- [x] 扩展 EOF、`response.failed`、交错的两个工具调用，以及工具完成前和完成后终止隔离客户端的负例。每个工具的效果独立计数，并检查后续请求保留对应结果；不把进程终止等同所有 Ctrl-C 或插件场景。
-- [x] 在 POSIX 私有伪终端向真实 Claude `-p` 客户端输入 Ctrl-C，检查工具完成前、上游发出首项后、一个效果完成且另一个被隔离钩子拦住、两项均完成后的情况；本机既有 HOME 与安装路径组合出现超时，交互 TUI 和 Windows 控制台仍待验证。
-- [x] 恢复同一隔离的中断会话，用能区分成功和拒绝结果的合成模型补做未完成动作，并检查已完成动作未重复；不推广到任意真实模型或工具。
-- [x] 将已记录的不完整流错误按固定白名单分类；已看到结构化 `request_timeout`，仍需辨别原始入口和更远端的具体来源。
-- [x] 对照运行中的原始二进制和固定版本源码，识别匹配中转程序的未完成流错误标记；这是来源包装的强相关证据，不断言终止事件丢失的根因。
-- [x] 在假上游、隔离转换器、TLS 入口及真实客户端中验证 SSE 保活、取消、截断和首字节前错误：开启首字节前保活会先提交 HTTP 200，随后把错误放进流内；当前运行配置未改变。
-- [x] 使用临时 TLS 入口和一次短合成订阅请求，验证保活注释和正常结束事件可从当前上游到达客户端；不能推广为长流稳定性结论。
-- [x] 合成 `response.incomplete` 复现未确认工具被执行；隔离候选阻止未完成调用，保留已确认工具，并在 HTTP/WebSocket 非流式错误中保持请求级别。真实 Claude 单工具和并行工具负例已加入门禁。
-- [x] 完成该安全补丁的三平台门禁，并滚动更新本地受管理中转；账号、原始入口和 TLS 入口保持不变，交接时的旧流自然结束。
-- [x] 使用真实客户端和两个假网关验证运行中设置变更：普通客户端能完成旧流并在下一轮转向验证过 CA 的新入口；启动设置优先、`--restricted` 和缺 CA 均有负例，不等于真实会话可以无风险迁移。
-- [ ] 为原始入口及直接连接它的历史会话设计安全迁移；它们仍使用旧转换器，其他未覆盖协议也不能视为已修复。
-- [ ] 安全查清本机非交互 Ctrl-C 夹具在既有 HOME 和已安装路径组合下超时的原因；临时 HOME 的同版客户端已通过，但不能据此推断交互会话正常或真实用户状态是原因，见 [STREAMING.md](STREAMING.md)。
-- [ ] 继续在实际模型路径验证保活、超时和安全恢复；区分客户端空闲超时与上游缺失结束事件，不把保活当作后者的修复。
-- [ ] 解释实际不完整流并验证安全恢复：区分原生错误事件、缺失终止事件、传输断开和取消，检查部分工具调用不会重放或执行两次；原始日志不足以确认的历史原因保持未知。
-- [ ] 继续查证 TLS/EOF 与 500/503，区分连接前失败、流中断、客户端取消和业务错误；不靠固定重试或重启掩盖原因。
-- [x] 对近期握手 EOF 增加固定白名单的 URL 主机类别统计，保留转发错误可能性；实际日志在官方 ChatGPT 主机附近报错，后续无凭证 TLS 检查通过，根因仍未确定。
+- [x] Identify the long-running main session matching the active process and inspect its main and child logs from startup, extracting only necessary structure and statistics.
+- [x] Fix stale 429 responses after usage resets: check the selected account's actual availability, release its expired account-wide cooldown, and stop duplicating the origin's rate-limit state in the translation layer.
+- [x] Add a single-instance background check and `claude-codex quota recover` without switching accounts, renewing tokens, running inference, or restarting inference services; retain genuine rate limits and authentication failures.
+- [x] Complete the three-platform end-to-end gate for the 429 fix; subsequent requests in the real session continued and background checks worked.
+- [x] Create a repeatable local audit for the full lifecycle, child sessions, tool calls, requested model/effort, compaction, and error categories. Report parser limits, skipped records, and missing data; see [SESSION_AUDIT.md](SESSION_AUDIT.md). Categories do not prove root cause, and command records do not prove complete support.
+- [x] Identify interrupted streams after HTTP 200 from real session and two-layer access records; diagnostics separately retain handshake and incomplete-stream failures rather than treating 200 as completion.
+- [x] Use an isolated real Claude client and the current translator to exercise synthetic failures during partial arguments, completed arguments, completed tool items, and termination. Independent hook counts establish exactly one write in successful cases and preservation of results on continuation; a healthy control must succeed. The three-platform gate does not cover all socket or parallel-tool scenarios.
+- [x] Add EOF, `response.failed`, interleaved calls to two tools, and client termination before and after tool completion. Count each tool's effect independently and check subsequent requests for corresponding results; process termination does not represent every Ctrl-C or plugin scenario.
+- [x] Send Ctrl-C to a real Claude `-p` client in a private POSIX pseudoterminal before tool completion, after the first upstream item, after one effect while a separate isolated hook blocks the other, and after both effects. The existing local HOME plus installed-path combination timed out; interactive TUI and Windows console behavior remain unverified.
+- [x] Resume the same isolated interrupted session with a synthetic model that distinguishes successful and denied outcomes, complete unfinished actions, and verify completed actions are not repeated. This does not cover arbitrary real models or tools.
+- [x] Classify recorded incomplete-stream errors using a fixed allowlist. A structured `request_timeout` was observed; its exact source within the origin or farther upstream remains unresolved.
+- [x] Compare the running original binary and pinned source to identify the translator's matching incomplete-stream error marker. This strongly associates the wrapper with the message but does not establish why the terminal event went missing.
+- [x] Test SSE keepalive, cancellation, truncation, and errors before the first byte with a fake upstream, isolated translator, TLS ingress, and real client. Keepalive before the first byte commits HTTP 200 and moves subsequent errors into the stream; the running configuration was not changed.
+- [x] Use a temporary TLS ingress and one short synthetic subscription request to verify keepalive comments and a normal terminal event can reach the client from the current upstream. This does not establish long-stream reliability.
+- [x] Reproduce execution of an unconfirmed tool with synthetic `response.incomplete`. The isolated candidate blocks unfinished calls, preserves confirmed calls, and retains request-level errors for HTTP/WebSocket nonstreaming responses. Real-Claude single-tool and parallel-tool negative cases are gated.
+- [x] Pass the three-platform gate for that safety patch and roll out the local managed translator. The account, original endpoint, and TLS ingress stayed unchanged, and the old stream drained naturally during handoff.
+- [x] Test live settings changes using a real client and two fake gateways. A normal client finishes its old stream and uses a CA-verified new ingress next turn; launch-setting precedence, `--restricted`, and missing-CA negative cases are covered. This does not prove risk-free migration of real sessions.
+- [ ] Design safe migration for the original endpoint and legacy sessions connected directly to it; they still use the old translator, and protocols outside the patch cannot be considered fixed.
+- [ ] Safely investigate why the local noninteractive Ctrl-C fixture times out with the existing HOME and installed-path combination. The same client passed with a temporary HOME; that does not establish that interactive sessions work or that real user state caused the timeout. See [STREAMING.md](STREAMING.md).
+- [ ] Continue testing keepalive, timeout, and safe recovery on the real model path. Distinguish client idle timeout from a missing upstream terminal event; keepalive does not fix the latter.
+- [ ] Explain real incomplete streams and verify safe recovery. Distinguish native errors, missing terminal events, disconnects, and cancellation, and check that partial tool calls are neither replayed nor executed twice. Historical causes unsupported by the logs remain unknown.
+- [ ] Continue investigating TLS/EOF and 500/503 errors, separating preconnection failures, interrupted streams, client cancellation, and application errors. Do not mask the cause with fixed retries or restarts.
+- [x] Add allowlisted URL-host categories for recent handshake EOF mentions, preserving the possibility that errors were forwarded. Real logs mention the official ChatGPT host; later credential-free TLS checks passed, but the root cause remains unknown.
 
-验收：正常请求和真实配额不足的负例均可重现；重置后自动恢复；无重复工具动作；原账号、监听、密钥、会话及已开始的流保持完整。
+Acceptance: reproduce successful requests and genuine quota-exhaustion negative cases; automatically recover after a reset; avoid duplicate tool effects; preserve the original account, listener, keys, sessions, and already-started streams.
 
-## P1：Prompt Caching、长上下文与压缩
+## P1: Prompt caching, long context, and compaction
 
-当前推进重点。真实会话已有缓存读取证据，也存在明显的长压缩耗时；二者分别评估。
+This remains a priority. The real session provides evidence of cache reads and also shows a long compaction; evaluate those separately.
 
-- [x] 建立长期会话的去重缓存基线；明确缓存 token 占比不是请求命中率，累计输入不是单次上下文，缺失计数不是免费证明。
-- [x] 核对当前官方缓存文档和已安装转换器：已有缓存读写计数转换；不同路由对缓存控制字段的处理存在差异，不能仅凭字段名称判断可用。
-- [x] 用合成固定前缀验证当前订阅路由的缓存读取，并记录首文本和总延迟；保留全部命中与未命中结果，见 [CACHE_AUDIT.md](CACHE_AUDIT.md)。配额影响和完整性能对照仍待验证。
-- [x] 绕过转换器过滤、经原凭证进程直接核验当前 Sol 订阅后端：普通请求成功；显式/隐式 `prompt_cache_options` 和独立断点均被后端以 400 拒绝。保留兼容过滤，不把自动缓存说成手动控制生效。
-- [x] 在合成 API-profile 上游验证 ToolSearch 加载和移除时工具定义顺序与字节、instructions 和历史 input 项前缀；同一合成会话的缓存键稳定，不同合成会话的键不同。此项不证明订阅后端的缓存命中或账号隔离。
-- [x] 使用伪造凭证元数据和本机上游，直接验证订阅执行器的工具加载/移除、稳定前缀、会话/子代理/模型缓存键范围和 effort 保留；这不代表真实账号隔离或后端命中已验证。
-- [x] 通过真实订阅网关，使用两组短合成历史观察工具发现和移除前后的缓存计数；保留未报告读取的样本，不据此推断命中率或其他账号的行为。
-- [x] 用同一账号的两组合成会话重复相同前缀，观察缓存计数差异；结果不足以确定提供者的跨会话或跨账号缓存隔离。
-- [x] 用真实 Claude 客户端和合成 MCP/Responses 上游，分别加载 1 个和 9 个延迟工具并检查转换后的缓存前缀；真实提供者上的多工具缓存读取仍待验证。
-- [x] 在 macOS 交互式合成会话分别以 Sol、Astra、Luna 的兼容映射切换五档 effort，检查缓存键、非空工具定义和历史输入项的结构前缀保持；这是合成结构验证，不证明提供者命中或跨账号隔离。
-- [x] 对齐近期长压缩和共享原始入口访问记录，发现接近整个压缩时长的请求；因缺少跨层请求身份，记录为相关性，不归因于模型计算或网络中的某一方。
-- [x] 用独立本地 TLS 中转及假上游对比 100 KB、1 MB、4 MB 合成消息的处理耗时和完整性；字节数和重复文本不等同真实上下文 token 或模型计算。
-- [x] 在假上游发送原生压缩进度事件并延迟结束，确认当前可选原生压缩路径在终止前不向 Claude 发送正文；不将该结论推广到默认摘要压缩或归因为真实慢请求的根因。
-- [ ] 检查新版 Responses 缓存选项、断点、TTL、缓存键及 Claude `cache_control` 的可表达范围；只有路由实际支持后才启用，不把公共 API 行为套用到 Codex 订阅后端。
-- [ ] 覆盖稳定系统前缀、工具排序、ToolSearch 动态加载/移除、工具结果、模型/effort 变化、账号隔离、恢复/分叉、压缩和失效边界。
-- [ ] 检查推理及原生状态是否保留、缓存写入是否重复计数、UI 是否把 Anthropic 的缓存期限或价格误用于当前路由。
-- [ ] 在更大、更多工具和更复杂约束的合成任务中比较普通总结与原生压缩，检查后续代码验收、记忆、插件和图片/工具结果。保留失败和慢样本。
-- [ ] 核对模型发现的默认/最大上下文、生成压缩窗口、Claude 内部预留、原生 token 估计及 HUD；不通过禁用压缩修饰显示。
-- [x] 账号切换和新会话准备使用同一账号锁；校验目标账号模型、上下文与 effort 的目录快照，变化时准备并复核新中转。隔离测试覆盖目录不变、目录变化、发布前变化回滚、锁竞争与旧流完成；当前实际账号目录经只读检查一致。
-- [x] 复核固定版本上游的内部按凭据调度接口，以无凭据源码测试验证流式/非流式传递、非流式缺失或禁用凭据不回退；另以合成流式测试确认精确指定优先于已有会话亲和性，缺失、禁用及模拟限流时不回退其他账号。这不是已开放的 HTTP 选账号能力。
-- [x] 在 POSIX 临时交互终端观察 `/model`：用户设置中的合成新模型可热显示，启动 `--settings` 文件的修改未刷新；这是指定客户端样本，不代表当前共享用户设置可安全用于真实会话。
-- [ ] 消除账号切换与目录发布之间新请求可能遇到的不一致窗口，并研究不重启既有 Claude 进程时安全更新其启动模型选择与上下文设置的可行性；目前不能声称两者已实现。
-- [ ] 单独处理账号间模型输入模态等能力差异；当前运行中转配置的对比覆盖模型 ID、上下文与 effort，不代表已有客户端的图片等能力展示会随账号变化。
-- [x] 用隔离的真实 Claude 客户端、候选转换器和假 Responses 上游检查 Sol、Astra、Luna 兼容映射的五档 effort：命令行参数及 macOS 交互式 `/effort` 均按原值到达模拟上游；这不证明每个真实模型账号都支持各档，Windows 交互终端仍待验证。
-- [ ] 为只支持部分 effort 的未来模型设计可见、可验证的选择方式；官方每模型上限在隔离客户端可用，但会压低超限请求，也不能单独表达不连续的支持集合，当前不据此放宽门禁。
+- [x] Establish a deduplicated cache baseline for the long-running session. Cached-token share is not request hit rate, cumulative input is not one context window, and missing counters do not prove free usage.
+- [x] Check current official caching documentation and the installed translator. Cache read/write counters are translated, but routes handle cache-control fields differently; field names alone do not establish availability.
+- [x] Test cache reads on the current subscription route with synthetic fixed prefixes and record first-text and total latency, including hits and misses. See [CACHE_AUDIT.md](CACHE_AUDIT.md). Quota impact and a full performance comparison remain unverified.
+- [x] Bypass translator filtering and test the current Sol subscription backend directly through the original credential process. Ordinary requests succeeded; explicit and implicit `prompt_cache_options` and standalone breakpoints were rejected with HTTP 400. Retain compatibility filtering and do not portray automatic caching as working manual control.
+- [x] Test ToolSearch loading/removal against a synthetic API-profile upstream for tool-definition ordering and bytes, instructions, and the historical input prefix. Cache keys stayed stable within one synthetic session and differed across synthetic sessions; this does not prove subscription-backend hits or account isolation.
+- [x] Use synthetic credential metadata and a local upstream to test the subscription executor's tool loading/removal, stable prefixes, session/subagent/model cache-key scope, and effort preservation. This does not verify real account isolation or provider cache hits.
+- [x] Observe cache counters around tool discovery and removal with two short synthetic histories through the real subscription gateway. Retain samples without reported reads; do not infer hit rate or behavior of other accounts.
+- [x] Repeat the same prefix across two synthetic sessions on one account and observe differences in cache counters. The result does not establish provider isolation across sessions or accounts.
+- [x] Load one and nine deferred tools with a real Claude client and synthetic MCP/Responses upstream, then inspect translated cache prefixes. Multi-tool cache reads at the real provider remain unverified.
+- [x] Switch five effort levels in macOS interactive synthetic sessions using Sol, Astra, and Luna compatibility mappings, checking structural preservation of the cache key, nonempty tool definitions, and historical input prefix. This does not prove provider hits or cross-account isolation.
+- [x] Align a recent long compaction with shared original-endpoint access records and identify a request lasting nearly the entire compaction. Without cross-layer request identity, this is correlation, not attribution to model computation or a network component.
+- [x] Compare processing latency and integrity for synthetic 100 KB, 1 MB, and 4 MB messages using an independent local TLS ingress and fake upstream. Byte size and repeated text are not equivalent to real context tokens or model computation.
+- [x] Send native-compaction progress events from a fake upstream and delay termination; the current optional native-compaction path sends no body to Claude before termination. Do not generalize to default summary compaction or attribute the real slow request to this observation.
+- [ ] Check the expressible range of newer Responses cache options, breakpoints, TTL, cache keys, and Claude `cache_control`. Enable them only when the selected route supports them; do not assume public API behavior applies to the Codex subscription backend.
+- [ ] Cover stable system prefixes, tool ordering, ToolSearch dynamic loading/removal, tool results, model/effort changes, account isolation, resume/fork, compaction, and invalidation boundaries.
+- [ ] Check preservation of reasoning and native state, cache-write double counting, and whether the UI incorrectly applies Anthropic cache durations or prices to this route.
+- [ ] Compare ordinary summaries and native compaction on larger synthetic tasks with more tools and more complex constraints; assess later code acceptance, memory, plugins, images, and tool results. Retain failures and slow samples.
+- [ ] Reconcile discovered default/maximum context, generated compaction windows, Claude's internal reserve, native token estimation, and HUD. Do not disable compaction to improve the display.
+- [x] Use one account lock for account switching and new-session preparation. Validate the target account's model, context, and effort catalog snapshot; prepare and recheck a new translator when it changes. Isolated tests cover unchanged and changed catalogs, rollback after a prepublication change, lock contention, and completion of an old stream. The current real account catalog matched in a read-only check.
+- [x] Review the pinned upstream's internal per-credential dispatch. Credential-free source tests cover streaming/nonstreaming dispatch and absence of fallback for a missing or disabled nonstreaming credential; synthetic streaming tests also show explicit selection takes precedence over session affinity and does not fall back for missing, disabled, or simulated rate-limited credentials. This is not an exposed HTTP account-selection capability.
+- [x] Observe `/model` in a temporary POSIX interactive terminal: a synthetic new model in user settings appeared live, but changes to a startup `--settings` file did not refresh. This client sample does not establish that shared user settings are safe for real sessions.
+- [ ] Eliminate the inconsistency window that new requests can encounter between account switching and catalog publication. Investigate safe updates to an existing Claude process's startup model picker and context settings without restarting it; neither is established yet.
+- [ ] Separately handle account differences in input modalities and other model capabilities. The running translator's comparison covers model IDs, context, and effort; it does not prove that image or other capability displays in existing clients follow an account switch.
+- [x] Check five effort levels for Sol, Astra, and Luna compatibility mappings using an isolated real Claude client, candidate translator, and fake Responses upstream. CLI settings and macOS interactive `/effort` arrived unchanged at the simulated upstream. This does not prove that every real model/account supports every level; Windows interactive terminals remain unverified.
+- [ ] Design visible, verifiable choices for future models supporting only some effort levels. Official per-model limits work in an isolated client but clamp excessive requests and cannot alone represent discontinuous supported sets; do not relax the gate on that basis.
 
-验收：可重复的缓存正负例、正确的 token 口径、受保护的账号边界，以及压缩后任务验收通过。性能收益必须与相同任务和可比预算对照；不因缓存收益牺牲正确性。
+Acceptance: repeatable positive and negative cache cases, correct token accounting, protected account boundaries, and passing task acceptance after compaction. Compare performance on the same tasks and comparable budgets; do not sacrifice correctness for cache gains.
 
-依据：[OpenAI Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)、[Claude 工具与缓存](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching)。公共 API 的控制、期限和价格需独立验证，当前不启用 Project API。
+References: [OpenAI Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching) and [Claude tools and prompt caching](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching). Public API controls, durations, and pricing need separate validation; the Project API is currently disabled.
 
-## P2：Claude Code 本地能力与插件矩阵
+## P2: Claude Code local capabilities and plugin matrix
 
-- [ ] 逐项覆盖 `/model`、`/effort`、`/compact`、`/context`、`/usage`、计划模式、恢复、分叉、rewind、上下文编辑和后台工作。
-- [ ] 验证权限拒绝、hooks 阻断、skills、MCP 共存、动态工具、部分工具参数流、结构化输出、取消与重试。
-- [x] 直接用隔离 Claude 客户端和假 Messages 服务复现 MCP 原名标准化碰撞，以及规范化别名的权限控制；不连接真实插件，见 [MCP_NAMING.md](MCP_NAMING.md)。
-- [x] 提供只读离线 MCP 名称审计，可检查本地配置中的潜在服务器名碰撞及用户提供的工具快照；默认不输出名称，不连接服务器，结果明确为部分覆盖。
-- [ ] 在 MCP 工具到达 Claude Code 之前解决原名标准化碰撞，并覆盖动态工具、跨服务器、权限和恢复；不能仅靠 HTTP 中转恢复客户端已合并的身份。
-- [ ] 独立追查当前客户端在 Windows/不同配置源下的文件授权规则差异。流故障门禁使用仅允许一个合成目标的 PreToolUse handler，并有其他目标被拒绝的负例；该测试配置不安装到真实用户会话。
-- [ ] 从实际子会话记录检查模型/effort 继承、后台唤醒、消息协作和工具结果；不能把主会话成功推广为全部子会话成功。
-- [x] 保留 Claude Code 原生子代理模型默认值、强制开关及兼容别名覆盖；先按当前可选目录校验，并用无凭证的真实 Claude 客户端验证优先级、同族例外、代理定义的完整模型 ID 和一次独立 effort。真实后端各模型推理和全部代理场景仍需单独验收。
-- [ ] 检查 Claude HUD 与其他依赖 status line、会话记录或可读总结的插件，尤其是原生压缩后的行为。
-- [x] 针对网关 MCP 超长名称，在实验候选中回补可读操作名并保留可容纳的实例前缀；真实 Claude 客户端、合成同名工具与中途切换测试通过。特殊命名、极长名称、真实插件和跨平台发布仍需单独验证，见 [COMMUNITY_REVIEW.md](COMMUNITY_REVIEW.md)。
-- [ ] 明确 Claude 内部统计和启动设置的可修改范围；不伪造 Anthropic 账号状态或用错误别名数据填补空缺。
-- [ ] 对新 Claude Code/Codex 版本运行锁定的真实客户端、协议和三平台门禁；模型更新与客户端更新分开评估。
+- [ ] Cover `/model`, `/effort`, `/compact`, `/context`, `/usage`, plan mode, resume, fork, rewind, context editing, and background work individually.
+- [ ] Verify permission denial, hook blocking, skills, coexisting MCP servers, dynamic tools, partial tool-argument streams, structured output, cancellation, and retries.
+- [x] Reproduce MCP original-name normalization collisions and normalized-alias permission controls with an isolated Claude client and fake Messages service, without connecting real plugins. See [MCP_NAMING.md](MCP_NAMING.md).
+- [x] Provide a read-only offline MCP name audit for potential server-name collisions in local configuration and user-provided tool snapshots. It prints no names by default, connects to no servers, and explicitly reports partial coverage.
+- [x] Prototype deterministic pre-client aliases with a test-only transport. An isolated real Claude client separately called two formerly colliding synthetic tools, enforced a per-alias deny, resumed the synthetic session, and fetched and called a changed synthetic tool list. A fake Responses origin and reviewed translator also exercised ToolSearch and structural cache preservation. This is not a production transport or a real-plugin test.
+- [ ] Resolve original-name normalization collisions before tools reach Claude Code, covering dynamic tools, cross-server collisions, permissions, and resume. The HTTP translator alone cannot recover identities already merged by the client.
+- [ ] Independently investigate file-permission differences in the current client across Windows and configuration sources. The stream-failure gate uses a PreToolUse handler allowing only one synthetic target and includes a denied-other-target control; that configuration is not installed in real sessions.
+- [ ] Inspect real child-session records for model/effort inheritance, background wakeups, message collaboration, and tool results; main-session success does not establish all child-session behavior.
+- [x] Preserve Claude Code's native subagent default, force switch, and compatibility alias overrides, validating against the available catalog first. A credential-free real client verifies precedence, same-family exceptions, complete model IDs in agent definitions, and one independent effort. Real backend inference for every model and all agent scenarios still needs acceptance.
+- [ ] Check Claude HUD and other plugins depending on status lines, session records, or readable summaries, especially after native compaction.
+- [x] Restore readable operation names and retain fitting instance prefixes for excessively long gateway MCP names in an experimental candidate. Real Claude, synthetic same-name tools, and mid-session handoff tests passed. Special naming, extreme lengths, real plugins, and cross-platform publication require separate validation; see [COMMUNITY_REVIEW.md](COMMUNITY_REVIEW.md).
+- [ ] Establish which Claude internal statistics and startup settings can be modified; do not fabricate Anthropic account state or fill gaps with incorrect alias data.
+- [ ] Run locked real-client, protocol, and three-platform gates for new Claude Code/Codex versions, evaluating model and client updates separately.
 
-验收：每类能力有实际流程及权限/异常负例；插件兼容按具体版本和场景说明，不作任意未来插件的无限保证。
+Acceptance: an actual flow plus permission/error negative cases for each capability; report plugin compatibility by version and scenario without unlimited guarantees for future plugins.
 
-## P3：Codex/OpenAI 的补充能力
+## P3: Complementary Codex/OpenAI capabilities
 
-- [ ] 补齐原生搜索、来源状态重放、引用、准确摘录及文件/容器引用的完整流程。
-- [ ] 验证 PDF、图片输入/生成/编辑、尺寸与透明度等实际输出契约，区分提供者原图与本地变换。
-- [ ] 扩展受限浏览器与选定窗口的操作流程，保持观察有效期、坐标、动作次数和权限边界；不擅自接入日常浏览器或开放全桌面。
-- [ ] 分别验证 Realtime、GPT-Live、全双工、视频/屏幕流和 mid-turn steering。当前 Live 的创建成功与媒体失败都保留，不能计为可用。
-- [ ] 按 Claude Code 工具和交互边界设计适配，不用额外 Codex 编码代理替换 harness。
+- [ ] Complete end-to-end native search, source-state replay, citations, precise excerpts, and file/container references.
+- [ ] Verify actual PDF, image input/generation/editing, dimensions, and transparency contracts, distinguishing provider originals from local transformations.
+- [ ] Extend scoped browser and selected-window flows while preserving observation lifetime, coordinates, action limits, and permission boundaries. Do not connect the everyday browser or open the full desktop without authorization.
+- [ ] Separately test Realtime, GPT-Live, full duplex, video/screen streams, and mid-turn steering. Retain both the successful Live creation and failed media test; these do not establish availability.
+- [ ] Design adaptations around Claude Code tool and interaction boundaries without replacing the harness with an additional Codex coding agent.
 
-验收：模型实际收到输入、执行授权工具并返回正确结果；媒体有真实数据；流中断、拒绝和取消均正确收尾。未知权限或上游未开放的能力明确保留前置条件。
+Acceptance: the model receives actual input, executes authorized tools, and returns correct results; media contains real data; interrupted, denied, and cancelled streams close correctly. Explicitly retain prerequisites for unknown permissions or unavailable upstream features.
 
-## P4：编码质量与模型/harness 差异
+## P4: Coding quality and model/harness differences
 
-- [ ] 扩充可复现的离线代码任务，覆盖多文件修改、调试、依赖理解、测试修复、长任务续接、视觉和工具选择。
-- [ ] 使用独立验收、相同起点、预算、工具与重复样本，分别测量模型、harness、适配和缓存的影响；记录请求模型与实际可核验身份的差别。
-- [ ] 保留现有试验：原生 Codex 与 Claude Code 的小样本均通过，未证明 Claude Code 普遍更优；原生压缩后的代码修复也只是一个已通过场景。
-- [ ] 用官方及可复现社区结果补充 GPT、Claude 和其他候选模型的比较，检查方法、版本、维护与 issues；没有授权访问时只做资料评估。
+- [ ] Expand reproducible offline coding tasks to cover multifile changes, debugging, dependency understanding, test repair, long-task continuation, vision, and tool selection.
+- [ ] Measure model, harness, adaptation, and caching effects separately using independent acceptance, the same starting point, budgets and tools, and repeated samples. Record the difference between requested model and verifiable actual identity.
+- [ ] Retain the current experiments: small samples passed with both native Codex and Claude Code but do not prove Claude Code is generally superior; code repair after native compaction is also only one passing case.
+- [ ] Add comparisons of GPT, Claude, and other candidates using official and reproducible community results, examining methods, versions, maintenance, and issues. With no authorized access, assess documentation only.
 
-验收：结论能由独立测试复现；不以一次成功、社区热度或不同预算下的分数证明 Opus/Fable 对等或“150%”提升。
+Acceptance: independent tests can reproduce conclusions; one success, community popularity, or scores under different budgets do not establish Opus/Fable parity or a “150%” improvement.
 
-## P5：安全、Windows 与可持续维护
+## P5: Security, Windows, and ongoing maintenance
 
-- [ ] 排查 Windows 无凭证候选门禁中一次代际切换后的 502：同一用例后续重跑通过，原因尚不明确；测试已增加仅含进程存活、耗时与错误类别的脱敏诊断。
-- [ ] 在私有 Windows 环境补齐真实账号、模型、HUD、浏览器、恢复及长期运行；凭证不进入公开 CI。
-- [x] 让无凭证真实 Claude 客户端夹具使用临时 HOME；Windows 同时使用临时用户配置和应用数据路径。隔离环境不是 OS 沙箱。
-- [x] 为 API 协议、动态工具、安装冒烟的临时代理，以及订阅候选测试的客户端、代理和临时入口限制子进程环境与 HOME；假上游链路已通过，本轮未重新运行需要真实订阅的测试。
-- [x] 限制新托管入口、转换器及 TLS 初始化进程的环境变量，只传系统必需项和私有本地 TLS 配置，避免继承无关密钥；三平台门禁通过后滚动替换本地托管转换器。既有 TLS 入口、Claude、原始认证服务及尚在排空的旧流没有被重启，仍保留各自原有环境。
-- [ ] 审查其余真实订阅验证脚本及其他代理启动路径的 HOME、继承环境、系统凭证及外部访问边界；未验证前不把已改造夹具的隔离结论推广到这些路径。
-- [ ] 对网关 MCP 名称候选完成三平台与实际插件验证，再评估安全发布；已有会话重写历史名称可能使缓存前缀发生变化。
-- [ ] 为原始监听和 ingress 自身替换建立可审查的迁移方案；目前只把已验证的中转切换视为无中断能力。
-- [ ] 每次提交检查完整历史、运行数据排除规则和依赖来源；新依赖需说明收益、维护、issues 和安全性。
-- [ ] 每次发布记录版本、测试、实际限制、回退和现有会话影响；继续使用 main，不额外创建分支。
+- [ ] Investigate one 502 after a generation handoff in the credential-free Windows candidate gate. A later rerun passed and the cause is unknown; the test now records sanitized process-liveness, elapsed-time, and error-category diagnostics only.
+- [ ] Test real accounts, models, HUD, browsers, resume, and long-running behavior in a private Windows environment; credentials must not enter public CI.
+- [x] Give the credential-free real Claude fixture a temporary HOME, including temporary user configuration and application-data paths on Windows. An isolated environment is not an OS sandbox.
+- [x] Restrict subprocess environment and HOME for temporary API protocol, dynamic-tool, and installation-smoke proxies, and for clients, proxies, and temporary ingress in subscription-candidate tests. Fake-upstream flows passed; subscription-dependent tests were not rerun in that iteration.
+- [x] Restrict environment variables for new managed ingress, translators, and TLS initialization to system necessities and private local TLS configuration, avoiding unrelated inherited keys. Roll out the local managed translator after the three-platform gate. The existing TLS ingress, Claude, original authentication service, and any streams still draining were not restarted and retain their previous environments.
+- [ ] Audit HOME, inherited environment, system credentials, and external-access boundaries for remaining real subscription probes and other proxy launch paths. Do not generalize isolation findings from updated fixtures to unverified paths.
+- [ ] Finish three-platform and real-plugin validation for the gateway MCP name candidate before assessing a safe release. Rewriting historical names in an existing session may change cache prefixes.
+- [ ] Prepare a reviewable migration plan for the original listener and ingress themselves. Only the validated translator handoff is currently considered non-disruptive.
+- [ ] Inspect complete history, runtime-data exclusions, and dependency provenance for each commit. Explain the benefit, maintenance, issues, and security of new dependencies.
+- [ ] Record version, tests, actual limitations, rollback, and effects on existing sessions for each release; continue using main without a new branch.
 
-## 当前下一步
+## Next steps
 
-P0 配额回归门禁已通过，长期主/子会话审计、单工具和并行工具流故障验收及 POSIX 非交互 Ctrl-C 样本已实现；P1 已完成第一批缓存读取对照、动态工具后的真实缓存样本、当前后端的手动控制负例及长压缩链路的时序关联。账号目录同步已增加隔离验证，但新请求交接窗口和既有客户端设置仍是开放边界。假网关已验证部分配置热重载及 TLS 负例，真实会话是否能独立、可回退地迁移尚未证明。接下来继续定位原生流错误的来源，覆盖交互终端、Windows 中断和其他工具；在不影响活跃会话及其额度的条件下，比较原生压缩与普通总结的质量和延迟。当前不强行启用后端拒绝的缓存字段。根据真实会话的新证据调整优先级；任何变更先在隔离场景验证，再应用到稳定入口。
+The P0 quota gate, long-running main/child session audit, single/parallel tool stream-failure tests, and POSIX noninteractive Ctrl-C samples are in place. P1 has initial cache-read comparisons, real cache samples after dynamic tools, negative tests for manual controls rejected by the current backend, and timing correlation for long compaction. Account-catalog synchronization has isolated coverage, but the new-request handoff window and existing client settings remain open. Fake gateways covered some settings reload and TLS negative cases; independently reversible migration of a real session remains unproven.
+
+Continue investigating native stream errors, interactive terminals, Windows interruptions, and other tools. Compare native compaction and ordinary summaries for quality and latency without affecting active sessions or their quota. Do not enable cache fields rejected by the backend. The MCP alias policy and fixture transport remain experimental: assess production framing and lifecycle, dynamic changes, real plugins, permissions, cross-server names, and Windows before any opt-in deployment. Adjust priorities as real session evidence changes, and validate changes in isolation before applying them to a stable ingress.
