@@ -186,7 +186,7 @@ client test found that the older fallback also overrode project/local status
 lines. The current source checks bounded settings metadata at startup and leaves
 detected or uncertain project/local precedence to Claude, without copying or
 printing those settings. In that case the project status line is not adapted,
-so its context display is not corrected by this bridge. This later source
+so its context, cost, quota and cache displays are not corrected by this bridge. This later source
 change is tracked separately from the installed controller. File changes after
 the check, `/cd`, unusual Git layouts, managed policies and real plugins still
 require investigation.

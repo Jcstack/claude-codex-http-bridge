@@ -946,7 +946,7 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         project_status_line_may_override(claude_args, Path.cwd())):
         if configured_status_line() is not None:
             print("Project/local status-line precedence cannot be safely wrapped; Claude selects the "
-                  "status line without bridge context correction for this launch.", file=sys.stderr)
+                  "status line without bridge context, cost, quota, or cache corrections for this launch.", file=sys.stderr)
         include_user_status_line = False
     runtime, state, created = ensure_service(route=route)
     environment = service_environment(state, runtime, route)

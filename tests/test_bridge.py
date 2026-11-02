@@ -866,7 +866,7 @@ Model ID: `gpt-6.1-sol`
                 with self.assertRaisesRegex(RuntimeError, "fixture stop"):
                     launcher.run_session("claude", "fixture-model", [], "fixture-client", route="api")
                 self.assertIs(session.call_args.kwargs["include_user_status_line"], False)
-                self.assertIn("context correction", error.getvalue())
+                self.assertIn("context, cost, quota, or cache corrections", error.getvalue())
 
     def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
         name = "gpt-6-astra"
