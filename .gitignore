@@ -84,6 +84,7 @@
 !tests/validator-fixture/go.mod
 !tests/validator-fixture/go.sum
 !tests/validator-fixture/validator_test.go
+!tests/validator-fixture/conformance_test.go
 !tests/validator-fixture/audit.py
 !gateway/
 !gateway/go.mod

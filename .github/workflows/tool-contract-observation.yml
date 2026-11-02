@@ -35,11 +35,25 @@ jobs:
           cache: false
       - name: Verify validator dependency-audit failure handling
         run: python -m unittest tests.test_validator_dependency_audit -q
+      - name: Fetch the pinned public JSON Schema test suite
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/bridge-json-schema-suite"
+          git -C "$RUNNER_TEMP/bridge-json-schema-suite" remote add origin https://github.com/json-schema-org/JSON-Schema-Test-Suite.git
+          git -C "$RUNNER_TEMP/bridge-json-schema-suite" fetch --depth 1 origin 3f05891cac5d51ffa068d7076d1372130e00c829
+          git -C "$RUNNER_TEMP/bridge-json-schema-suite" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/bridge-json-schema-suite" rev-parse HEAD)" = 3f05891cac5d51ffa068d7076d1372130e00c829
       - name: Exercise the separate synthetic schema-validator fixture
         working-directory: tests/validator-fixture
         shell: bash
         env:
           GOFLAGS: -mod=readonly
+          BRIDGE_REQUIRE_NODE: '1'
+          BRIDGE_REQUIRE_CONFORMANCE: '1'
+          BRIDGE_JSONSCHEMA_SUITE: ${{ runner.temp }}/bridge-json-schema-suite
         run: |
           set -euo pipefail
           go mod download all

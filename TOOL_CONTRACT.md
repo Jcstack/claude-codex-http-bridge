@@ -111,6 +111,38 @@ so a production design needs an explicit format/dialect policy. These examples
 do not establish bounded CPU or memory for every schema, streaming safety,
 complete JSON Schema equivalence, or protection against every numeric edge.
 
+Go's standard JSON decoder replaces a lone escaped surrogate with U+FFFD,
+which can collapse two distinct serialized inputs before comparison. The
+standalone fixture now refuses malformed UTF-8 and unpaired escaped surrogates
+before decoding, while testing a valid pair, a literal replacement character,
+and an escaped backslash as positive controls. This is a conservative fixture
+policy, not complete Unicode or JSON dialect coverage and not an installed
+runtime change.
+
+The [selected public-suite fixture](tests/validator-fixture/conformance_test.go)
+also runs 25 files from a [pinned JSON Schema Test Suite commit](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/3f05891cac5d51ffa068d7076d1372130e00c829).
+On macOS, 836 cases reached validation: none were falsely accepted and 17 were
+falsely rejected against the suite's expected results. All 17 concerned
+`format` values: the fixture explicitly asserts formats, whereas those draft
+2020-12 cases treat the format as an annotation by default. One additional
+case was refused by the fixture's exponent limit before validation. This is a
+deliberate fixture-policy comparison, not a claim that the library or the
+suite is wrong. The selected cases omit many files, optional and remote-reference
+scenarios; the separate regexp counterexample below demonstrates why the zero
+false-acceptance count does not establish complete safety. Three-platform
+results for this newly added subset are pending.
+
+The default Go regexp engine adds another concrete incompatibility. In the
+local fixture, the schema pattern `^.$` accepted a carriage return and the
+Unicode line separator U+2028, while a Node ECMAScript Unicode-regexp control
+rejected both and accepted a normal letter. JSON Schema describes its regex
+syntax in terms of [ECMA 262](https://json-schema.org/understanding-json-schema/reference/regular_expressions),
+whereas the [validator's default](https://pkg.go.dev/github.com/santhosh-tekuri/jsonschema/v6@v6.0.3#Compiler.UseRegexpEngine)
+uses Go's regexp engine. This is a synthetic false-acceptance example, not a
+complete regex conformance or security audit. A production guard must explicitly
+resolve dialect fidelity and resource limits; simply enabling this fixture's
+default validator is unsafe.
+
 The fixture initially resolved `golang.org/x/text` v0.14.0, for which OSV
 reported [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) and
 [GO-2026-6629](https://pkg.go.dev/vuln/GO-2026-6629). It was repinned to
