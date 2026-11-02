@@ -111,6 +111,18 @@ not that Claude acknowledged applying it. Only synthetic booleans are emitted;
 client output, request bodies, paths and tool arguments remain private. The
 candidate remains experimental and is not installed in user sessions.
 
+On macOS, a separate synthetic removal control held the changed list until an
+immediate request had captured the older list. After the adapter forwarded the
+new list, the fake model selected the removed alias that its request had
+offered. The experimental policy rejected the call, the client sent an error
+tool result, and the old original had only its first call. The fixture records
+whether the stale call reached the adapter, was rejected there, and produced
+an error; it does not conflate a client-side rejection with an adapter-side
+one. If a future client waits and no stale call is offered, that run does not
+exercise the rejection path and the control fails for review. This is not
+evidence about actual plugins, arbitrary concurrent requests, or an
+already-running user's client.
+
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,
 real plugins, MCP protocol changes, and Windows. The test adapter does not

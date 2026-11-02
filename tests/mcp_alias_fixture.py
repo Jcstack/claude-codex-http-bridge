@@ -84,6 +84,13 @@ def fake_adapter(marker, dynamic=False, hold_refresh=False):
             message = json.loads(line)
             destination, outgoing = (policy.client_message(message) if source == "client"
                                      else policy.server_message(message))
+            if (dynamic and source == "client" and message.get("method") == "tools/call"
+                    and Path(marker + ".forwarded").exists()
+                    and isinstance(message.get("params"), dict)
+                    and message["params"].get("name") not in policy.advertised):
+                Path(marker + ".removed-call-received").touch()
+                if destination == "client" and isinstance(outgoing.get("error"), dict):
+                    Path(marker + ".removed-call-rejected").touch()
             if destination == "drop":
                 continue
             stream = child.stdin if destination == "server" else sys.stdout

@@ -41,6 +41,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.server.bodies.append(body)
         step = len(self.server.bodies) - 1
+        if self.server.removed_control and step > 1:
+            for message in body.get("messages", []):
+                if isinstance(message, dict) and isinstance(message.get("content"), list):
+                    for part in message["content"]:
+                        if (isinstance(part, dict) and part.get("type") == "tool_result"
+                                and part.get("tool_use_id") == "fixture_call_1"):
+                            self.server.stale_result_error = part.get("is_error") is True
         if self.server.dynamic and step == 1:
             # The request body is already fixed at this point. Waiting for the
             # server's changed list cannot update the tools in this request.
@@ -49,12 +56,20 @@ class Handler(BaseHTTPRequestHandler):
             deadline = time.monotonic() + 8
             while not self.server.refresh_marker.exists() and time.monotonic() < deadline:
                 time.sleep(0.05)
+            if self.server.removed_control:
+                deadline = time.monotonic() + 8
+                while not self.server.forwarded_marker.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
         text_result = "DONE"
         if self.server.dynamic:
             offered = {item.get("name") for item in body.get("tools", []) if isinstance(item, dict)}
             if step == 0:
                 name = ALIASES[0]
                 self.server.first_tool_offered = name in offered
+            elif self.server.removed_control:
+                name = ALIASES[0] if step == 1 and ALIASES[0] in offered else None
+                if name:
+                    self.server.stale_call_sent = True
             elif not self.server.dynamic_call_sent and DYNAMIC_ALIAS in offered:
                 name = DYNAMIC_ALIAS
                 self.server.dynamic_call_sent = True
@@ -162,8 +177,8 @@ def run_dynamic_client(command, work, env, forwarded):
                 stream.close()
 
 
-def run_case(claude, deny, *, resume=False, dynamic=False, hold_refresh=False):
-    if (resume and dynamic) or (hold_refresh and not dynamic):
+def run_case(claude, deny, *, resume=False, dynamic=False, hold_refresh=False, removed_control=False):
+    if (resume and dynamic) or ((hold_refresh or removed_control) and not dynamic):
         raise ValueError("Unsupported synthetic fixture combination")
     with tempfile.TemporaryDirectory(prefix="bridge-mcp-alias-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
         root = Path(temporary).resolve()
@@ -185,11 +200,15 @@ def run_case(claude, deny, *, resume=False, dynamic=False, hold_refresh=False):
         server.bodies = []
         server.dynamic = dynamic
         server.refresh_marker = Path(str(marker) + ".refreshed")
+        server.forwarded_marker = Path(str(marker) + ".forwarded")
         server.second_marker = Path(str(marker) + ".second-request")
         server.second_before_refresh = None
         server.dynamic_call_sent = False
         server.dynamic_call_offered = False
         server.first_tool_offered = False
+        server.removed_control = removed_control
+        server.stale_call_sent = False
+        server.stale_result_error = False
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         env = isolated_environment(root)
@@ -206,7 +225,7 @@ def run_case(claude, deny, *, resume=False, dynamic=False, hold_refresh=False):
             command += ["--disallowedTools", deny]
         try:
             if dynamic:
-                completed = run_dynamic_client(command, work, env, Path(str(marker) + ".forwarded"))
+                completed = run_dynamic_client(command, work, env, server.forwarded_marker)
                 message = {}
             else:
                 result = subprocess.run([*command, "-p", "Use the synthetic fixture tools."], cwd=work,
@@ -241,6 +260,10 @@ def run_case(claude, deny, *, resume=False, dynamic=False, hold_refresh=False):
                             "changed_list_forwarded": Path(str(marker) + ".forwarded").exists(),
                             "first_tool_offered": server.first_tool_offered,
                             "new_tool_called_only_when_offered": server.dynamic_call_offered,
+                            "stale_call_sent": server.stale_call_sent,
+                            "stale_result_error": server.stale_result_error,
+                            "removed_call_reached_adapter": Path(str(marker) + ".removed-call-received").exists(),
+                            "removed_call_rejected_by_adapter": Path(str(marker) + ".removed-call-rejected").exists(),
                             "new_tool_offered_per_request": [DYNAMIC_ALIAS in {
                                 item.get("name") for item in body.get("tools", []) if isinstance(item, dict)
                             } for body in server.bodies] if dynamic else []}
@@ -255,6 +278,25 @@ def main():
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("The locked Claude fixture is required")
+    if sys.argv[1:] == ["--diagnose-removed-tool"]:
+        ok, _, calls, refreshed, observations = run_case(
+            claude, None, dynamic=True, hold_refresh=True, removed_control=True)
+        old_called_once = calls == [ORIGINALS[0]]
+        evidence = {key: observations[key] for key in (
+            "changed_list_forwarded", "first_tool_offered", "refresh_hold_timed_out",
+            "removed_call_reached_adapter", "removed_call_rejected_by_adapter",
+            "second_request_before_server_prepared_list", "stale_call_sent", "stale_result_error")}
+        print(json.dumps({"synthetic_only": True, "intentional_refresh_barrier": True,
+            "completed": ok, "server_prepared_list": refreshed,
+            "old_original_called_once": old_called_once, **evidence}, sort_keys=True))
+        if not (ok and refreshed and old_called_once and observations["first_tool_offered"]
+                and observations["changed_list_forwarded"]):
+            raise RuntimeError("Synthetic removed-tool control did not settle safely")
+        if not observations["stale_call_sent"]:
+            raise RuntimeError("Synthetic stale-call control was not exercised")
+        if not observations["stale_result_error"]:
+            raise RuntimeError("Synthetic stale call did not return an error")
+        return
     if sys.argv[1:] == ["--diagnose-dynamic-race"]:
         ok, offered, calls, refreshed, observations = run_case(claude, None, dynamic=True, hold_refresh=True)
         print(json.dumps({"synthetic_only": True, "intentional_refresh_barrier": True,
