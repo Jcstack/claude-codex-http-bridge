@@ -3,9 +3,11 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -85,6 +87,64 @@ for line in sys.stdin:
                                     env=codex_usage.usage_environment(), capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 2)
         self.assertEqual((result.stdout, result.stderr), ("", ""))
+
+    @unittest.skipIf(os.name == "nt", "This detached executable fixture uses a POSIX shebang")
+    def test_detached_refresh_writes_only_a_synthetic_matching_account_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            controller, native, bin_dir, runtime = (root / name for name in ("controller", "native", "bin", "runtime"))
+            for directory in (controller, native, bin_dir, runtime, controller / "auth"):
+                directory.mkdir(mode=0o700)
+            project = Path(codex_usage.__file__).resolve().parent
+            for name in ("accounts.py", "api_profile.py"):
+                shutil.copyfile(project / name, controller / name)
+            source = (project / "codex_usage.py").read_text(encoding="utf-8")
+            # Refuse the fallback HTTPS path even if this fixture is malformed.
+            guard = 'if __name__ == "__main__":\n    raise SystemExit(main())'
+            self.assertEqual(source.count(guard), 1)
+            source = source.replace(guard,
+                                    '_bridge_rate_limits = lambda *_args: None\n\nif __name__ == "__main__":\n    raise SystemExit(main())')
+            (controller / "codex_usage.py").write_text(source, encoding="utf-8")
+            account = {"account_id": "fixture-account", "email": "fixture@example.invalid"}
+            for path, value in ((controller / "auth" / "fixture.json", {"type": "codex", **account}),
+                                (native / "auth.json", {"tokens": account})):
+                path.write_text(json.dumps(value), encoding="utf-8")
+                path.chmod(0o600)
+            fake = bin_dir / "codex"
+            fake.write_text(f'''#!{sys.executable}
+import json,os,sys
+safe=all(name not in os.environ for name in ("OPENAI_API_KEY","PYTHONPATH"))
+safe=safe and os.environ.get("CODEX_HOME")=={str(native)!r} and os.environ.get("HTTPS_PROXY")=="http://proxy.invalid:1234"
+for line in sys.stdin:
+    message=json.loads(line)
+    if message.get("id")==1:
+        result={{}}
+    elif message.get("id")==2:
+        result={{"accountId":"fixture-account" if safe else "wrong-account", "rateLimitsByLimitId":{{"codex":{{
+            "secondary":{{"windowDurationMins":10080,"usedPercent":12.5,"resetsAt":2000000000}}}}}}}}
+    else:
+        continue
+    print(json.dumps({{"id":message["id"],"result":result}}),flush=True)
+''', encoding="utf-8")
+            fake.chmod(0o700)
+            cache = runtime / "usage.json"
+            environment = {"PATH": str(bin_dir), "HOME": str(root), "CODEX_HOME": str(native),
+                           "HTTPS_PROXY": "http://proxy.invalid:1234", "OPENAI_API_KEY": "SYNTHETIC_PRIVATE_KEY",
+                           "PYTHONPATH": "SYNTHETIC_IMPORT_PATH"}
+            command = [sys.executable, "-I", "-c",
+                       "import sys; sys.path.insert(0,sys.argv[1]); import codex_usage; from pathlib import Path; codex_usage.start_refresh(Path(sys.argv[2]))",
+                       str(controller), str(cache)]
+            result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual((result.stdout, result.stderr), ("", ""))
+            deadline = time.monotonic() + 12
+            lock = cache.with_suffix(".lock")
+            while time.monotonic() < deadline and (lock.exists() or not cache.exists()):
+                time.sleep(0.05)
+            self.assertFalse(lock.exists())
+            value = json.loads(cache.read_text(encoding="utf-8"))
+            self.assertEqual(set(value), {"fetched_at", "account_fingerprint", "windows"})
+            self.assertEqual(value["windows"]["seven_day"]["used_percentage"], 12.5)
 
 
 if __name__ == "__main__":
