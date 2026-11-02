@@ -182,6 +182,13 @@ and never opens or modifies a user's transcript. Rewriting real conversation
 history could affect integrity, permissions, context and cache identity, and
 is not offered or recommended as a mitigation.
 
+Disabling client-side ToolSearch did not eliminate this issue in another
+noninteractive synthetic macOS control: the already-running client continued
+to send the old description after the changed list was forwarded. A fresh
+synthetic client sent the new description. This does not establish behavior
+for real plugins or all client modes, and disabling ToolSearch is not a
+validated general workaround.
+
 The manually dispatched [dynamic observation workflow](.github/workflows/mcp-dynamic-observation.yml)
 repeats these local synthetic client and alias controls on macOS, Linux and
 Windows without an account. Translator and native-executor checks remain in

@@ -44,3 +44,5 @@ jobs:
           python tests/probe_dynamic_toolsearch.py --description-change --fresh-description
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --repair-synthetic-record
+          python tests/probe_eager_tool_description.py --fresh-description
+          python tests/probe_eager_tool_description.py
