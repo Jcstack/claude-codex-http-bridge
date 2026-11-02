@@ -202,6 +202,14 @@ reboot, Windows login, or a successful real model call.
 Only operating-system errors corresponding to lock contention are treated as
 busy. A synthetic I/O failure remains a failed recovery and its exception text
 is withheld from the status file; it is not silently classified as contention.
+The final controller passed the [login-recovery gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41515747735)
+on macOS, Windows and Linux. The controller alone was atomically installed on the
+local Mac under operation, account and service locks after verifying the exact
+previous source, and a private rollback copy was retained. Service and network
+policy metadata matched before and after; the origin and ingress kept their
+processes and ports, and a request remained active. A subsequent scheduled
+login-agent check reported healthy. No account or inference request was
+changed. A real reboot and Windows user login were not performed.
 
 The longer lock wait also exposed a Windows watcher race in a synthetic
 concurrency test: a watcher that had already checked its startup registry entry
