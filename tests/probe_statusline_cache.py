@@ -4,6 +4,7 @@ The client sends two synthetic requests to a local fake Messages service. No
 model account, user configuration, transcript, or project is used.
 """
 
+import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -55,6 +56,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--hud-dir", type=Path, help="Optional reviewed HUD source for a full display check")
+    args = parser.parse_args()
     if os.name == "nt":
         print(json.dumps({"synthetic_only": True, "skipped": "Windows interactive console not covered"}))
         return
@@ -81,11 +85,38 @@ def main() -> None:
             "row={'cache':{key:cache.get(key) for key in keys} if isinstance(cache,dict) else None,"
             "'usage':usage if isinstance(usage,dict) else None}\n"
             "with Path(sys.argv[1]).open('a',encoding='utf-8') as out: out.write(json.dumps(row)+'\\n')\n"
-            "print('fixture')\n", encoding="utf-8")
+            "print(json.dumps(value) if len(sys.argv)>2 else 'fixture')\n", encoding="utf-8")
+        status_command = shlex.join([sys.executable, str(recorder), str(marker)])
+        hud_marker = root / "hud-results.jsonl"
+        if args.hud_dir is not None:
+            hud = args.hud_dir.resolve()
+            package = json.loads((hud / "package.json").read_text(encoding="utf-8"))
+            node = shutil.which("node")
+            if package.get("name") != "claude-hud" or package.get("version") != "0.15.0" or not node:
+                raise RuntimeError("The reviewed HUD and Node are required")
+            hud_config = config / "plugins" / "claude-hud"
+            hud_config.mkdir(parents=True)
+            (hud_config / "config.json").write_text(json.dumps({"gitStatus": {"enabled": False},
+                "display": {"showPromptCache": True, "showUsage": False}}), encoding="utf-8")
+            profile = root / "profile.json"
+            profile.write_text(json.dumps({"context_windows": {"gpt-6.1-sol": 872_000},
+                                           "expose_cache_metrics": True}), encoding="utf-8")
+            output_recorder = root / "record-hud.py"
+            output_recorder.write_text("import json,sys\nfrom pathlib import Path\n"
+                "text=sys.stdin.read(); row={'fraction': 'Reported cache-read input (main)' in text and '37.5%' in text,"
+                "'timer': any(word in text.lower() for word in ('expired','until','5m'))}\n"
+                "with Path(sys.argv[1]).open('a',encoding='utf-8') as out: out.write(json.dumps(row)+'\\n')\n"
+                "sys.stdout.write(text)\n", encoding="utf-8")
+            status_command = " | ".join((
+                shlex.join([sys.executable, str(recorder), str(marker), "passthrough"]),
+                shlex.join([sys.executable, str(Path(statusline_adapter.__file__)), str(profile)]),
+                shlex.join([node, str(hud / "hud.mjs")]),
+                shlex.join([sys.executable, str(output_recorder), str(hud_marker)]),
+            ))
         settings = root / "settings.json"
         settings.write_text(json.dumps({"modelPicker": {"options": [{"model": "gpt-6.1-sol", "label": "Fixture",
             "behavesAs": "claude-sonnet-5-5"}], "replaceBuiltInOptions": True},
-            "statusLine": {"type": "command", "command": shlex.join([sys.executable, str(recorder), str(marker)])}}), encoding="utf-8")
+            "statusLine": {"type": "command", "command": status_command}}), encoding="utf-8")
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.requests = []
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
@@ -133,14 +164,20 @@ def main() -> None:
                                 and isinstance(reported.get("expires_at"), int))
             full_usage = bool(usages and all(type(usages[-1].get(key)) is int for key in (
                 "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")))
+            hud_rows = [json.loads(line) for line in hud_marker.read_text(encoding="utf-8").splitlines()] if hud_marker.exists() else []
+            hud_correct = any(row.get("fraction") is True and row.get("timer") is False for row in hud_rows)
             print(json.dumps({"synthetic_only": True, "fake_message_requests": len(server.requests), "frames": len(frames), "frames_with_usage": len(usages),
                 "frames_with_prompt_cache": len(caches), "cache_read_fraction_matches_reported_tokens": correct_counters,
                 "client_inferred_five_minute_ttl_without_provider_ttl": inferred_ttl,
                 "bridge_omits_standard_cache_by_default": "prompt_cache" not in default and "claude_codex_bridge" not in default,
                 "opt_in_omits_inferred_ttl": bool(filtered and "ttl" not in filtered and "expires_at" not in filtered),
-                "last_usage_has_all_input_counters": full_usage}, sort_keys=True))
+                "last_usage_has_all_input_counters": full_usage,
+                "hud_display_checked": args.hud_dir is not None,
+                "hud_reported_fraction_without_timer": hud_correct if args.hud_dir is not None else None}, sort_keys=True))
             if len(server.requests) != 2 or not (full_usage and correct_counters and inferred_ttl and "prompt_cache" not in default):
                 raise RuntimeError("Synthetic status-line control did not complete")
+            if args.hud_dir is not None and not hud_correct:
+                raise RuntimeError("Synthetic HUD cache display did not complete")
         finally:
             cleanup_ok = True
             if process is not None and process.poll() is None:

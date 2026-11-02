@@ -50,3 +50,12 @@ jobs:
         run: git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-windows-fixture.patch"
       - name: Exercise upstream's owned-repository security controls and failed enumeration
         run: python tests/probe_hud_security.py --hud-dir external-hud
+      - name: Install the integrity-locked Claude fixture without scripts
+        if: runner.os != 'Windows'
+        run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+      - name: Select the pinned native Claude fixture
+        if: runner.os != 'Windows'
+        run: python tests/claude_fixture.py
+      - name: Exercise the real Claude status line with fake cache reports and the reviewed HUD
+        if: runner.os != 'Windows'
+        run: python tests/probe_statusline_cache.py --hud-dir external-hud

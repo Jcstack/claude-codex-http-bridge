@@ -230,8 +230,11 @@ synthetic responses reported 2,000 fresh tokens, then 500 fresh plus 1,500
 cache-read tokens. Claude's status line reported two requests and a 0.375
 cache-read token fraction, while also displaying a `5m` lifetime and warmth
 even though the fake service supplied no lifetime. The [reproducible probe](tests/probe_statusline_cache.py)
-uses a temporary home and no provider. Its interactive path has been tested
-locally on macOS; Windows console behavior remains unverified.
+uses a temporary home and no provider. Its optional `--hud-dir` path pipes
+the real client's synthetic status through the bridge adapter and the reviewed
+HUD, then checks the displayed fraction and the absence of a timer. This full
+chain has passed locally on macOS with fake responses; it does not establish
+the values in a real session. Windows console behavior remains unverified.
 
 The adapter continues to remove the standard `prompt_cache` object by
 default. In an opt-in extension, it passes the validated `requests`,
@@ -254,8 +257,10 @@ teaches the reviewed HUD version to display the extension as “Reported
 cache-read input (main)” when its existing prompt-cache display is enabled.
 The [synthetic display fixture](tests/probe_hud_cache_display.py) checks the
 token fraction, disabled and missing cases, malformed values and unchanged
-native cache display. It never invents a lifetime or warmth. The patch has not
-been installed; the main-session counter may include model or account changes.
+native cache display. It never invents a lifetime or warmth. The reviewed patch
+is installed in the local HUD 0.15.0 package; it does not change an upstream
+release. The shared preference is still disabled until the controller update is
+verified. The main-session counter may include model or account changes.
 
 Passing a partial object as the standard `prompt_cache` is unsafe for some
 plugins. For example, [this status-line implementation](https://github.com/tsalkin/claude-code-statusline/blob/17396d0bb11a47b184c7eb3709088dac36d7c91d/statusline.sh)
