@@ -227,6 +227,37 @@ class DiagnosticsTests(unittest.TestCase):
             for private in ("PRIVATE_SECRET", generation, "127.0.0.1", str(root)):
                 self.assertNotIn(private, json.dumps(report))
 
+    def test_managed_stream_only_and_oversized_logs_are_not_omitted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current = "g-" + "a" * 24
+            oversized = "g-" + "b" * 24
+            irrelevant = "g-" + "c" * 24
+            for generation in (current, oversized, irrelevant):
+                (root / "runtime-managed" / generation).mkdir(parents=True)
+            (root / "runtime-managed" / current / "proxy.log").write_text(
+                '[2026-01-02 12:00:00] [aabbccdd] upstream stream failed: '
+                'stream disconnected before completion PRIVATE_SECRET\n', encoding="utf-8")
+            (root / "runtime-managed" / oversized / "proxy.log").write_text(
+                'PRIVATE_SECRET' + 'x' * 200 + '\n', encoding="utf-8")
+            (root / "runtime-managed" / irrelevant / "proxy.log").write_text(
+                '[2026-01-02 12:00:00] ordinary startup\n', encoding="utf-8")
+            with patch.object(diagnostics, "LINE_LIMIT", 160), \
+                 patch.object(rolling_runtime, "state", return_value={"pid": 123, "port": 12345, "current": current}), \
+                 patch.object(rolling_runtime, "private_key", side_effect=AssertionError("must not read keys")), \
+                 patch.object(launcher, "listener_pids", return_value={123}):
+                report = diagnostics.collect(root, "subscription", [], datetime(2026, 1, 1, tzinfo=timezone.utc))
+            backends = report["managed"]["backends"]
+            self.assertEqual(len(backends), 2)
+            stream, = (row for row in backends if row["current"])
+            self.assertEqual(stream["completed_http_statuses"], {})
+            self.assertEqual(stream["transport_error_mentions"], {})
+            self.assertEqual(stream["stream_failure_mentions"]["incomplete_native_stream"]["mentions"], 1)
+            skipped, = (row for row in backends if not row["current"])
+            self.assertEqual(skipped["coverage"]["oversized_lines"], 1)
+            for private in ("PRIVATE_SECRET", "aabbccdd", current, oversized, str(root)):
+                self.assertNotIn(private, json.dumps(report))
+
     def test_large_blob_does_not_hide_next_metadata_record(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "input.jsonl"

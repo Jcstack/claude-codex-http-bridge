@@ -370,7 +370,13 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
                 logs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
                 for log in logs[:32]:
                     summary = proxy_summary(log, since)
-                    if summary["completed_http_statuses"] or summary["transport_error_mentions"]:
+                    # A stream can fail before an access record is written, and
+                    # its sentinel need not contain any transport-error keyword.
+                    # Oversized lines also limit what can be concluded, even if
+                    # no recognizable in-window records were seen.
+                    if (any(summary[key] for key in ("completed_http_statuses", "transport_error_mentions",
+                                                     "upstream_preconnection_failures", "stream_failure_mentions"))
+                            or summary["coverage"]["oversized_lines"]):
                         detail["backends"].append({"generation_tag": hashlib.sha256(log.parent.name.encode()).hexdigest()[:12],
                                                   "current": log.parent.name == managed["current"], **summary})
                 result["managed"] = detail

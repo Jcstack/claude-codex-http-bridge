@@ -55,6 +55,12 @@ before sharing. It is not automatically saved or committed.
   are not additive. An HTTP 200 can precede an SSE failure; both stream-failure
   mentions in proxy logs and API-error categories in transcripts are retained.
   Neither is automatically a count of distinct failed inference requests.
+- The managed-log filter must retain an incomplete-stream sentinel even when
+  no HTTP access record or general transport keyword exists. Oversized lines
+  also need visible coverage because their timestamps and content are unknown.
+  A synthetic regression checks both cases without returning the lines, tags,
+  paths or keys. This candidate still needs cross-platform validation and local
+  installation before its results describe the installed diagnostic command.
 
 ## Current evidence and next investigation
 
