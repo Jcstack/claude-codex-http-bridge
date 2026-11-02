@@ -42,6 +42,16 @@ controls, a valid string reached the fake server once, while an explicit
 The selected installed translator was exercised locally on macOS; the direct
 and candidate routes produced the same observations on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41521874679).
 
+In another local client test, the loopback shim injected a programmatic-only
+`allowed_callers` field into the synthetic tool definition. The selected
+translator omitted that field; the fake upstream then returned a direct call,
+which reached the permissive synthetic MCP server. With the uninstalled
+candidate, the client received an error, the shim observed HTTP 400, and no
+request reached the fake upstream or fake tool. The client had not itself sent
+the caller field in these samples. This confirms only the behavior of the
+synthetic injection and controls, not a real model call, plugin invocation or
+Claude permission bypass. Cross-platform candidate coverage is pending.
+
 This is evidence about a permissive fixture and the tested client/translator
 combination, not evidence that a real provider violates strict mode, that a
 real MCP server accepts invalid arguments, or that any user's tool was called.
@@ -175,16 +185,24 @@ calls, compare item/call identities and accumulated arguments against their
 terminal counterparts, and validate every call before exposing any of them.
 It accepts only a small object schema subset whose properties are all required
 strings and whose additional properties are forbidden; schemas using patterns,
-formats or other keywords are refused. Local cases cover interleaved valid
+formats or other keywords are refused. Cases cover interleaved valid
 calls, an invalid parallel call, missing or changed terminal data, duplicate
 identities, late deltas, cancellation, an oversized argument and a different
-request's call. The fixture and its worker passed a local Go race-detector run.
+request's call. The fixture and its worker passed a local Go race-detector run,
+and the [validator-only gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41524490404)
+passed on three platforms.
 
 This is an abstract, sequential event model: it does not parse actual Responses
 or Messages streams, authenticate real session/tool identities, execute tools,
 cover post-release cancellation or implement eager streaming. It has no CPU or
 memory quota and is not activated. Its narrow schema subset is a temporary
 fail-closed research constraint, not complete strict-tool compatibility.
+The selected translator can close a completed function block on
+`response.output_item.done` before `response.completed`; earlier real-client
+synthetic tests also exercised a completed call followed by an incomplete
+parallel call. See [streaming evidence](STREAMING.md#incomplete-tool-call-safety-2026-11-02).
+Waiting for the terminal response would change that timing and needs explicit
+latency, cancellation, tool-result and text-interleaving acceptance tests.
 
 The fixture initially resolved `golang.org/x/text` v0.14.0, for which OSV
 reported [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) and

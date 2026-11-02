@@ -1,4 +1,4 @@
-"""Observe a locked Claude client receiving invalid synthetic MCP arguments.
+"""Observe a locked Claude client receiving synthetic MCP tool calls.
 
 Only an owned temporary MCP server, a loopback fake, and synthetic credentials
 are used. The MCP server deliberately records calls without schema validation.
@@ -82,6 +82,7 @@ class Handler(ResponsesHandler):
         matching = [tool for tool in tools if isinstance(tool, dict) and tool.get("name") == NAME]
         server.offered |= bool(matching)
         server.strict_seen |= any(tool.get("strict") is True for tool in matching)
+        server.caller_field_seen |= any("allowed_callers" in tool for tool in matching)
         server.result_seen |= result_seen
         name = None if result_seen or not matching else NAME
         arguments = {"value": 123 if server.invalid else "synthetic"}
@@ -115,7 +116,7 @@ class Handler(ResponsesHandler):
 
 
 @contextmanager
-def synthetic_strict_injector(port, key):
+def synthetic_policy_injector(port, key, policy):
     """Mutate only this fixture's tool definition and forward to loopback."""
     class Injector(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -139,7 +140,14 @@ def synthetic_strict_injector(port, key):
                     return
                 if matching:
                     self.server.client_already_strict |= matching[0].get("strict") is True
-                    matching[0]["strict"] = True
+                    self.server.client_caller_field |= "allowed_callers" in matching[0]
+                    if policy == "strict":
+                        matching[0]["strict"] = True
+                    elif policy == "programmatic":
+                        matching[0]["allowed_callers"] = ["code_execution_20260120"]
+                    else:
+                        self.send_error(400)
+                        return
                     self.server.injected += 1
                 encoded = json.dumps(body).encode()
                 connection = HTTPConnection("127.0.0.1", port, timeout=30)
@@ -148,6 +156,7 @@ def synthetic_strict_injector(port, key):
                         headers={"Content-Type": "application/json", "Authorization": "Bearer " + key,
                                  "anthropic-version": "2023-06-01"})
                     response = connection.getresponse()
+                    self.server.rejected += int(bool(matching) and response.status == 400)
                     self.send_response(response.status)
                     self.send_header("Content-Type", response.getheader("Content-Type", "application/json"))
                     self.send_header("Connection", "close")
@@ -167,6 +176,8 @@ def synthetic_strict_injector(port, key):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Injector)
     server.injected = 0
     server.client_already_strict = False
+    server.client_caller_field = False
+    server.rejected = 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -177,7 +188,7 @@ def synthetic_strict_injector(port, key):
         thread.join(timeout=2)
 
 
-def observe(claude, translator, invalid, denied, inject_strict=False):
+def observe(claude, translator, invalid, denied, inject_policy=None, expect_rejection=False):
     with tempfile.TemporaryDirectory(prefix="bridge-output-client-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
         root = Path(temporary).resolve()
         work, config = root / "work", root / "config"
@@ -203,7 +214,7 @@ def observe(claude, translator, invalid, denied, inject_strict=False):
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.responses, server.invalid = translator is not None, invalid
         server.requests = 0
-        server.offered = server.strict_seen = server.result_seen = server.error_result_seen = server.call_sent = False
+        server.offered = server.strict_seen = server.caller_field_seen = server.result_seen = server.error_result_seen = server.call_sent = False
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         env = isolated_environment(root)
@@ -227,24 +238,38 @@ def observe(claude, translator, invalid, denied, inject_strict=False):
                 if proxy:
                     port, key = proxy
                     env.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_AUTH_TOKEN=key)
-                injected = synthetic_strict_injector(port, key) if inject_strict else nullcontext(None)
+                injected = synthetic_policy_injector(port, key, inject_policy) if inject_policy else nullcontext(None)
                 with injected as injector:
                     if injector:
                         env.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{injector.server_port}",
                                    ANTHROPIC_AUTH_TOKEN="synthetic-injector-key")
                     completed = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, timeout=60)
-                    if completed.returncode or json.loads(completed.stdout).get("is_error"):
-                        raise RuntimeError("Synthetic Claude client did not complete")
                     calls = [json.loads(line) for line in marker.read_text(encoding="utf-8").splitlines()] if marker.exists() else []
+                    final = json.loads(completed.stdout)
+                    client_error = bool(completed.returncode or final.get("is_error"))
+                    if expect_rejection:
+                        if not (client_error and injector and injector.injected and injector.rejected
+                                and server.requests == 0 and not calls):
+                            raise RuntimeError("Synthetic caller restriction was not rejected before the fake")
+                        return {"policy_injected": inject_policy, "client_reported_error": client_error,
+                                "policy_request_rejected_400": bool(injector.rejected),
+                                "fake_upstream_contacted": bool(server.requests), "call_count": len(calls),
+                                "client_sent_caller_field_before_injection": injector.client_caller_field}
+                    if client_error:
+                        raise RuntimeError("Synthetic Claude client did not complete")
                     if not (server.offered and server.call_sent and server.result_seen):
                         raise RuntimeError("Synthetic tool-call control did not complete")
-                    if injector and not (injector.injected and server.strict_seen):
+                    if injector and not injector.injected:
+                        raise RuntimeError("Synthetic policy injection was not observed")
+                    if inject_policy == "strict" and not server.strict_seen:
                         raise RuntimeError("Synthetic strict injection was not observed at the fake")
                     return {"invalid_arguments": invalid, "permission_denied": denied, "through_translator": bool(translator),
                             "call_count": len(calls), "number_reached_mcp": any(call.get("number") for call in calls),
                             "string_reached_mcp": any(call.get("string") for call in calls),
                             "client_result_returned": server.result_seen, "strict_seen_by_fake": server.strict_seen,
                             "client_sent_strict_before_injection": injector.client_already_strict if injector else None,
+                            "client_sent_caller_field_before_injection": injector.client_caller_field if injector else None,
+                            "caller_field_seen_by_fake": server.caller_field_seen,
                             "deny_hook_called": hook_marker.exists(),
                             "messages_error_result": server.error_result_seen if not translator else None}
         finally:
@@ -258,6 +283,8 @@ def main():
     parser.add_argument("--mcp-server", type=Path)
     parser.add_argument("--translator", type=Path)
     parser.add_argument("--inject-strict", action="store_true", help="Inject strict into only the synthetic client request")
+    parser.add_argument("--inject-programmatic-only", action="store_true", help="Inject only a synthetic caller restriction")
+    parser.add_argument("--expect-programmatic-rejection", action="store_true", help="Require rejection before the fake upstream")
     options = parser.parse_args()
     if options.mcp_server:
         mcp_server(options.mcp_server)
@@ -266,9 +293,23 @@ def main():
     if not claude:
         raise RuntimeError("The pinned Claude client is required")
     translator = options.translator.resolve() if options.translator else None
-    if options.inject_strict and not translator:
-        raise RuntimeError("Strict injection requires a disposable translator")
-    controls = [observe(claude, translator, invalid, denied, options.inject_strict) for invalid, denied in
+    if (options.inject_strict or options.inject_programmatic_only) and not translator:
+        raise RuntimeError("Policy injection requires a disposable translator")
+    if options.inject_strict and options.inject_programmatic_only:
+        raise RuntimeError("Choose one synthetic policy")
+    if options.expect_programmatic_rejection and not options.inject_programmatic_only:
+        raise RuntimeError("The rejection control requires programmatic-only injection")
+    if options.inject_programmatic_only:
+        result = observe(claude, translator, False, False, "programmatic", options.expect_programmatic_rejection)
+        if result["client_sent_caller_field_before_injection"] is not False:
+            raise RuntimeError("The locked client unexpectedly supplied a caller policy")
+        if not options.expect_programmatic_rejection and not (result["call_count"] == 1
+                and result["string_reached_mcp"] and result["caller_field_seen_by_fake"] is False):
+            raise RuntimeError("Synthetic caller-policy loss and direct-call control did not match")
+        print(json.dumps({"synthetic_only": True, "real_claude_client": True, "real_provider": False,
+                          "programmatic_only_field_injected": True, "observation": result}, sort_keys=True))
+        return
+    controls = [observe(claude, translator, invalid, denied, "strict" if options.inject_strict else None) for invalid, denied in
                 ((False, False), (True, False), (True, True))]
     if not (controls[0]["call_count"] == 1 and controls[0]["string_reached_mcp"]
             and controls[2]["deny_hook_called"] and controls[2]["call_count"] == 0):
