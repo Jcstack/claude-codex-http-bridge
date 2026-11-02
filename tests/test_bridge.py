@@ -752,6 +752,65 @@ Model ID: `gpt-6.1-sol`
             self.assertEqual(result, base)
             self.assertEqual(files, [])
 
+    def test_statusline_does_not_promote_a_disabled_user_scope(self) -> None:
+        cases = [([], True), (["--restricted"], False), (["--bare"], False), (["--safe-mode"], False),
+                 (["--setting-sources", "project,local"], False), (["--setting-sources=project,user"], True),
+                 (["--setting-sources=project", "--setting-sources", "user"], True),
+                 (["--setting-sources=user", "--setting-sources", "local"], False),
+                 (["--setting-sources"], False), (["--", "--restricted"], True)]
+        with patch.dict(os.environ, {}, clear=True):
+            for arguments, expected in cases:
+                with self.subTest(arguments=arguments):
+                    self.assertIs(launcher.user_status_line_allowed(arguments), expected)
+        for name in ("CLAUDE_CODE_RESTRICTED", "CLAUDE_CODE_SAFE_MODE", "CLAUDE_CODE_SIMPLE"):
+            with self.subTest(variable=name), patch.dict(os.environ, {name: "1"}, clear=True):
+                self.assertFalse(launcher.user_status_line_allowed([]))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); user = root / "user"; user.mkdir()
+            (user / "settings.json").write_text('{"statusLine":{"type":"command","command":"echo global"}}')
+            base = root / "base.json"; base.write_text('{}')
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(user)}, clear=True):
+                result, files = launcher.session_settings(base, {}, root / "unused", include_user_status_line=False)
+                self.assertEqual((result, files), (base, []))
+                base.write_text('{"statusLine":{"type":"command","command":"echo explicit"}}')
+                session = root / "session"; session.mkdir()
+                result, _ = launcher.session_settings(base, {}, session, include_user_status_line=False)
+            self.assertIn(" | echo explicit", json.loads(result.read_text())["statusLine"]["command"])
+
+    def test_launcher_passes_statusline_scope_to_session_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); runtime = root / "runtime"; runtime.mkdir()
+            base = root / "base.json"; base.write_text('{}')
+            prepared = "\t".join(["fixture-model", "500000", "300000", str(base), '{}'])
+            environment = {name: os.environ[name] for name in ("PATH", "SYSTEMROOT", "WINDIR", "USERPROFILE", "TEMP", "TMP")
+                           if name in os.environ}
+            for arguments, expected in ((["--restricted"], False), (["--setting-sources", "project"], False),
+                                        (["--", "--restricted"], True), ([], True)):
+                with self.subTest(arguments=arguments), patch.dict(os.environ, environment, clear=True), \
+                        patch.object(launcher, "ROOT", root), \
+                        patch.object(launcher, "ensure_service", return_value=(runtime, {"port": 12345}, False)), \
+                        patch.object(launcher, "service_environment", return_value={}), \
+                        patch.object(launcher, "helper_output", return_value=prepared), \
+                        patch.object(launcher, "session_settings", side_effect=RuntimeError("fixture stop")) as session:
+                    with self.assertRaisesRegex(RuntimeError, "fixture stop"):
+                        launcher.run_session("claude", "fixture-model", arguments, "fixture-client", route="api")
+                    self.assertIs(session.call_args.kwargs["include_user_status_line"], expected)
+            import rolling_runtime
+            (runtime / "session-fixture").mkdir()
+            (runtime / "session-fixture" / "key").write_text("fixture-local-key")
+            state = {"port": 12345, "session": "session-fixture"}
+            base.write_text('{"modelSettings":{"fixture-model":{"autoCompactWindow":300000}}}')
+            with patch.dict(os.environ, environment, clear=True), patch.object(launcher, "ROOT", root), \
+                    patch.object(launcher, "ensure_service", return_value=(runtime, state, False)), \
+                    patch.object(launcher, "service_environment", return_value={}), \
+                    patch.object(launcher, "helper_output", return_value=prepared), \
+                    patch.object(rolling_runtime, "client_settings", return_value=base), \
+                    patch.object(launcher, "session_settings", side_effect=RuntimeError("fixture stop")) as session:
+                with self.assertRaisesRegex(RuntimeError, "fixture stop"):
+                    launcher.run_session("claude", "fixture-model", ["--settings", "{}", "--restricted"],
+                                         "fixture-client", route="api")
+                self.assertIs(session.call_args.kwargs["include_user_status_line"], False)
+
     def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
         name = "gpt-6-astra"
         for usage in (None, {}, {"input_tokens": 100},

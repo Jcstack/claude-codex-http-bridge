@@ -104,3 +104,4 @@
 !.github/workflows/hud-safety.yml
 !.github/workflows/nested-agent-observation.yml
 !.github/workflows/duplicate-settings-observation.yml
+!.github/workflows/statusline-scope-observation.yml

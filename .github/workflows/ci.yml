@@ -69,6 +69,13 @@ jobs:
       - name: Verify reported cache counters in an isolated status line
         if: runner.os != 'Windows'
         run: python tests/probe_statusline_cache.py
+      - name: Verify status-line settings scope in an isolated terminal
+        if: runner.os != 'Windows'
+        run: python tests/probe_statusline_scope.py --expect-isolated
+      - name: Verify composed custom settings with a fake gateway
+        run: python tests/probe_composed_settings.py
+      - name: Verify composed settings in bare mode with a fake gateway
+        run: python tests/probe_composed_settings.py --bare
       - name: Verify picker reload in an isolated terminal
         if: runner.os != 'Windows'
         run: python tests/probe_picker_reload.py

@@ -171,6 +171,19 @@ disk after a client exits. The explicit bridge-stop cleanup removes its known
 settings files when service state is present; it is not a per-session retention
 guarantee, and an already-missing service state needs separate manual cleanup.
 
+An isolated locked-client test exposed a separate status-line scope issue: the
+older launcher copied a synthetic user status line into its `--settings` file,
+so it ran under `--restricted` and with `--setting-sources project`; direct
+Claude controls did not run it. No actual user command was used. The updated
+source avoids copying the user status line when restricted, bare or safe mode
+is selected by a CLI flag or inherited environment variable, or when user
+settings are excluded; an explicitly supplied
+launch status line remains eligible. The local installed launcher is tracked
+separately. Because the adapter otherwise promotes its user-level fallback to
+command-line priority, project/local status-line precedence and changes during
+`/cd` still require investigation. These tests do not cover every plugin or
+managed policy.
+
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 
 The bridge's WebFetch PDF hook processes the tool result locally and replaces only the binary-PDF summary with a warning and the path Claude Code already returned. It does not upload or copy the PDF. Claude Code's own WebFetch may leave downloaded binaries in its session `tool-results` directory; the hook does not remove them. Review that directory according to your local retention policy. [Upstream retention report](https://github.com/anthropics/claude-code/issues/104178).

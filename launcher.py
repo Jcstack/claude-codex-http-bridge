@@ -261,6 +261,33 @@ def configured_status_line() -> dict | None:
     return None
 
 
+def user_status_line_allowed(arguments: list[str]) -> bool:
+    """Do not promote a disabled user setting into command-line scope."""
+    if any(os.environ.get(name) == "1" for name in
+           ("CLAUDE_CODE_RESTRICTED", "CLAUDE_CODE_SAFE_MODE", "CLAUDE_CODE_SIMPLE")):
+        return False
+    selected_sources = None
+    index = 0
+    while index < len(arguments):
+        value = arguments[index]
+        if value == "--":
+            break
+        if value in ("--restricted", "--safe-mode", "--bare"):
+            return False
+        if value == "--setting-sources":
+            if index + 1 >= len(arguments) or arguments[index + 1].startswith("-"):
+                return False
+            selected_sources = arguments[index + 1]
+            index += 2
+            continue
+        if value.startswith("--setting-sources="):
+            selected_sources = value.partition("=")[2]
+        index += 1
+    if selected_sources is None:
+        return True
+    return "user" in {part.strip() for part in selected_sources.split(",") if part.strip()}
+
+
 def private_json(path: Path, value: dict) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as handle:
@@ -278,7 +305,8 @@ def private_settings_json(path: Path, value: dict) -> None:
 
 
 def session_settings(base: Path, windows: dict[str, int], directory: Path,
-                     route: str = "subscription") -> tuple[Path, list[Path]]:
+                     route: str = "subscription", *,
+                     include_user_status_line: bool = True) -> tuple[Path, list[Path]]:
     settings = json.loads(base.read_text())
     # An explicit launch setting has precedence over the user-level status line.
     if "statusLine" in settings:
@@ -289,7 +317,7 @@ def session_settings(base: Path, windows: dict[str, int], directory: Path,
             "statusline_adapter.py" in status_line["command"]):
             status_line = None
     else:
-        status_line = configured_status_line()
+        status_line = configured_status_line() if include_user_status_line else None
     if status_line is None:
         return base, []
     profile_path = directory / "statusline-profile.json"
@@ -816,6 +844,7 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         if custom_settings is not None and "model" in custom_settings and not explicit_model:
             selected = custom_settings["model"]
             explicit_model = True
+    include_user_status_line = user_status_line_allowed(claude_args)
     runtime, state, created = ensure_service(route=route)
     environment = service_environment(state, runtime, route)
     if mode == "models":
@@ -858,7 +887,8 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         windows_acl.lock([directory])
     settings_path = Path(settings)
     if custom_settings is None:
-        settings_path, statusline_files = session_settings(settings_path, json.loads(catalog_json), directory, route)
+        settings_path, statusline_files = session_settings(settings_path, json.loads(catalog_json), directory, route,
+                                                          include_user_status_line=include_user_status_line)
         if statusline_files and route == "subscription":
             import codex_usage
             codex_usage.start_refresh(runtime / "codex-usage.json")
@@ -880,7 +910,8 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         compact = combined.get("modelSettings", {}).get(model, {}).get("autoCompactWindow", compact)
         settings_path = directory / "composed-settings.json"
         private_settings_json(settings_path, combined)
-        settings_path, statusline_files = session_settings(settings_path, json.loads(catalog_json), directory, route)
+        settings_path, statusline_files = session_settings(settings_path, json.loads(catalog_json), directory, route,
+                                                          include_user_status_line=include_user_status_line)
         if statusline_files and route == "subscription":
             import codex_usage
             codex_usage.start_refresh(runtime / "codex-usage.json")
