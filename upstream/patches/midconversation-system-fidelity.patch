@@ -1,0 +1,181 @@
+diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
+index c546ba9..dae4d59 100644
+--- a/internal/translator/codex/claude/codex_claude_request.go
++++ b/internal/translator/codex/claude/codex_claude_request.go
+@@ -107,6 +107,12 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 	messagesResult := rootResult.Get("messages")
+ 	if messagesResult.IsArray() {
+ 		messageResults := messagesResult.Array()
++		lastUser := -1
++		for index, message := range messageResults {
++			if message.Get("role").String() == "user" {
++				lastUser = index
++			}
++		}
+ 		var pendingToolUseIDs []string
+ 		var pendingSystemReminders [][]byte
+ 		var toolSearchCallIDs map[string]struct{}
+@@ -115,9 +121,14 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 			messageResult := messageResults[i]
+ 			messageRole := messageResult.Get("role").String()
+ 			if messageRole == "system" {
++				// Turn-scoped text remains in Claude's history but stops rendering
++				// after any later user message, including a tool-result-only turn.
++				if messageResult.Get("clear_at").String() == "next_user_message" && i < lastUser {
++					continue
++				}
+ 				systemContent := messageResult.Get("content")
+ 				if reminderText, ok := translatorcommon.ClaudeMessageSystemReminderText(systemContent); ok {
+-					message := []byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}`)
++					message := []byte(`{"type":"message","role":"developer","content":[{"type":"input_text","text":""}]}`)
+ 					message, _ = sjson.SetBytes(message, "content.0.text", reminderText)
+ 					if len(pendingToolUseIDs) > 0 {
+ 						pendingSystemReminders = append(pendingSystemReminders, message)
+diff --git a/internal/translator/codex/claude/codex_claude_request_test.go b/internal/translator/codex/claude/codex_claude_request_test.go
+index 312bb29..261d77a 100644
+--- a/internal/translator/codex/claude/codex_claude_request_test.go
++++ b/internal/translator/codex/claude/codex_claude_request_test.go
+@@ -45,7 +45,7 @@ func TestConvertClaudeRequestToCodex_SystemMessageScenarios(t *testing.T) {
+ 			wantTexts:        []string{"Be helpful"},
+ 		},
+ 		{
+-			name: "Message system role does not become developer",
++			name: "Message system role retains developer priority",
+ 			inputJSON: `{
+ 				"model": "claude-3-opus",
+ 				"messages": [
+@@ -53,7 +53,8 @@ func TestConvertClaudeRequestToCodex_SystemMessageScenarios(t *testing.T) {
+ 					{"role": "user", "content": "hello"}
+ 				]
+ 			}`,
+-			wantHasDeveloper: false,
++			wantHasDeveloper: true,
++			wantTexts:        []string{"<system-reminder>\nFollow the project instructions\n</system-reminder>"},
+ 		},
+ 		{
+ 			name: "Array system field with filtered billing header",
+@@ -103,7 +104,7 @@ func TestConvertClaudeRequestToCodex_SystemMessageScenarios(t *testing.T) {
+ 	}
+ }
+ 
+-func TestConvertClaudeRequestToCodex_MessageSystemRoleWrapsAsUserReminder(t *testing.T) {
++func TestConvertClaudeRequestToCodex_MessageSystemRoleRetainsPriority(t *testing.T) {
+ 	inputJSON := `{
+ 		"model": "claude-3-opus",
+ 		"system": [{"type": "text", "text": "Top-level rules"}],
+@@ -124,14 +125,14 @@ func TestConvertClaudeRequestToCodex_MessageSystemRoleWrapsAsUserReminder(t *tes
+ 	if got := inputs[0].Get("role").String(); got != "developer" {
+ 		t.Fatalf("top-level system role = %q, want developer", got)
+ 	}
+-	if got := inputs[2].Get("role").String(); got != "user" {
+-		t.Fatalf("message-level system role = %q, want user", got)
++	if got := inputs[2].Get("role").String(); got != "developer" {
++		t.Fatalf("message-level system role = %q, want developer", got)
+ 	}
+ 	if got := inputs[2].Get("content.0.text").String(); got != "<system-reminder>\nFollow the project instructions\n</system-reminder>" {
+ 		t.Fatalf("unexpected first reminder text: %q", got)
+ 	}
+-	if got := inputs[4].Get("role").String(); got != "user" {
+-		t.Fatalf("array message-level system role = %q, want user", got)
++	if got := inputs[4].Get("role").String(); got != "developer" {
++		t.Fatalf("array message-level system role = %q, want developer", got)
+ 	}
+ 	if got := inputs[4].Get("content.0.text").String(); got != "<system-reminder>\nUse the current repo\n</system-reminder>" {
+ 		t.Fatalf("unexpected second reminder text: %q", got)
+diff --git a/sdk/api/handlers/claude/code_handlers.go b/sdk/api/handlers/claude/code_handlers.go
+index cdec58e..2128cfe 100644
+--- a/sdk/api/handlers/claude/code_handlers.go
++++ b/sdk/api/handlers/claude/code_handlers.go
+@@ -85,6 +85,13 @@ func (h *ClaudeCodeAPIHandler) ClaudeMessages(c *gin.Context) {
+ 
+ 	// Decode claude-fable-5-dd-<reversed> model IDs back to the real model name for routing.
+ 	rawJSON = rewriteClaudeDDModelInBody(rawJSON)
++	if err = handlers.ValidateClaudeTurnScopedSystem(rawJSON); err != nil {
++		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{Error: handlers.ErrorDetail{
++			Message: "Invalid turn-scoped system instruction.",
++			Type:    "invalid_request_error",
++		}})
++		return
++	}
+ 	rawJSON, err = handlers.ResolveClaudeMidConversationEffort(rawJSON)
+ 	if err != nil {
+ 		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{Error: handlers.ErrorDetail{
+diff --git a/sdk/api/handlers/claude_turn_scoped_system.go b/sdk/api/handlers/claude_turn_scoped_system.go
+new file mode 100644
+index 0000000..dbcde80
+--- /dev/null
++++ b/sdk/api/handlers/claude_turn_scoped_system.go
+@@ -0,0 +1,73 @@
++package handlers
++
++import (
++	"errors"
++	"strings"
++
++	"github.com/tidwall/gjson"
++)
++
++// ValidateClaudeTurnScopedSystem refuses unsupported combinations instead of
++// silently discarding a tool operation, reasoning setting, or cache control.
++// Consecutive system messages are validated as one group for placement.
++func ValidateClaudeTurnScopedSystem(raw []byte) error {
++	messages := gjson.GetBytes(raw, "messages")
++	if !messages.IsArray() {
++		return nil
++	}
++	items := messages.Array()
++	for index, message := range items {
++		scope := message.Get("clear_at")
++		if !scope.Exists() || scope.Type == gjson.Null {
++			continue
++		}
++		if message.Get("role").String() != "system" || scope.Type != gjson.String ||
++			(scope.String() != "never" && scope.String() != "next_user_message") {
++			return errors.New("invalid turn-scoped system message")
++		}
++		if scope.String() != "next_user_message" {
++			continue
++		}
++		start, end := index, index+1
++		for start > 0 && items[start-1].Get("role").String() == "system" {
++			start--
++		}
++		for end < len(items) && items[end].Get("role").String() == "system" {
++			end++
++		}
++		if start == 0 || (items[start-1].Get("role").String() != "user" && !bridgeAssistantServerResult(items[start-1])) ||
++			(end < len(items) && items[end].Get("role").String() != "assistant") {
++			return errors.New("invalid turn-scoped system message placement")
++		}
++		output := message.Get("output_config")
++		if output.Exists() && output.Type != gjson.Null {
++			return errors.New("turn-scoped system message cannot carry output configuration")
++		}
++		content := message.Get("content")
++		if content.Type == gjson.String {
++			continue
++		}
++		if !content.IsArray() || len(content.Array()) == 0 {
++			return errors.New("turn-scoped system message requires text")
++		}
++		for _, block := range content.Array() {
++			cache := block.Get("cache_control")
++			if block.Get("type").String() != "text" || (cache.Exists() && cache.Type != gjson.Null) {
++				return errors.New("turn-scoped system message must contain only uncached text")
++			}
++		}
++	}
++	return nil
++}
++
++func bridgeAssistantServerResult(message gjson.Result) bool {
++	content := message.Get("content")
++	if message.Get("role").String() != "assistant" || !content.IsArray() {
++		return false
++	}
++	blocks := content.Array()
++	if len(blocks) == 0 {
++		return false
++	}
++	return strings.HasSuffix(blocks[len(blocks)-1].Get("type").String(), "_tool_result")
++}

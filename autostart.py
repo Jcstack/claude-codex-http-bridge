@@ -81,7 +81,7 @@ def healthy(root: Path) -> bool:
         if not (root / "runtime-selected.json").exists(): return True
         managed = rolling_runtime.state(root)
         if managed is None: return False
-        rolling_runtime.endpoint_status(root, managed)
+        rolling_runtime.preflight_routes(root, managed)
         directory = root / "runtime-managed"
         backend = rolling_runtime.read(directory / "backend.json")
         origin = rolling_runtime.read(directory / "origin.json")

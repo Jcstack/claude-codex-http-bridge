@@ -58,6 +58,7 @@
 !tests/auth_handoff_fixture.go
 !tests/effort_guard_fixture.go
 !tests/midconversation_effort_fixture.go
+!tests/scoped_system_fixture.go
 !tests/native_cache_fixture.go
 !tests/native_gateway_names_fixture.go
 !tests/native_incomplete_fixture.go
@@ -82,6 +83,7 @@
 !upstream/patches/incomplete-tool-guard.patch
 !upstream/patches/effort-downgrade-guard.patch
 !upstream/patches/midconversation-effort.patch
+!upstream/patches/midconversation-system-fidelity.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml

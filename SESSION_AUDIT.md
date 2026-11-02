@@ -178,6 +178,19 @@ no further API-error records in the sampled main or child sessions. Both
 listeners still matched their recorded processes; no restart or retry policy
 change was made. The source of the missing terminal events remains unknown.
 
+At 17:30 China time on 2026-11-02, the tracked main session recorded an
+automatic compaction lasting 624.744 seconds, with reported context changing
+from 766,494 to 55,373 tokens. Shared origin and managed logs each recorded
+a 624-second HTTP 200 request ending in the same second. These are consistent
+with the compaction duration, but shared logs do not provide cross-layer
+request identity or first-byte timing; they do not identify whether model
+computation, upstream waiting, or another component dominated. In the same
+two-hour audit window the main session's deduplicated reported cache-read
+share was 94.8% of reported input tokens, which is not request hit rate and
+does not establish the compaction request's cache behavior. The main session
+continued afterward; one later HTTP 499 was recorded by both shared layers,
+without enough evidence here to identify the initiating client or cause.
+
 As a separate local-only control on 2026-11-02, a disposable TLS ingress,
 candidate translator and fake origin relayed synthetic messages of 100,000,
 1,000,000 and 4,000,000 bytes in 0.058, 0.130 and 0.407 seconds respectively;

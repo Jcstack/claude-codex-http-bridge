@@ -87,6 +87,22 @@ Synthetic tests check the cache key, translated tool definitions and input
 prefix, but do not prove a real provider cache hit. Cross-platform checks and
 rolling activation are required before treating this candidate as installed.
 
+The official [Anthropic system-message specification](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages)
+states that a turn-scoped instruction stops rendering after the next user
+message, including a tool-result-only message. The [OpenAI Responses reference](https://developers.openai.com/api/reference/go/resources/responses)
+assigns `developer` and `system` messages higher priority than `user`
+messages. In an isolated local fixture, the installed translator rendered
+an expired synthetic instruction and emitted active system text as a `user`
+message. This establishes a wire-level mismatch, not that a real session was
+affected or that model behavior changed in a particular way. A separate
+[experimental patch](upstream/patches/midconversation-system-fidelity.patch)
+emits active synthetic instructions as `developer`, suppresses an expired
+instruction, and rejects invalid scoped combinations and placement. Existing
+translator tests and synthetic tool and cache-prefix fixtures passed locally.
+The candidate is deliberately excluded from the active runtime bundle until
+its private Codex backend behavior, client/plugin interaction, cache effects,
+and cross-platform tests are independently validated.
+
 Claude Code's [native gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery)
 is an additional constraint on dynamic GPT discovery: the documented picker
 accepts discovered IDs containing `claude` or `anthropic`, caches results,

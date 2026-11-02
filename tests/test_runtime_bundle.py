@@ -17,6 +17,26 @@ import windows_acl
 
 
 class BundleTests(unittest.TestCase):
+    def test_recovery_readiness_requires_both_authenticated_catalogs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            value = {"port": 12345}
+            good = {"data": [{"id": "gpt-fixture"}]}
+            with patch.object(rolling_runtime, "endpoint_status") as status, \
+                 patch.object(rolling_runtime, "private_key", return_value="synthetic-key"), \
+                 patch.object(rolling_runtime, "get_json", side_effect=[good, good]) as get:
+                rolling_runtime.preflight_routes(root, value, {"gpt-fixture": {}})
+            status.assert_called_once_with(root, value)
+            self.assertEqual([call.args[2] for call in get.call_args_list], ["/bridge/origin/v1/models", "/v1/models"])
+            for origin, frontend in (({"data": []}, good), (good, {"data": []}),
+                                     (good, {"data": [{"id": "gpt-other"}]})):
+                with self.subTest(origin=origin, frontend=frontend), \
+                     patch.object(rolling_runtime, "endpoint_status"), \
+                     patch.object(rolling_runtime, "private_key", return_value="synthetic-key"), \
+                     patch.object(rolling_runtime, "get_json", side_effect=[origin, frontend]):
+                    with self.assertRaisesRegex(RuntimeError, "catalog"):
+                        rolling_runtime.preflight_routes(root, value, {"gpt-fixture": {}})
+
     def test_managed_process_environment_excludes_unrelated_shell_secrets(self):
         sentinel = "PRIVATE_FIXTURE_SENTINEL"
         inherited = {"OPENAI_API_KEY": sentinel, "ANTHROPIC_AUTH_TOKEN": sentinel,

@@ -119,6 +119,22 @@ def get_json(runtime: Path, port: int, path: str, key: str) -> dict:
         raise RuntimeError("Managed endpoint readiness check failed; raw transport details withheld") from None
 
 
+def preflight_routes(root: Path, value: dict, models: dict | None = None) -> None:
+    """Verify both authenticated loopback routes using catalog metadata only."""
+    endpoint_status(root, value)
+    runtime = root / "runtime-managed"
+    origin = get_json(runtime, value["port"], "/bridge/origin/v1/models", private_key(runtime / "origin-guard-key"))
+    frontend = get_json(runtime, value["port"], "/v1/models", private_key(runtime / "front-key"))
+    def ids(payload):
+        rows = payload.get("data")
+        if not isinstance(rows, list): return set()
+        return {row["id"] for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)}
+    origin_ids, frontend_ids = ids(origin), ids(frontend)
+    if not origin_ids or not frontend_ids or (models is not None and
+            (not set(models).issubset(origin_ids) or not set(models).issubset(frontend_ids))):
+        raise RuntimeError("Managed route catalog did not become ready")
+
+
 def start(binary: Path, arguments: list[str], log: Path, *, ca: Path | None = None, authority: str | None = None) -> subprocess.Popen:
     runtime_bundle.safe_file(binary)
     environment = process_environment()
@@ -335,7 +351,16 @@ def restore_ingress(root: Path, runtime: Path, value: dict, models: dict,
         # Once listening, a client may have been admitted. Record ownership
         # before testing it, and never kill this replacement on a later error.
         write(runtime / "service.json", replacement)
-        endpoint_status(root, replacement)
+        # A listener and translator catalog alone do not prove the guarded
+        # origin route is ready. This checks only local model-list metadata.
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                preflight_routes(root, replacement, models)
+                break
+            except (OSError, RuntimeError, ValueError):
+                if time.monotonic() >= deadline: raise
+                time.sleep(.2)
         return replacement
     except BaseException:
         if ingress is not None and replacement is not None and launcher.listener_pids(port) == {ingress.pid}:

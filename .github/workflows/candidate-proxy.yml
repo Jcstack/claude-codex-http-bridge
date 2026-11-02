@@ -71,6 +71,14 @@ jobs:
           cp ../tests/midconversation_effort_fixture.go sdk/api/handlers/bridge_mid_effort_local_test.go
           go test -timeout 60s -run '^TestBridge(MarkClaudeRequestedEffort|ProtectClaudeEffortError|MidConversationEffort|MidConversationEffortInvalid)$' ./sdk/api/handlers
           go build -o "../${{ matrix.binary }}" ./cmd/server
+          # This independent system-role candidate is tested but not packed or activated.
+          git apply ../upstream/patches/midconversation-system-fidelity.patch
+          cp ../tests/scoped_system_fixture.go sdk/api/handlers/bridge_scoped_system_local_test.go
+          go test -timeout 60s -run '^TestBridgeScopedSystemValidation$' ./sdk/api/handlers
+          go test ./internal/translator/codex/claude
+          go build -o "../system-${{ matrix.binary }}" ./cmd/server
+          rm sdk/api/handlers/bridge_scoped_system_local_test.go
+          git apply --reverse ../upstream/patches/midconversation-system-fidelity.patch
           git apply ../upstream/patches/08437a67-gateway-tool-names.patch
           git apply ../upstream/patches/gateway-instance-identity.patch
           cp ../tests/native_gateway_names_fixture.go internal/translator/codex/claude/bridge_gateway_names_local_test.go
@@ -98,6 +106,8 @@ jobs:
           python tests/probe_effort_rejection_gateway.py "${{ matrix.binary }}" --expect-blocked
           python tests/probe_effort_guard_contract.py "${{ matrix.binary }}"
           python tests/probe_midconversation_effort.py "${{ matrix.binary }}" --expect-midconversation
+          python tests/probe_midconversation_system.py "${{ matrix.binary }}"
+          python tests/probe_midconversation_system.py "system-${{ matrix.binary }}" --expect-fidelity
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}" --family astra
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}" --family luna
           python tests/probe_gateway_tool_names.py "names-${{ matrix.binary }}"
