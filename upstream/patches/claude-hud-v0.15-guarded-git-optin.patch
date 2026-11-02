@@ -25,15 +25,26 @@
      });
 --- a/src/config.ts
 +++ b/src/config.ts
-@@ -610,8 +610,13 @@
+@@ -600,6 +600,13 @@
+   problems: string[];
+ }
+ 
++// An opt-in only applies when this process was started by the guarded collector.
++export function applyBridgeGitGuard(config: HudConfig, merged: Record<string, unknown>): HudConfig {
++  if (merged.claudeCodexGuardedGit === true && process.env.CLAUDE_CODEX_HUD_GIT_GUARD === 'bridge-v1' &&
++      isPlainObject(merged.gitStatus) && merged.gitStatus.enabled === false) config.gitStatus.enabled = true;
++  return config;
++}
++
+ export function loadConfigFiles(paths: Pick<Paths, 'config' | 'override'>): LoadedConfig {
+   const files = [['config.json', readConfigFile(paths.config)], ['claude-hud.json', readConfigFile(paths.override)]] as const;
+   const problems: string[] = [];
+@@ -610,8 +617,10 @@
    });
    const merged = override ? mergeOverrides(base ?? {}, override) : base ?? {};
    const baseFile = files[0][1];
-+  const config = mergeConfig(merged as Partial<HudConfig>);
-+  // Keep the standard Git switch off for old and future HUD versions. Only a
-+  // reviewed collector can attest that this process has the guarded adapter.
-+  if (merged.claudeCodexGuardedGit === true && process.env.CLAUDE_CODEX_HUD_GIT_GUARD === 'bridge-v1' &&
-+      isPlainObject(merged.gitStatus) && merged.gitStatus.enabled === false) config.gitStatus.enabled = true;
++  // Keep the standard Git switch off for old and future HUD versions.
++  const config = applyBridgeGitGuard(mergeConfig(merged as Partial<HudConfig>), merged);
    return {
 -    config: mergeConfig(merged as Partial<HudConfig>),
 +    config,
@@ -42,22 +53,58 @@
      override: override ?? {},
 --- a/src/commands.ts
 +++ b/src/commands.ts
-@@ -220,8 +220,16 @@
+@@ -1,7 +1,7 @@
+ import * as fs from "node:fs";
+ import * as path from "node:path";
+ import type { Answers, Facts, Input, Output, Paths } from "./channel.ts";
+-import { checkValue, configKey, configKeys, mergeConfig, mergeOverrides, type HudConfig, type LoadedConfig } from "./config.ts";
++import { applyBridgeGitGuard, checkValue, configKey, configKeys, mergeConfig, mergeOverrides, type HudConfig, type LoadedConfig } from "./config.ts";
+ import { stripAnsi, textWidth } from "./render/ansi.ts";
+ import { schemaLines } from "./schema.ts";
+ import type { StdinData } from "./types.ts";
+@@ -50,6 +50,20 @@
+ }
+ 
+ const getPath = (source: unknown, key: string): unknown => key.split(".").reduce<unknown>((node, part) => (isObject(node) ? node[part] : undefined), source);
++
++function guardedGitToggle(config: Raw, key: string, value: unknown): boolean {
++  return key === "gitStatus.enabled" && typeof value === "boolean" &&
++    typeof config.claudeCodexGuardedGit === "boolean" && process.env.CLAUDE_CODEX_HUD_GIT_GUARD === "bridge-v1";
++}
++
++function assignConfig(config: Raw, key: string, value: unknown): void {
++  if (guardedGitToggle(config, key, value)) {
++    config.claudeCodexGuardedGit = value;
++    setPath(config, key, false);
++  } else {
++    setPath(config, key, value);
++  }
++}
+ 
+ // `true`, `42`, `["a","b"]` and `"quoted"` are JSON; anything else is taken as text.
+ function parseValue(text: string): unknown {
+@@ -202,8 +216,9 @@
+   if (!Number.isInteger(width) || width < 10 || width > 1000) return fail(["--width must be a whole number from 10 to 1000"]);
+ 
+   const base = structuredClone(loaded.base);
+-  for (const [key, value] of assignments) setPath(base, key, value);
+-  const config = mergeConfig(mergeOverrides(base, loaded.override) as Partial<HudConfig>);
++  for (const [key, value] of assignments) assignConfig(base, key, value);
++  const merged = mergeOverrides(base, loaded.override);
++  const config = applyBridgeGitGuard(mergeConfig(merged as Partial<HudConfig>), merged);
+   const stdin = mergeDeep(last ? facts.heartbeat!.stdin : SAMPLE, state) as StdinData;
+   const output = await render(stdin, config, { ask: last ? ask : noFacts, files: last, paths: input.paths, dataDir: scratchDir(input.paths.data), now: input.now, columns: width });
+   return { lines: [`Preview at ${width} columns, ${last ? "replaying the last real render" : "with a sample session"}:`, ...output.lines.map(stripAnsi)] };
+@@ -220,8 +235,10 @@
    if (problems.length > 0) return fail([...problems, "Nothing was changed."]);
    const config = structuredClone(loaded.base);
    const lines = assignments.map(([key, value]) => {
 -    const was = getPath(mergeOverrides(loaded.base, loaded.override), key);
 -    setPath(config, key, value);
-+    const guardedGit = key === "gitStatus.enabled" && typeof value === "boolean" &&
-+      typeof config.claudeCodexGuardedGit === "boolean" && process.env.CLAUDE_CODEX_HUD_GIT_GUARD === "bridge-v1";
++    const guardedGit = guardedGitToggle(config, key, value);
 +    const was = guardedGit ? loaded.config.gitStatus.enabled : getPath(mergeOverrides(loaded.base, loaded.override), key);
-+    if (guardedGit) {
-+      // Keep the ordinary switch off for any other plugin version.
-+      config.claudeCodexGuardedGit = value;
-+      setPath(config, key, false);
-+    } else {
-+      setPath(config, key, value);
-+    }
++    // Keep the ordinary switch off for any other plugin version.
++    assignConfig(config, key, value);
      const shadowed = getPath(loaded.override, key) !== undefined ? " claude-hud.json also sets it, and its value wins." : "";
      return `Set ${key} = ${JSON.stringify(value)} (was ${JSON.stringify(was ?? configKey(key)?.default)}).${shadowed}`;
    });

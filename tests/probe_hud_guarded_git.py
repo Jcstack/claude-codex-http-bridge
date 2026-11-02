@@ -79,6 +79,13 @@ def main() -> None:
             raise RuntimeError('The reviewed collector marker is not present exactly once')
         collector.write_text(text.replace(GUARD_EXPORT, '', 1), encoding='utf-8')
         missing_guard_output = render(no_marker, True, injected=True)
+        def preview(*values: str) -> str:
+            result = subprocess.run([node, str(hud / 'hud.mjs'), 'preview', '--last', *values], cwd=work, env=env,
+                                    capture_output=True, text=True, encoding='utf-8', timeout=30, check=True)
+            return ANSI.sub('', result.stdout)
+        preview_default = preview()
+        preview_off = preview('--set', 'gitStatus.enabled=false')
+        preview_on = preview('--set', 'gitStatus.enabled=true')
         def set_git(value: str) -> dict:
             subprocess.run([node, str(hud / 'hud.mjs'), 'set', value], cwd=work, env=env,
                            capture_output=True, text=True, encoding='utf-8', timeout=30, check=True)
@@ -95,6 +102,9 @@ def main() -> None:
         checks = {'disabled_without_opt_in': 'fixture-branch' not in default_output,
                   'enabled_with_reviewed_guard_and_opt_in': 'fixture-branch' in guarded_output,
                   'missing_guard_ignores_injected_environment': 'fixture-branch' not in missing_guard_output,
+                  'native_preview_respects_guarded_git_toggle':
+                      'fixture-branch' in preview_default and 'fixture-branch' not in preview_off
+                      and 'fixture-branch' in preview_on,
                   'native_set_and_undo_keep_other_versions_disabled':
                       off.get('claudeCodexGuardedGit') is False and off.get('gitStatus', {}).get('enabled') is False
                       and on.get('claudeCodexGuardedGit') is True and on.get('gitStatus', {}).get('enabled') is False
