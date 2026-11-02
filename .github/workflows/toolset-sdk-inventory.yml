@@ -38,5 +38,5 @@ jobs:
           PYTHONNOUSERSITE: '1'
         run: |
           python tests/audit_toolset_sdk.py "$BRIDGE_TOOLSET_SDK_CHECKOUT"
-          python -m unittest tests.test_toolset_sdk_audit -v
+          python -m unittest tests.test_toolset_sdk_audit tests.test_toolset_identity_fixture -v
         shell: bash

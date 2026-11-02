@@ -6,7 +6,8 @@ import shutil
 import tempfile
 import unittest
 
-from tests.audit_toolset_sdk import audit
+from tests.audit_toolset_sdk import audit, members
+from tests.toolset_identity_fixture import Identity, RequestAliases
 
 
 SDK = os.environ.get("BRIDGE_TOOLSET_SDK_CHECKOUT")
@@ -47,6 +48,15 @@ class StaticInventoryTest(unittest.TestCase):
                          result["shared_names_requiring_family_identity"])
         self.assertFalse(result["source_integrity_verified_by_fixture"])
         self.assertFalse(result["schemas_or_executor_permissions_verified"])
+
+    def test_every_snapshot_member_has_a_distinct_fixture_alias(self):
+        identities = [Identity(family, name) for family in ("browser", "computer")
+                      for name in members(self.beta, family)]
+        identities.append(Identity(None, "scroll"))
+        aliases = RequestAliases(identities)
+        names = [aliases.replay_name(item) for item in identities]
+        self.assertEqual(len(set(names)), 49)
+        self.assertEqual([aliases.returned_identity(name) for name in names], identities)
 
     def test_source_is_parsed_without_execution(self):
         path = self.beta / "beta_browser_navigate_input.py"

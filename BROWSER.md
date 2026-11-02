@@ -27,11 +27,10 @@ contains generated member input models and discriminated response unions. The
 importing or executing it: it found input classes for all 31 browser and 17
 computer members, with 16 names shared across the families. Each shared name
 has a different set of top-level input field names in these generated types.
-It also confirms
-that upload, JavaScript, console and network readers default to disabled in
-that snapshot. The member inventory and negative controls passed on
-[macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41530229705);
-the field-name comparison was added afterward. The audit does not verify the checkout's integrity itself: fetch
+It also confirms that upload, JavaScript, console and network readers default
+to disabled in that snapshot. The member inventory and negative controls
+passed on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41530519329).
+The audit does not verify the checkout's integrity itself: fetch
 the public commit and verify its SHA and clean state independently, as the
 [isolated workflow](.github/workflows/toolset-sdk-inventory.yml) does. It is
 not a schema exporter, tool executor, or permission system.
@@ -48,6 +47,19 @@ errors. Browser member input is documented as arriving in one complete
 `input_json_delta`; ordered actions stop after the first failure or refusal,
 while other tools can still run. Earlier synthetic fixtures do not establish
 those behaviors for this bridge.
+
+A separate [request-local naming fixture](tests/toolset_identity_fixture.py)
+experiments with distinct, deterministic aliases for browser and computer
+members. It rejects collisions with custom names, unknown or removed returned
+tools and unsupported names, while retaining known historical names for replay.
+Local controls cover the SDK snapshot's 48 members, a same-name custom tool,
+dynamic additions and separate requests. This is an isolated mapping experiment:
+it does not provide schemas, authenticate a session, process real streams,
+validate permissions or expand toolsets. Its collision and length rejections
+are compatibility limitations, so it is not included in the runtime. Its
+64-character ASCII function-name assumption follows the public
+[OpenAI SDK definition](https://github.com/openai/openai-python/blob/main/src/openai/types/shared_params/function_definition.py),
+not a verified constraint of the Codex subscription backend.
 
 The current translator does not yet implement that toolset contract. A local
 [synthetic translator fixture](tests/native_toolset_contract_fixture.go)
