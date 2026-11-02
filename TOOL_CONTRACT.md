@@ -42,7 +42,7 @@ controls, a valid string reached the fake server once, while an explicit
 The selected installed translator was exercised locally on macOS; the direct
 and candidate routes produced the same observations on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41521874679).
 
-In another local client test, the loopback shim injected a programmatic-only
+In another client test, the loopback shim injected a programmatic-only
 `allowed_callers` field into the synthetic tool definition. The selected
 translator omitted that field; the fake upstream then returned a direct call,
 which reached the permissive synthetic MCP server. With the uninstalled
@@ -50,7 +50,8 @@ candidate, the client received an error, the shim observed HTTP 400, and no
 request reached the fake upstream or fake tool. The client had not itself sent
 the caller field in these samples. This confirms only the behavior of the
 synthetic injection and controls, not a real model call, plugin invocation or
-Claude permission bypass. Cross-platform candidate coverage is pending.
+Claude permission bypass. The same baseline and combined-candidate controls
+passed on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41525145049).
 
 This is evidence about a permissive fixture and the tested client/translator
 combination, not evidence that a real provider violates strict mode, that a
@@ -86,6 +87,16 @@ fake MCP tool in the injected programmatic-only case. A separate API fake and
 dynamic-tool probe passed; three synthetic dynamic-tool stages preserved the
 same prompt fields and session cache key versus the locally selected binary.
 That comparison does not establish real provider cache hits.
+
+An additional [handoff fixture](tests/probe_caller_handoff.py) used separate
+baseline and candidate executables, a temporary TLS ingress and a fake origin.
+On macOS, an admitted baseline stream completed after candidate publication;
+the baseline forwarded a restricted request after dropping its field, the
+candidate rejected it before the fake origin, and a later ordinary request
+succeeded. The same temporary ingress and CA survived rollback, and a locked
+Claude client continued its synthetic conversation across a subsequent
+baseline-to-candidate handoff. The two fixture bundles use a mocked source
+lock; this is not provenance verification or a live-session rollout test.
 
 This narrower candidate deliberately leaves the existing `strict: false`
 translation and dropped `input_examples` unchanged. A fake invalid strict

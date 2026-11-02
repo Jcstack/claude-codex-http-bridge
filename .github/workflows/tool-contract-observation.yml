@@ -127,6 +127,9 @@ jobs:
           go test ./internal/translator/codex/claude
           go test -run '^TestCodexBridgeNativeCallerPolicy$' -timeout 60s ./internal/runtime/executor
           go build -o "../caller-${{ matrix.binary }}" ./cmd/server
+          cd ../gateway
+          go mod verify
+          go build -o "../fixture-ingress-${{ matrix.binary }}" .
       - name: Observe caller-only protocol and cache controls
         if: ${{ inputs.scope == 'caller' }}
         shell: bash
@@ -160,3 +163,4 @@ jobs:
           python tests/probe_tool_output_client.py --translator "baseline-${{ matrix.binary }}" --inject-programmatic-only
           python tests/probe_tool_output_client.py --translator "caller-${{ matrix.binary }}" --inject-programmatic-only --expect-programmatic-rejection
           python tests/probe_tool_output_client.py --translator "caller-${{ matrix.binary }}"
+          python tests/probe_caller_handoff.py "baseline-${{ matrix.binary }}" "caller-${{ matrix.binary }}" "fixture-ingress-${{ matrix.binary }}" --claude-client
