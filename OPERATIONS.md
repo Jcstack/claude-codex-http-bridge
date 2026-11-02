@@ -230,6 +230,14 @@ to inspect or change the shared preference; an explicit session override wins.
 This was a targeted two-file update, not an atomic general-purpose controller
 installer. See [CACHE_AUDIT.md](CACHE_AUDIT.md) for interpretation and limits.
 
+The installed diagnostics now retain a managed backend when its only recognized
+in-window event is an incomplete-stream sentinel. They also expose its coverage
+when oversized lines prevent classification, even without a recognized event.
+Synthetic privacy and filtering regressions passed on Linux, macOS and Windows;
+the targeted local file update preserved the running processes and recorded
+rollback bundle. A comparison of up to 32 recent shared backend logs did not
+find additional newly visible events. See [SESSION_AUDIT.md](SESSION_AUDIT.md).
+
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
 Remaining work, updated 2026-11-01; execution order and acceptance gates are in [PLAN.md](PLAN.md):

@@ -59,8 +59,9 @@ before sharing. It is not automatically saved or committed.
   no HTTP access record or general transport keyword exists. Oversized lines
   also need visible coverage because their timestamps and content are unknown.
   A synthetic regression checks both cases without returning the lines, tags,
-  paths or keys. This candidate still needs cross-platform validation and local
-  installation before its results describe the installed diagnostic command.
+  paths or keys. The unit-test steps in the [three-platform run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41457409921)
+  passed, and the fix was installed locally without restarting any service.
+  Other jobs in that run may still be in progress.
 
 ## Current evidence and next investigation
 
