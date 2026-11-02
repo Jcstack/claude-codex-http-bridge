@@ -61,12 +61,14 @@ per-model effort set. The existing eligibility gate remains unchanged.
 A separate synthetic rejection test exposed a distinct risk even when the
 catalog advertises every level. Claude Code 2.1.316 retried a recognizable
 HTTP 400 for `output_config.effort` without any effort value, then continued
-omitting it on the next turn in the same process. Through the currently
+omitting it on the next turn in the same process. Through the previous
 reviewed translator, a fake upstream saw `max` on the rejected request and
 `xhigh` on the subsequent request. These were fake errors and do not establish
-that the real Codex backend has rejected the user's effort. A narrow guard is
-being developed and must pass negative, cross-platform, and rolling-handoff
-tests before use; the running service has not been changed for it.
+that the real Codex backend has rejected the user's effort. A narrow guard now
+surfaces selected recognizable pre-header rejections on the managed runtime.
+It passed [credential-free three-platform tests](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41425623062)
+and was activated by rolling backend handoff on 2026-11-02. Legacy sessions
+connected directly to the original endpoint still use the older translator.
 In a separate direct-client control, a differently worded 400 was visible as
 an error and retained `max` on all three synthetic attempts, even with
 `x-should-retry: false`. That header alone did not eliminate retries in this
@@ -76,16 +78,16 @@ The [Claude effort documentation](https://platform.claude.com/docs/en/build-with
 also describes a beta system-message directive. It applies immediately after
 new user input or otherwise waits for the next new user input; a user message
 containing only tool results does not activate a pending change. A synthetic
-request to the currently installed translator kept top-level `high` when a
+request to the previous translator kept top-level `high` when a
 later directive selected `low`. There is no evidence that the user's actual
-session sent this directive. A local candidate applies the effective level
+session sent this directive. The managed runtime now applies the effective level
 without editing message history, preserves a pending directive across
 tool-result-only turns, and returns an explicit error for malformed directives.
-The same candidate intercepts selected pre-header effort rejections so the
+The same runtime intercepts selected pre-header effort rejections so the
 tested client surfaces an error while retaining `max` on its three attempts.
 Synthetic tests check the cache key, translated tool definitions and input
-prefix, but do not prove a real provider cache hit. Cross-platform checks and
-rolling activation are required before treating this candidate as installed.
+prefix, but do not prove a real provider cache hit, model-level acceptance,
+or identical behavior in later Claude Code versions.
 
 The official [Anthropic system-message specification](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages)
 states that a turn-scoped instruction stops rendering after the next user

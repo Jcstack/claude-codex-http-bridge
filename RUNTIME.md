@@ -45,6 +45,17 @@ process environments are unaffected. Historical
 sessions connected directly to the original service also remain on its older
 translator, outside the new incomplete-tool guard.
 
+Later on 2026-11-02, the [credential-free three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41425623062)
+passed for the effort-rejection guard and mid-conversation effort mapping. Its
+source-locked macOS ARM64 bundle was verified and selected using `bridge upgrade`.
+The original account, origin process, managed TLS port, and ingress were not
+replaced; the selected backend executable and both local model-list routes were
+checked afterward. The status snapshots immediately before and after the change
+showed no active managed request; they do not prove the state at every instant.
+No model inference was run as part of this activation. Legacy sessions connected
+directly to the original endpoint do not receive these managed-runtime patches.
+The separate experimental system-message fidelity patch was not selected.
+
 An isolated Claude Code 2.1.316 probe found a possible future migration path:
 when its user settings file changed, an ordinary long-running client completed
 an already-started fake HTTP stream, then used a new authenticated fake HTTPS
