@@ -22,6 +22,7 @@ LINE_LIMIT = 16 * 1024 * 1024
 IDENTITY_LIMIT = 100_000
 CHILD_LIMIT = 256
 MODE_LIMIT = 128
+TOOL_ERROR_TEXT_LIMIT = 8192
 INPUT_FIELDS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 USAGE_FIELDS = (*INPUT_FIELDS, "output_tokens")
 EFFORTS = {"none", "low", "medium", "high", "xhigh", "max", "ultra"}
@@ -36,6 +37,7 @@ LIMITS = ("Snapshot metadata only; no inference, credentials or transcript conte
           "Cache fraction describes reported input tokens, not request hit rate, quota or pricing. "
           "Cache reads occupy context; cumulative input is not context size. "
           "Tool errors and API-error records are not unique bridge defects or requests. "
+          "Tool-error categories are text patterns, not proof of cause or current task state. "
           "Child durations overlap; command mentions do not certify execution or support. "
           "Main-request effort does not identify compaction effort. "
           "Undated metadata is included only for lifetime scans. "
@@ -185,14 +187,37 @@ def error_labels(text: str) -> list[str]:
     return labels or ["unclassified"]
 
 
+def task_stop_error_category(content: object) -> tuple[str, bool]:
+    """Classify only a bounded error shape; never return the error text."""
+    if isinstance(content, str):
+        chunks = [content]
+    elif isinstance(content, list):
+        chunks = (part.get("text") for part in content if isinstance(part, dict)
+                  and isinstance(part.get("text"), str))
+    else:
+        chunks = []
+    text, remaining, truncated = [], TOOL_ERROR_TEXT_LIMIT, False
+    for chunk in chunks:
+        if len(chunk) > remaining:
+            truncated = True
+        if remaining:
+            text.append(chunk[:remaining])
+            remaining -= min(len(chunk), remaining)
+        if truncated:
+            break
+    matched = re.search(r"\bowned\b.{0,256}\bagent\b.{0,256}\bcannot stop\b", "".join(text), re.I | re.S)
+    return ("task_stop_ownership_denial" if matched else "task_stop_other_or_unclassified"), truncated
+
+
 def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
     coverage = dict.fromkeys(("snapshot_bytes", "bytes_read", "lines_seen", "records_parsed",
         "oversized_lines", "malformed_lines", "nonobject_records", "records_missing_timestamp",
-        "in_scope_records", "tool_identity_limit_records", "compaction_records_at_limit", "request_modes_merged_at_limit"), 0)
+        "in_scope_records", "tool_identity_limit_records", "compaction_records_at_limit", "request_modes_merged_at_limit",
+        "tool_error_text_truncated"), 0)
     coverage.update(unterminated_tail=False, short_snapshot=False, changed_during_scan=False, read_failed=False)
     usage, modes, tools, results, errors, commands, statuses = Usage(), Counter(), Counter(), Counter(), Counter(), Counter(), Counter()
     calls, completed_tools, compactions = {}, set(), []
-    recent_errors, error_categories = deque(maxlen=12), Counter()
+    recent_errors, error_categories, tool_error_categories = deque(maxlen=12), Counter(), Counter()
     first = last = last_request = None
     api_errors = unpaired_results = 0
     try:
@@ -290,6 +315,10 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
                         results[label] += 1
                         if part.get("is_error") is True:
                             errors[label] += 1
+                            if label == "TaskStop":
+                                category, truncated = task_stop_error_category(part.get("content"))
+                                tool_error_categories[category] += 1
+                                coverage["tool_error_text_truncated"] += int(truncated)
     except (OSError, ValueError, OverflowError):
         coverage["read_failed"] = True
     seconds = [item["seconds"] for item in compactions if item["seconds"] is not None]
@@ -299,7 +328,8 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
         "api_error_records": api_errors, "api_error_status_mentions": dict(statuses),
         "api_error_category_mentions": dict(error_categories), "last_api_error_records": list(recent_errors),
         "command_record_mentions": dict(commands), "tool_calls": dict(tools), "tool_results": dict(results),
-        "tool_error_results": dict(errors), "unpaired_tool_results": unpaired_results,
+        "tool_error_results": dict(errors), "tool_error_categories": dict(tool_error_categories),
+        "unpaired_tool_results": unpaired_results,
         "cache_usage": usage.report(), "compaction_count": len(compactions) + coverage["compaction_records_at_limit"],
         "compaction_seconds_median": round(statistics.median(seconds), 3) if seconds else None,
         "compaction_seconds_max": max(seconds) if seconds else None,
@@ -326,7 +356,8 @@ def collect(claude_roots: list[Path], *, since: datetime | None = None,
         "matching_main_logs": len(candidates), "unsafe_paths_skipped": unsafe, "sessions": [], "limits": LIMITS}
     result["parser_limits"] = {"line_bytes": LINE_LIMIT, "usage_and_tool_identities_per_log": IDENTITY_LIMIT,
         "combined_usage_identities": IDENTITY_LIMIT, "compaction_details_per_log": IDENTITY_LIMIT,
-        "request_modes_per_log": MODE_LIMIT + 1, "child_logs_per_main": CHILD_LIMIT, "default_main_logs": 3}
+        "request_modes_per_log": MODE_LIMIT + 1, "child_logs_per_main": CHILD_LIMIT,
+        "tool_error_text_characters": TOOL_ERROR_TEXT_LIMIT, "default_main_logs": 3}
     if (session is not None or session_tag is not None) and len(candidates) != 1:
         result["selection_status"] = "target_missing" if not candidates else "target_ambiguous"
         return result

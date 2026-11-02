@@ -20,16 +20,18 @@ background child. While that child was held open, the intermediate agent's
 `TaskStop` returned an ownership-shaped error. Afterward, the child made the
 synthetic file write and returned a tool result. In the independent root-session
 control, `TaskStop` reported success and no corresponding file appeared during
-the bounded observation. This is a direct-client, fake-model observation, so
-it shows a harness behavior without implicating the HTTP bridge. It does not
-prove every stop or descendant effect behaves the same way, nor does it identify
-the cause of a particular real-session denial.
+the bounded observation. The same observations passed in the [Linux, macOS and
+Windows runner fixture](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41461244669).
+This is a direct-client, fake-model observation, so it shows a harness behavior
+without implicating the HTTP bridge. It does not prove every stop or descendant
+effect behaves the same way, nor does it identify the cause of a particular
+real-session denial or establish authenticated Windows behavior.
 
 The optional `--observe-hooks` variant also tests `PostToolUseFailure` and
 `PostToolBatch` hooks with synthetic input. On this Mac both detected the
 synthetic ownership error and their fixed additional-context markers reached
-the fake model endpoint. The successful root stop did not produce a matching
-failure marker. The [hooks reference](https://code.claude.com/docs/en/hooks#posttoolusefailure)
+the fake model endpoint on all three platform runners. The successful root stop
+did not produce a matching failure marker. The [hooks reference](https://code.claude.com/docs/en/hooks#posttoolusefailure)
 describes event boundaries and warns that error text is not a stable format.
 This demonstrates an observation path, not an automatic remedy or proof that a
 real model will act on additional context. No hook has been installed into user

@@ -51,6 +51,11 @@ before sharing. It is not automatically saved or committed.
 - A tool error may be a valid failed test, missing file or denied operation.
   Command mentions and requested model labels do not certify successful
   execution, actual provider identity or compatibility with every plugin.
+- A candidate audit category recognizes a bounded, ownership-shaped `TaskStop`
+  error without exporting the result text, task IDs or arguments. Other errors
+  remain unclassified, and truncated error text is counted separately. A text
+  match does not establish ownership, task liveness, or a common root cause.
+  The candidate has not yet been installed locally; see [NESTED_AGENTS.md](NESTED_AGENTS.md).
 - Proxy logs are shared across conversations. Origin and relay observations
   are not additive. An HTTP 200 can precede an SSE failure; both stream-failure
   mentions in proxy logs and API-error categories in transcripts are retained.

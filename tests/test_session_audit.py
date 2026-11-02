@@ -82,6 +82,30 @@ class SessionAuditTests(unittest.TestCase):
             self.assertTrue(coverage["changed_during_scan"])
             self.assertEqual(coverage["bytes_read"], coverage["snapshot_bytes"])
 
+    def test_task_stop_ownership_error_is_bounded_deduplicated_and_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "PRIVATE_SESSION.jsonl"
+            records = []
+            def pair(tool_id, name, content):
+                records.append({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": tool_id, "name": name, "input": {"PRIVATE": "PRIVATE_SECRET"}}]}})
+                result = {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": tool_id, "is_error": True, "content": content}]}}
+                records.append(result)
+                return result
+            repeated = pair("one", "TaskStop", "Task PRIVATE_ID is owned by PRIVATE_OWNER; agent PRIVATE_AGENT cannot stop it. PRIVATE_SECRET")
+            records.append(repeated)
+            pair("two", "TaskStop", [{"type": "text", "text": "Other PRIVATE_SECRET failure"}])
+            pair("three", "Read", "owned by agent PRIVATE_AGENT cannot stop PRIVATE_SECRET")
+            pair("four", "TaskStop", "x" * (audit.TOOL_ERROR_TEXT_LIMIT + 1) + " owned by agent cannot stop")
+            write_records(path, records)
+            report = audit.scan(path, None, audit.Usage())
+            self.assertEqual(report["tool_error_results"], {"TaskStop": 3, "Read": 1})
+            self.assertEqual(report["tool_error_categories"], {"task_stop_ownership_denial": 1,
+                                                               "task_stop_other_or_unclassified": 2})
+            self.assertEqual(report["coverage"]["tool_error_text_truncated"], 1)
+            self.assertNotIn("PRIVATE", json.dumps(report))
+
     def test_oversized_corrupt_and_partial_records_have_explicit_coverage(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "log.jsonl"
