@@ -1,0 +1,115 @@
+diff --git a/sdk/api/handlers/claude/code_handlers.go b/sdk/api/handlers/claude/code_handlers.go
+index 04b32ae..e2d122c 100644
+--- a/sdk/api/handlers/claude/code_handlers.go
++++ b/sdk/api/handlers/claude/code_handlers.go
+@@ -85,6 +85,7 @@ func (h *ClaudeCodeAPIHandler) ClaudeMessages(c *gin.Context) {
+ 
+ 	// Decode claude-fable-5-dd-<reversed> model IDs back to the real model name for routing.
+ 	rawJSON = rewriteClaudeDDModelInBody(rawJSON)
++	handlers.MarkClaudeRequestedEffort(c, rawJSON)
+ 
+ 	// Check if the client requested a streaming response.
+ 	streamResult := gjson.GetBytes(rawJSON, "stream")
+@@ -561,6 +562,9 @@ func (h *ClaudeCodeAPIHandler) toClaudeError(msg *interfaces.ErrorMessage) claud
+ }
+ 
+ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interfaces.ErrorMessage) {
++	if handlers.ProtectClaudeEffortError(c, msg) {
++		return
++	}
+ 	status := http.StatusInternalServerError
+ 	if msg != nil && msg.StatusCode > 0 {
+ 		status = msg.StatusCode
+diff --git a/sdk/api/handlers/claude_effort_guard.go b/sdk/api/handlers/claude_effort_guard.go
+new file mode 100644
+index 0000000..ae1e376
+--- /dev/null
++++ b/sdk/api/handlers/claude_effort_guard.go
+@@ -0,0 +1,87 @@
++package handlers
++
++import (
++	"errors"
++	"net/http"
++	"regexp"
++	"strings"
++
++	"github.com/gin-gonic/gin"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
++	"github.com/tidwall/gjson"
++)
++
++const bridgeClaudeEffortKey = "bridge.explicit_claude_effort"
++
++// MarkClaudeRequestedEffort marks only an explicit Claude Messages effort.
++// The message body is never stored in the context or logged by this guard.
++func MarkClaudeRequestedEffort(c *gin.Context, raw []byte) {
++	explicit := func(value gjson.Result) bool {
++		return value.Type == gjson.String && strings.TrimSpace(value.String()) != ""
++	}
++	if explicit(gjson.GetBytes(raw, "output_config.effort")) {
++		c.Set(bridgeClaudeEffortKey, true)
++		return
++	}
++	gjson.GetBytes(raw, "messages").ForEach(func(_, message gjson.Result) bool {
++		if message.Get("role").String() == "system" && explicit(message.Get("output_config.effort")) {
++			c.Set(bridgeClaudeEffortKey, true)
++			return false
++		}
++		return true
++	})
++}
++
++var bridgeMidEffortExtra = regexp.MustCompile(`\bmessages\.[0-9]+\.output_config(?:\.effort)?:\s*extra inputs are not permitted\b`)
++
++func isClaudeEffortRejection(text string) bool {
++	text = strings.ToLower(strings.TrimSpace(text))
++	return bridgeMidEffortExtra.MatchString(text) ||
++		strings.Contains(text, "output_config.effort requires a model that supports per-turn effort") ||
++		(strings.Contains(text, "output_config.effort") && strings.Contains(text, "extra inputs are not permitted")) ||
++		strings.Contains(text, "does not support the effort parameter") ||
++		strings.Contains(text, "doesn't support the effort parameter") ||
++		(strings.HasPrefix(text, "unexpected value(s)") && strings.Contains(text, "anthropic-beta") &&
++			strings.Contains(text, "effort-2025-11-24"))
++}
++
++// Protect an explicitly requested reasoning level from Claude's automatic
++// retry without effort. This applies only before HTTP headers are committed.
++func ProtectClaudeEffortError(c *gin.Context, msg *interfaces.ErrorMessage) bool {
++	if !c.GetBool(bridgeClaudeEffortKey) || c.Writer.Written() || msg == nil || msg.StatusCode != http.StatusBadRequest {
++		return false
++	}
++	var samples []string
++	if msg.Error != nil {
++		samples = append(samples, msg.Error.Error())
++		var provider interface{ ResponseBody() []byte }
++		if errors.As(msg.Error, &provider) && provider != nil {
++			samples = append(samples, string(provider.ResponseBody()))
++		}
++	}
++	if msg.DirectResponse && len(msg.Body) <= 65536 {
++		samples = append(samples, string(msg.Body))
++	}
++	matched := false
++	for _, sample := range samples {
++		if len(sample) > 65536 {
++			continue
++		}
++		if gjson.Valid(sample) {
++			sample = gjson.Get(sample, "error.message").String()
++		}
++		if isClaudeEffortRejection(sample) {
++			matched = true
++			break
++		}
++	}
++	if !matched {
++		return false
++	}
++	c.Header("x-should-retry", "false")
++	c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{
++		"type":    "invalid_request_error",
++		"message": "The requested reasoning setting was rejected. Choose another level with /effort; this request was not downgraded.",
++	}})
++	return true
++}

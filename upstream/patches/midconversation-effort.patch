@@ -1,0 +1,110 @@
+diff --git a/sdk/api/handlers/claude/code_handlers.go b/sdk/api/handlers/claude/code_handlers.go
+index e2d122c..cdec58e 100644
+--- a/sdk/api/handlers/claude/code_handlers.go
++++ b/sdk/api/handlers/claude/code_handlers.go
+@@ -85,6 +85,14 @@ func (h *ClaudeCodeAPIHandler) ClaudeMessages(c *gin.Context) {
+ 
+ 	// Decode claude-fable-5-dd-<reversed> model IDs back to the real model name for routing.
+ 	rawJSON = rewriteClaudeDDModelInBody(rawJSON)
++	rawJSON, err = handlers.ResolveClaudeMidConversationEffort(rawJSON)
++	if err != nil {
++		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{Error: handlers.ErrorDetail{
++			Message: "Could not apply the mid-conversation reasoning setting. Check the effort directive and try again.",
++			Type:    "invalid_request_error",
++		}})
++		return
++	}
+ 	handlers.MarkClaudeRequestedEffort(c, rawJSON)
+ 
+ 	// Check if the client requested a streaming response.
+diff --git a/sdk/api/handlers/claude_mid_effort.go b/sdk/api/handlers/claude_mid_effort.go
+new file mode 100644
+index 0000000..552d8d3
+--- /dev/null
++++ b/sdk/api/handlers/claude_mid_effort.go
+@@ -0,0 +1,85 @@
++package handlers
++
++import (
++	"errors"
++	"strings"
++
++	"github.com/tidwall/gjson"
++	"github.com/tidwall/sjson"
++)
++
++// bridgeHasNewUserInput excludes a continuation containing only tool results.
++// Unknown non-tool content remains new input so later attachment types work.
++func bridgeHasNewUserInput(message gjson.Result) bool {
++	content := message.Get("content")
++	if content.Type == gjson.String {
++		return strings.TrimSpace(content.String()) != ""
++	}
++	if !content.IsArray() {
++		return false
++	}
++	for _, block := range content.Array() {
++		kind := block.Get("type").String()
++		if kind == "text" {
++			if strings.TrimSpace(block.Get("text").String()) != "" {
++				return true
++			}
++		} else if kind != "" && kind != "tool_result" {
++			return true
++		}
++	}
++	return false
++}
++
++// ResolveClaudeMidConversationEffort determines which user-requested level is
++// in effect for the current turn. It never mutates conversation history: a
++// directive following a fresh user input applies immediately; one placed
++// elsewhere waits for the next user input that is not solely tool results.
++// The downstream Responses request only exposes one reasoning level, so apply
++// that effective level to the request-level field before translation.
++func ResolveClaudeMidConversationEffort(raw []byte) ([]byte, error) {
++	messages := gjson.GetBytes(raw, "messages")
++	if !messages.IsArray() {
++		return raw, nil
++	}
++	var effective, pending string
++	followsNewUser := false
++	for _, message := range messages.Array() {
++		switch message.Get("role").String() {
++		case "user":
++			followsNewUser = bridgeHasNewUserInput(message)
++			if followsNewUser && pending != "" {
++				effective, pending = pending, ""
++			}
++		case "system":
++			effort := message.Get("output_config.effort")
++			if !effort.Exists() || effort.Type == gjson.Null {
++				continue
++			}
++			if effort.Type != gjson.String || strings.TrimSpace(effort.String()) == "" ||
++				message.Get("clear_at").String() == "next_user_message" {
++				return nil, errors.New("invalid mid-conversation reasoning setting")
++			}
++			level := strings.TrimSpace(effort.String())
++			if followsNewUser {
++				effective, pending = level, ""
++			} else {
++				pending = level
++			}
++		default:
++			followsNewUser = false
++		}
++	}
++	if effective == "" {
++		return raw, nil
++	}
++	outputConfig := gjson.GetBytes(raw, "output_config")
++	if outputConfig.Exists() && outputConfig.Type != gjson.Null && !outputConfig.IsObject() {
++		return nil, errors.New("invalid request reasoning settings")
++	}
++	updated, err := sjson.SetBytes(raw, "output_config.effort", effective)
++	if err != nil {
++		return nil, errors.New("could not apply mid-conversation reasoning setting")
++	}
++	return updated, nil
++}

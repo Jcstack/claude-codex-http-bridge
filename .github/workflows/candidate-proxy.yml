@@ -64,6 +64,12 @@ jobs:
           go test -timeout 90s -run 'TestCodex|TestBridgeCompact' ./internal/runtime/executor
           cp ../tests/auth_handoff_fixture.go sdk/cliproxy/auth/bridge_handoff_local_test.go
           go test -timeout 60s -run '^TestBridgeAccountHandoff' ./sdk/cliproxy/auth
+          go build -o "../unguarded-${{ matrix.binary }}" ./cmd/server
+          git apply ../upstream/patches/effort-downgrade-guard.patch
+          git apply ../upstream/patches/midconversation-effort.patch
+          cp ../tests/effort_guard_fixture.go sdk/api/handlers/bridge_effort_guard_local_test.go
+          cp ../tests/midconversation_effort_fixture.go sdk/api/handlers/bridge_mid_effort_local_test.go
+          go test -timeout 60s -run '^TestBridge(MarkClaudeRequestedEffort|ProtectClaudeEffortError|MidConversationEffort|MidConversationEffortInvalid)$' ./sdk/api/handlers
           go build -o "../${{ matrix.binary }}" ./cmd/server
           git apply ../upstream/patches/08437a67-gateway-tool-names.patch
           git apply ../upstream/patches/gateway-instance-identity.patch
@@ -88,7 +94,10 @@ jobs:
           python tests/probe_mcp_alias_gateway.py "${{ matrix.binary }}"
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}"
           python tests/probe_effort_capability_tui.py "${{ matrix.binary }}"
-          python tests/probe_effort_rejection_gateway.py "${{ matrix.binary }}"
+          python tests/probe_effort_rejection_gateway.py "unguarded-${{ matrix.binary }}" --expect-fallback
+          python tests/probe_effort_rejection_gateway.py "${{ matrix.binary }}" --expect-blocked
+          python tests/probe_effort_guard_contract.py "${{ matrix.binary }}"
+          python tests/probe_midconversation_effort.py "${{ matrix.binary }}" --expect-midconversation
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}" --family astra
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}" --family luna
           python tests/probe_gateway_tool_names.py "names-${{ matrix.binary }}"

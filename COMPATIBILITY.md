@@ -72,6 +72,21 @@ an error and retained `max` on all three synthetic attempts, even with
 `x-should-retry: false`. That header alone did not eliminate retries in this
 fixture, so any guard must check actual behavior rather than promise one try.
 
+The [Claude effort documentation](https://platform.claude.com/docs/en/build-with-claude/effort#change-effort-mid-conversation)
+also describes a beta system-message directive. It applies immediately after
+new user input or otherwise waits for the next new user input; a user message
+containing only tool results does not activate a pending change. A synthetic
+request to the currently installed translator kept top-level `high` when a
+later directive selected `low`. There is no evidence that the user's actual
+session sent this directive. A local candidate applies the effective level
+without editing message history, preserves a pending directive across
+tool-result-only turns, and returns an explicit error for malformed directives.
+The same candidate intercepts selected pre-header effort rejections so the
+tested client surfaces an error while retaining `max` on its three attempts.
+Synthetic tests check the cache key, translated tool definitions and input
+prefix, but do not prove a real provider cache hit. Cross-platform checks and
+rolling activation are required before treating this candidate as installed.
+
 Claude Code's [native gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery)
 is an additional constraint on dynamic GPT discovery: the documented picker
 accepts discovered IDs containing `claude` or `anthropic`, caches results,

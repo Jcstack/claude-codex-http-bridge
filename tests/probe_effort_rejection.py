@@ -44,9 +44,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
-                for event in (start, failure):
-                    self.wfile.write(("event: " + event["type"] + "\ndata: " + json.dumps(event) + "\n\n").encode())
-                    self.wfile.flush()
+                try:
+                    for event in (start, failure):
+                        self.wfile.write(("event: " + event["type"] + "\ndata: " + json.dumps(event) + "\n\n").encode())
+                        self.wfile.flush()
+                except OSError:
+                    pass
                 return
             payload = json.dumps({"type": "error", "error": {"type": "invalid_request_error", "message": message}}).encode()
             self.send_response(400)

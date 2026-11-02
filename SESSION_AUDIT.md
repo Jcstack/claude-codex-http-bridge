@@ -165,6 +165,19 @@ A shared origin `/v1/responses` request ended within ten seconds and lasted
 correlation only: the logs have no cross-layer identity tying the two records,
 and HTTP 200 alone does not establish a complete stream or compaction quality.
 
+Another read-only sample on 2026-11-02 found an incomplete-stream record in
+the tracked main conversation at 16:06 China time. The shared managed log had
+three incomplete-stream sentinel records near 16:03, 16:04, and 16:06; their
+unique same-log HTTP matches reported 200, 502, and 200, with durations of
+41.034, 60.000, and 58.864 seconds respectively. Shared origin Responses
+access records completed at the same recorded seconds with HTTP 200 and
+durations of 40.449, 60.000, and 58.242 seconds. This timing is correlation,
+not a cross-layer identity or proof that an origin stream completed. After the
+tracked error, the main session recorded 11 deduplicated usage responses and
+no further API-error records in the sampled main or child sessions. Both
+listeners still matched their recorded processes; no restart or retry policy
+change was made. The source of the missing terminal events remains unknown.
+
 As a separate local-only control on 2026-11-02, a disposable TLS ingress,
 candidate translator and fake origin relayed synthetic messages of 100,000,
 1,000,000 and 4,000,000 bytes in 0.058, 0.130 and 0.407 seconds respectively;
