@@ -1,6 +1,6 @@
 """Security and model-selection checks with no live credential or network use."""
 
-from contextlib import nullcontext, redirect_stdout
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from io import BytesIO, StringIO, TextIOWrapper
 import json
 import os
@@ -777,6 +777,43 @@ Model ID: `gpt-6.1-sol`
                 result, _ = launcher.session_settings(base, {}, session, include_user_status_line=False)
             self.assertIn(" | echo explicit", json.loads(result.read_text())["statusLine"]["command"])
 
+    def test_project_and_worktree_statusline_precedence_is_detected_privately(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            root = Path(directory); main = root / "main"; main.mkdir()
+            git = main / ".git"; git.mkdir(); nested = main / "nested"; nested.mkdir()
+            project = nested / ".claude"; project.mkdir()
+            shared = project / "settings.json"
+            shared.write_text('{"permissions":{"deny":["Bash"]}}')
+            self.assertFalse(launcher.project_status_line_may_override([], nested))
+            shared.write_text('{"statusLine":{"type":"command","command":"fixture"}}')
+            self.assertTrue(launcher.project_status_line_may_override([], nested))
+            self.assertFalse(launcher.project_status_line_may_override(["--setting-sources", "user"], nested))
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(project)}, clear=True):
+                self.assertFalse(launcher.project_status_line_may_override([], nested))
+            shared.write_text('{}')
+            local = main / ".claude"; local.mkdir()
+            (local / "settings.local.json").write_text('{"statusLine":{}}')
+            self.assertEqual(launcher.project_status_line_may_override([], nested), os.name != "nt")
+            self.assertFalse(launcher.project_status_line_may_override(["--setting-sources", "user,project"], nested))
+            nested_local = project / "settings.local.json"
+            nested_local.write_text('{"statusLine":{}}')
+            self.assertTrue(launcher.project_status_line_may_override([], nested))
+            nested_local.unlink()
+            worktree = root / "worktree"; worktree.mkdir()
+            gitdir = git / "worktrees" / "fixture"; gitdir.mkdir(parents=True)
+            (gitdir / "commondir").write_text('../..')
+            (worktree / ".git").write_text('gitdir: ' + str(gitdir))
+            self.assertEqual(launcher.project_status_line_may_override([], worktree), os.name != "nt")
+            (local / "settings.local.json").unlink()
+            self.assertFalse(launcher.project_status_line_may_override([], worktree))
+            shared.write_text('{broken')
+            self.assertTrue(launcher.project_status_line_may_override([], nested))
+            shared.write_bytes(b'x' * (launcher.SETTINGS_LIMIT + 1))
+            self.assertTrue(launcher.project_status_line_may_override([], nested))
+            if hasattr(os, "mkfifo"):
+                shared.unlink(); os.mkfifo(shared)
+                self.assertTrue(launcher.project_status_line_may_override([], nested))
+
     def test_launcher_passes_statusline_scope_to_session_settings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); runtime = root / "runtime"; runtime.mkdir()
@@ -791,6 +828,7 @@ Model ID: `gpt-6.1-sol`
                         patch.object(launcher, "ensure_service", return_value=(runtime, {"port": 12345}, False)), \
                         patch.object(launcher, "service_environment", return_value={}), \
                         patch.object(launcher, "helper_output", return_value=prepared), \
+                        patch.object(launcher, "project_status_line_may_override", return_value=False), \
                         patch.object(launcher, "session_settings", side_effect=RuntimeError("fixture stop")) as session:
                     with self.assertRaisesRegex(RuntimeError, "fixture stop"):
                         launcher.run_session("claude", "fixture-model", arguments, "fixture-client", route="api")
@@ -810,6 +848,19 @@ Model ID: `gpt-6.1-sol`
                     launcher.run_session("claude", "fixture-model", ["--settings", "{}", "--restricted"],
                                          "fixture-client", route="api")
                 self.assertIs(session.call_args.kwargs["include_user_status_line"], False)
+
+            with patch.dict(os.environ, environment, clear=True), patch.object(launcher, "ROOT", root), \
+                    patch.object(launcher, "ensure_service", return_value=(runtime, state, False)), \
+                    patch.object(launcher, "service_environment", return_value={}), \
+                    patch.object(launcher, "helper_output", return_value=prepared), \
+                    patch.object(launcher, "project_status_line_may_override", return_value=True), \
+                    patch.object(launcher, "configured_status_line", return_value={"type":"command", "command":"fixture"}), \
+                    patch.object(launcher, "session_settings", side_effect=RuntimeError("fixture stop")) as session, \
+                    redirect_stderr(StringIO()) as error:
+                with self.assertRaisesRegex(RuntimeError, "fixture stop"):
+                    launcher.run_session("claude", "fixture-model", [], "fixture-client", route="api")
+                self.assertIs(session.call_args.kwargs["include_user_status_line"], False)
+                self.assertIn("context correction", error.getvalue())
 
     def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
         name = "gpt-6-astra"

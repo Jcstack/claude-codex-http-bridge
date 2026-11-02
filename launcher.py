@@ -261,11 +261,11 @@ def configured_status_line() -> dict | None:
     return None
 
 
-def user_status_line_allowed(arguments: list[str]) -> bool:
-    """Do not promote a disabled user setting into command-line scope."""
+def status_line_setting_sources(arguments: list[str]) -> set[str]:
+    """Determine the explicitly requested local setting scopes."""
     if any(os.environ.get(name) == "1" for name in
            ("CLAUDE_CODE_RESTRICTED", "CLAUDE_CODE_SAFE_MODE", "CLAUDE_CODE_SIMPLE")):
-        return False
+        return set()
     selected_sources = None
     index = 0
     while index < len(arguments):
@@ -273,10 +273,10 @@ def user_status_line_allowed(arguments: list[str]) -> bool:
         if value == "--":
             break
         if value in ("--restricted", "--safe-mode", "--bare"):
-            return False
+            return set()
         if value == "--setting-sources":
             if index + 1 >= len(arguments) or arguments[index + 1].startswith("-"):
-                return False
+                return set()
             selected_sources = arguments[index + 1]
             index += 2
             continue
@@ -284,8 +284,97 @@ def user_status_line_allowed(arguments: list[str]) -> bool:
             selected_sources = value.partition("=")[2]
         index += 1
     if selected_sources is None:
+        return {"user", "project", "local"}
+    return {part.strip() for part in selected_sources.split(",") if part.strip()}
+
+
+def user_status_line_allowed(arguments: list[str]) -> bool:
+    """Do not promote a disabled user setting into command-line scope."""
+    return "user" in status_line_setting_sources(arguments)
+
+
+def bounded_regular_bytes(path: Path, limit: int) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise ValueError("Invalid regular file")
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("File exceeds limit")
+    return data
+
+
+def settings_may_define_status_line(path: Path) -> bool:
+    """Read only bounded JSON; uncertainty leaves precedence to Claude."""
+    try:
+        data = bounded_regular_bytes(path, SETTINGS_LIMIT)
+        value = json.loads(data.decode("utf-8-sig"))
+        return not isinstance(value, dict) or "statusLine" in value
+    except FileNotFoundError:
+        return False
+    except (OSError, UnicodeError, ValueError, RecursionError):
         return True
-    return "user" in {part.strip() for part in selected_sources.split(",") if part.strip()}
+
+
+def local_settings_roots(workspace: Path) -> tuple[set[Path], bool]:
+    """Find ordinary repository and linked-worktree local settings roots."""
+    roots = {workspace}
+    # Claude keeps project-local settings at the starting directory on Windows.
+    if os.name == "nt":
+        return roots, False
+    for directory in (workspace, *workspace.parents):
+        marker = directory / ".git"
+        try:
+            if marker.is_dir():
+                roots.add(directory)
+                break
+            if not marker.is_file():
+                continue
+            roots.add(directory)
+            content = bounded_regular_bytes(marker, 4096).decode("utf-8").strip()
+            if not content.startswith("gitdir: "):
+                return roots, True
+            location = Path(content.removeprefix("gitdir: "))
+            gitdir = (location if location.is_absolute() else directory / location).resolve()
+            common_file = gitdir / "commondir"
+            if common_file.exists():
+                common_text = bounded_regular_bytes(common_file, 4096).decode("utf-8").strip()
+                common = Path(common_text)
+                common = (common if common.is_absolute() else gitdir / common).resolve()
+                if not common_text or common.name != ".git":
+                    return roots, True
+                roots.add(common.parent)
+            break
+        except (OSError, UnicodeError, RuntimeError, ValueError):
+            return roots, True
+    return roots, False
+
+
+def project_status_line_may_override(arguments: list[str], workspace: Path) -> bool:
+    sources = status_line_setting_sources(arguments)
+    if "project" in sources:
+        shared = workspace / ".claude" / "settings.json"
+        locations = os.environ.get("CLAUDE_CONFIG_DIR")
+        user_roots = ([Path(part) for part in locations.split(os.pathsep) if part] if locations
+                      else [Path.home() / ".claude"])
+        same_as_user = False
+        for root in user_roots:
+            try:
+                if os.path.samefile(shared, root / "settings.json"):
+                    same_as_user = True
+                    break
+            except OSError:
+                pass
+        if not same_as_user and settings_may_define_status_line(shared):
+            return True
+    if "local" in sources:
+        roots, uncertain = local_settings_roots(workspace)
+        if uncertain:
+            return True
+        return any(settings_may_define_status_line(root / ".claude" / "settings.local.json") for root in roots)
+    return False
 
 
 def private_json(path: Path, value: dict) -> None:
@@ -845,6 +934,14 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
             selected = custom_settings["model"]
             explicit_model = True
     include_user_status_line = user_status_line_allowed(claude_args)
+    if (mode == "claude" and include_user_status_line and
+        (custom_settings is None or "statusLine" not in custom_settings) and
+        os.environ.get("CLAUDE_CODEX_STATUSLINE_ADAPTER") != "0" and
+        project_status_line_may_override(claude_args, Path.cwd())):
+        if configured_status_line() is not None:
+            print("Project/local status-line precedence cannot be safely wrapped; Claude selects the "
+                  "status line without bridge context correction for this launch.", file=sys.stderr)
+        include_user_status_line = False
     runtime, state, created = ensure_service(route=route)
     environment = service_environment(state, runtime, route)
     if mode == "models":

@@ -255,3 +255,21 @@ Five paired local runs with fake origins and highly repetitive 100 KB, 1 MB and
 seconds for the previous/candidate gateways respectively. These small
 synthetic samples do not measure provider latency, prove an improvement, or
 cover actual PID reuse, all architectures, or live-session ingress migration.
+
+## Status-line settings scopes (2026-11-02)
+
+[Claude's settings documentation](https://code.claude.com/docs/en/settings)
+describes command-line, project-local, project and user precedence, including
+special project-local placement for worktrees. An upstream [issue report](https://github.com/anthropics/claude-code/issues/80791)
+describes a profile's ancestor `.claude` directory being treated as project
+scope. A disposable non-Git parent-directory fixture using Claude Code 2.1.316
+did not reproduce that report; it does not duplicate every condition in the
+report and is not evidence that the upstream issue is resolved.
+
+Our separate isolated fixture did reproduce a bridge-specific precedence issue:
+the generated command-line status line overrode project and local settings.
+The startup candidate leaves detected or uncertain cases to the native client,
+with no bridge context correction for that status line. Local synthetic tests
+covered ordinary project/local files and a real linked Git worktree with its
+local setting in the main checkout. Mid-session file changes, `/cd`, unusual Git
+layouts, authenticated Windows interaction and arbitrary plugins remain open.

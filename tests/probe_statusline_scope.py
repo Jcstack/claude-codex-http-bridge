@@ -38,7 +38,24 @@ def run_case(claude, scope, wrap, *, legacy=False):
 
     with tempfile.TemporaryDirectory(prefix="bridge-status-scope-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
         root = Path(temporary).resolve(); work = root / "work"; config = root / "config"; ui = root / "ui"
-        for directory in (work, config, ui): directory.mkdir(mode=0o700)
+        for directory in (config, ui): directory.mkdir(mode=0o700)
+        main_worktree = None
+        if scope == "worktree_override":
+            git = shutil.which("git")
+            if not git: raise RuntimeError("Git is required for the synthetic worktree")
+            main_worktree = root / "main"; main_worktree.mkdir(mode=0o700)
+            template = root / "empty-template"; template.mkdir(mode=0o700)
+            git_env = isolated_environment(root)
+            git_env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                           GIT_TEMPLATE_DIR=str(template), GIT_TERMINAL_PROMPT="0")
+            git_prefix = [git, "-c", "core.hooksPath=" + os.devnull, "-c", "commit.gpgsign=false"]
+            for arguments in (["init", "--quiet", str(main_worktree)],
+                              ["-C", str(main_worktree), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                               "commit", "--quiet", "--allow-empty", "-m", "fixture"],
+                              ["-C", str(main_worktree), "worktree", "add", "--quiet", "--detach", str(work)]):
+                subprocess.run([*git_prefix, *arguments], env=git_env, capture_output=True, check=True, timeout=20)
+        else:
+            work.mkdir(mode=0o700)
         adapter = root / "adapter"; adapter.mkdir(mode=0o700)
         source = Path(launcher.__file__).resolve().parent
         for name in ("statusline_adapter.py", "session_models.py", "codex_usage.py", "accounts.py",
@@ -47,11 +64,18 @@ def run_case(claude, scope, wrap, *, legacy=False):
         (config / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True,
             "projects": {str(work): {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
         marker = root / "statusline-ran"; explicit_marker = root / "explicit-statusline-ran"
+        project_marker = root / "project-statusline-ran"
         recorder = root / "statusline.py"
         recorder.write_text("import pathlib,sys\nsys.stdin.read()\npathlib.Path(sys.argv[1]).write_text('fixture')\nprint('fixture')\n",
                             encoding="utf-8")
         status = {"type": "command", "command": shlex.join([sys.executable, str(recorder), str(marker)])}
         (config / "settings.json").write_text(json.dumps({"statusLine": status}), encoding="utf-8")
+        if scope in ("project_override", "local_override", "parent_override", "worktree_override"):
+            project_root = root if scope == "parent_override" else main_worktree if scope == "worktree_override" else work
+            project_config = project_root / ".claude"; project_config.mkdir()
+            name = "settings.local.json" if scope in ("local_override", "worktree_override") else "settings.json"
+            project_status = {"type": "command", "command": shlex.join([sys.executable, str(recorder), str(project_marker)])}
+            (project_config / name).write_text(json.dumps({"statusLine": project_status}), encoding="utf-8")
         base = root / "base.json"
         initial = {"modelPicker": {"options": [{"model": MODEL, "label": "Fixture",
             "behavesAs": "claude-sonnet-5-5"}], "replaceBuiltInOptions": True}}
@@ -68,7 +92,8 @@ def run_case(claude, scope, wrap, *, legacy=False):
                  ["--setting-sources", scope] if scope in ("project", "user") else [])
         if scope == "restricted_env": env["CLAUDE_CODE_RESTRICTED"] = "1"
         with patch.dict(os.environ, env, clear=True), patch.object(launcher, "ROOT", adapter):
-            allowed = True if legacy else launcher.user_status_line_allowed(flags)
+            allowed = (True if legacy else launcher.user_status_line_allowed(flags)
+                       and not launcher.project_status_line_may_override(flags, work))
             settings, _ = (launcher.session_settings(base, {MODEL: 500000}, ui, route="api",
                                                      include_user_status_line=allowed) if wrap else (base, []))
         command = [claude, *flags, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
@@ -97,7 +122,8 @@ def run_case(claude, scope, wrap, *, legacy=False):
                 raise RuntimeError("Synthetic client did not reach its fake service")
             collect(3)
             return {"scope": scope, "bridge_wrapped": wrap, "fake_request_seen": True,
-                    "global_statusline_ran": marker.exists(), "explicit_statusline_ran": explicit_marker.exists()}
+                    "global_statusline_ran": marker.exists(), "explicit_statusline_ran": explicit_marker.exists(),
+                    "project_statusline_ran": project_marker.exists()}
         finally:
             cleanup_ok = True
             if process is not None and process.poll() is None:
@@ -117,17 +143,27 @@ def main():
     expectations = parser.add_mutually_exclusive_group()
     expectations.add_argument("--expect-promotion", action="store_true", help="Exercise the earlier unconditional wrapper")
     expectations.add_argument("--expect-isolated", action="store_true", help="Require scoped user settings")
+    expectations.add_argument("--expect-project-promotion", action="store_true", help="Observe project/local status-line precedence")
+    expectations.add_argument("--expect-project-respected", action="store_true", help="Require native project/local precedence")
+    expectations.add_argument("--observe-parent-scope", action="store_true", help="Observe parent project-settings discovery")
+    expectations.add_argument("--observe-worktree-scope", action="store_true", help="Observe linked-worktree local settings")
+    expectations.add_argument("--expect-worktree-respected", action="store_true", help="Require linked-worktree local precedence")
     args = parser.parse_args()
     if os.name == "nt":
         print(json.dumps({"synthetic_only": True, "skipped": "Windows interactive console not covered"})); return
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude: raise RuntimeError("The locked client is required")
-    scopes = ("restricted", "project", "normal") if args.expect_promotion else (
-        "restricted", "project", "user", "restricted_explicit", "restricted_env", "normal")
-    results = [run_case(claude, scope, wrap, legacy=args.expect_promotion) for scope in scopes for wrap in (False, True)]
+    scopes = (("restricted", "project", "normal") if args.expect_promotion else
+              ("project_override", "local_override") if args.expect_project_promotion or args.expect_project_respected else
+              ("parent_override",) if args.observe_parent_scope else
+              ("worktree_override",) if args.observe_worktree_scope or args.expect_worktree_respected else
+              ("restricted", "project", "user", "restricted_explicit", "restricted_env", "normal"))
+    results = [run_case(claude, scope, wrap, legacy=args.expect_promotion or args.expect_project_promotion)
+               for scope in scopes for wrap in (False, True)]
     print(json.dumps({"synthetic_only": True, "cases": results}, sort_keys=True))
     values = {(row["scope"], row["bridge_wrapped"]): row["global_statusline_ran"] for row in results}
-    if not (not values[("restricted", False)] and not values[("project", False)]
+    if not (args.expect_project_promotion or args.expect_project_respected or args.observe_parent_scope
+            or args.observe_worktree_scope or args.expect_worktree_respected) and not (not values[("restricted", False)] and not values[("project", False)]
             and values[("normal", False)] and values[("normal", True)]):
         raise RuntimeError("Synthetic status-line source controls did not hold")
     if args.expect_promotion and not (values[("restricted", True)] and values[("project", True)]):
@@ -140,6 +176,21 @@ def main():
         explicit = [row for row in results if row["scope"] == "restricted_explicit"]
         if not all(row["explicit_statusline_ran"] and not row["global_statusline_ran"] for row in explicit):
             raise RuntimeError("Explicit synthetic launch status line was not preserved")
+    if args.expect_project_promotion:
+        for scope in scopes:
+            native = next(row for row in results if row["scope"] == scope and not row["bridge_wrapped"])
+            bridge = next(row for row in results if row["scope"] == scope and row["bridge_wrapped"])
+            if not (native["project_statusline_ran"] and not native["global_statusline_ran"]
+                    and bridge["global_statusline_ran"] and not bridge["project_statusline_ran"]):
+                raise RuntimeError("Synthetic project status-line precedence changed")
+    if args.expect_project_respected:
+        for scope in scopes:
+            for row in (row for row in results if row["scope"] == scope):
+                if not (row["project_statusline_ran"] and not row["global_statusline_ran"]):
+                    raise RuntimeError("Synthetic project status-line precedence was not preserved")
+    if args.expect_worktree_respected:
+        if not all(row["project_statusline_ran"] and not row["global_statusline_ran"] for row in results):
+            raise RuntimeError("Synthetic linked-worktree status-line precedence was not preserved")
 
 
 if __name__ == "__main__":

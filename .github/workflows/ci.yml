@@ -72,6 +72,12 @@ jobs:
       - name: Verify status-line settings scope in an isolated terminal
         if: runner.os != 'Windows'
         run: python tests/probe_statusline_scope.py --expect-isolated
+      - name: Verify project and local status-line precedence
+        if: runner.os != 'Windows'
+        run: python tests/probe_statusline_scope.py --expect-project-respected
+      - name: Verify linked-worktree status-line precedence
+        if: runner.os != 'Windows'
+        run: python tests/probe_statusline_scope.py --expect-worktree-respected
       - name: Verify composed custom settings with a fake gateway
         run: python tests/probe_composed_settings.py
       - name: Verify composed settings in bare mode with a fake gateway

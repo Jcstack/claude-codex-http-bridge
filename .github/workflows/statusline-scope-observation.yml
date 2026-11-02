@@ -34,3 +34,9 @@ jobs:
         run: python tests/probe_statusline_scope.py --expect-promotion
       - name: Check scoped and explicit status lines with the real client
         run: python tests/probe_statusline_scope.py --expect-isolated
+      - name: Reproduce the earlier synthetic project and local override
+        run: python tests/probe_statusline_scope.py --expect-project-promotion
+      - name: Check project and local status-line precedence
+        run: python tests/probe_statusline_scope.py --expect-project-respected
+      - name: Check linked-worktree local status-line precedence
+        run: python tests/probe_statusline_scope.py --expect-worktree-respected
