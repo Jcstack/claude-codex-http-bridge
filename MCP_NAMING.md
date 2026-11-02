@@ -172,6 +172,16 @@ plugin's changed definition. A new conversation worked for the synthetic
 control; actual plugin behavior still needs verification. A stable cache prefix
 in the stale case is not evidence of a correct tool definition.
 
+The disposable synthetic session contained one `deferred_tools_record` with
+the old definition before and after resume. In a separate controlled run,
+changing the known synthetic description in that temporary record before
+resume made the resumed request expose the updated description. This shows
+that the record affects this fixture's outcome; it does not establish a safe
+real-session repair. The experiment checks that it owns the temporary session
+and never opens or modifies a user's transcript. Rewriting real conversation
+history could affect integrity, permissions, context and cache identity, and
+is not offered or recommended as a mitigation.
+
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,
 real plugins, MCP protocol changes, and Windows. The test adapter does not

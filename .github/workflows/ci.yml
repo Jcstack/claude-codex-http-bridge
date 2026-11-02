@@ -111,6 +111,8 @@ jobs:
         run: python tests/probe_dynamic_toolsearch.py --description-change --fresh-description
       - name: Observe a changed tool description in a live and resumed synthetic session
         run: python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation
+      - name: Test a description change only in a disposable session record
+        run: python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --repair-synthetic-record
       - name: Check tool effects across interrupted Messages streams
         run: python tests/probe_claude_stream_safety.py
   gateway:

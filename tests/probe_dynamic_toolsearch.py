@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import uuid
 
 from claude_fixture import isolated_environment
 from live_support import temporary_translator
@@ -55,6 +56,103 @@ def description_flags(body, alias, responses):
         tools = body.get("tools", [])
     descriptions = [tool.get("description") for tool in tools if isinstance(tool, dict) and tool.get("name") == alias]
     return "Synthetic fixture" in descriptions, UPDATED_DESCRIPTION in descriptions
+
+
+def synthetic_deferred_records(config, session_id):
+    """Summarize only this fixture's disposable session records, never their contents."""
+    try:
+        if str(uuid.UUID(session_id)) != session_id.lower():
+            return {"available": False}
+    except (ValueError, TypeError, AttributeError):
+        return {"available": False}
+    paths = list((config / "projects").glob("*/" + session_id + ".jsonl"))
+    if len(paths) != 1 or not paths[0].is_file() or paths[0].stat().st_size > 16 * 1024 * 1024:
+        return {"available": False}
+    records = []
+
+    def visit(value):
+        if isinstance(value, dict):
+            if value.get("type") == "deferred_tools_record":
+                records.append(value)
+                return
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    with paths[0].open(encoding="utf-8") as handle:
+        for line in handle:
+            if len(line) > 2 * 1024 * 1024:
+                return {"available": False}
+            try:
+                visit(json.loads(line))
+            except ValueError:
+                return {"available": False}
+    def contains_named_description(value, description):
+        if isinstance(value, dict):
+            if (ALIASES[0] in (value.get("name"), value.get("tool_name"), value.get("toolName"))
+                    and value.get("description") == description):
+                return True
+            return any(contains_named_description(child, description) for child in value.values())
+        return isinstance(value, list) and any(contains_named_description(child, description) for child in value)
+
+    return {"available": True, "record_count": len(records),
+            "named_old_description_in_record": any(contains_named_description(record, "Synthetic fixture") for record in records),
+            "named_updated_description_in_record": any(contains_named_description(record, UPDATED_DESCRIPTION) for record in records)}
+
+
+def rewrite_synthetic_deferred_record(config, session_id):
+    """Change one known description in this probe's own disposable session only."""
+    if not config.parent.name.startswith("bridge-mcp-toolsearch-"):
+        raise RuntimeError("Refusing to modify a non-fixture session")
+    try:
+        if str(uuid.UUID(session_id)) != session_id.lower():
+            raise ValueError
+    except (ValueError, TypeError, AttributeError):
+        raise RuntimeError("Invalid synthetic session") from None
+    paths = list((config / "projects").glob("*/" + session_id + ".jsonl"))
+    if (len(paths) != 1 or config.is_symlink() or (config / "projects").is_symlink()
+            or paths[0].parent.is_symlink() or paths[0].is_symlink()
+            or not paths[0].resolve().is_relative_to(config.parent.resolve())
+            or paths[0].stat().st_size > 16 * 1024 * 1024):
+        raise RuntimeError("Synthetic session is unavailable")
+    changed = 0
+
+    def edit(value, inside_record=False):
+        nonlocal changed
+        if isinstance(value, dict):
+            inside_record = inside_record or value.get("type") == "deferred_tools_record"
+            if (inside_record and ALIASES[0] in (value.get("name"), value.get("tool_name"), value.get("toolName"))
+                    and value.get("description") == "Synthetic fixture"):
+                value["description"] = UPDATED_DESCRIPTION
+                changed += 1
+            for child in value.values():
+                edit(child, inside_record)
+        elif isinstance(value, list):
+            for child in value:
+                edit(child, inside_record)
+
+    lines = []
+    with paths[0].open(encoding="utf-8") as handle:
+        for line in handle:
+            if len(line) > 2 * 1024 * 1024:
+                raise RuntimeError("Synthetic session record is too large")
+            value = json.loads(line)
+            before = changed
+            edit(value)
+            lines.append(json.dumps(value, ensure_ascii=True, separators=(",", ":")) + "\n" if changed != before else line)
+    if changed != 1:
+        raise RuntimeError("Synthetic description record was not unique")
+    temporary = paths[0].with_name(".synthetic-record-update")
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.writelines(lines)
+        os.replace(temporary, paths[0])
+    finally:
+        temporary.unlink(missing_ok=True)
+    return True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -198,6 +296,7 @@ def main():
     parser.add_argument("--description-change", action="store_true")
     parser.add_argument("--fresh-description", action="store_true")
     parser.add_argument("--resume-observation", action="store_true")
+    parser.add_argument("--repair-synthetic-record", action="store_true")
     args = parser.parse_args()
     if args.description_change and args.natural_query:
         raise RuntimeError("The synthetic description observation needs the exact selector")
@@ -205,6 +304,8 @@ def main():
         raise RuntimeError("The fresh-description control cannot hold the initial list")
     if args.resume_observation and (not args.description_change or args.fresh_description):
         raise RuntimeError("The resume control requires the description-change scenario")
+    if args.repair_synthetic_record and not args.resume_observation:
+        raise RuntimeError("The synthetic record experiment requires the resume control")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("The locked Claude fixture is required")
@@ -278,6 +379,8 @@ def main():
                 initial["hold_timed_out"] = Path(str(marker) + ".hold-timeout").exists()
                 resumed = None
                 if args.resume_observation and sessions:
+                    initial_records = synthetic_deferred_records(config, sessions[-1])
+                    rewritten = rewrite_synthetic_deferred_record(config, sessions[-1]) if args.repair_synthetic_record else False
                     for path in (server.refresh_marker, Path(str(marker) + ".forwarded")):
                         path.unlink(missing_ok=True)
                     mcp.write_text(json.dumps({"mcpServers": {"gateway": {"command": sys.executable,
@@ -292,7 +395,10 @@ def main():
                         "current_list_forwarded": Path(str(marker) + ".forwarded").exists(),
                         "search_result_seen": server.old_result_seen, "alias_discovered": server.old_reference,
                         "old_description_seen": server.old_description_seen,
-                        "updated_description_seen": server.updated_description_seen}
+                        "updated_description_seen": server.updated_description_seen,
+                        "synthetic_record_rewritten": rewritten,
+                        "initial_deferred_records": initial_records,
+                        "resumed_deferred_records": synthetic_deferred_records(config, sessions[-1])}
             result = {"synthetic_only": True, "test_only_transport": True,
                 "through_translator": server.responses,
                 "discovery_form": "responses_additional_tools" if server.responses else "messages_tool_reference",
@@ -359,6 +465,10 @@ def main():
                     and resumed["search_result_seen"] and resumed["alias_discovered"]
                     and (resumed["old_description_seen"] or resumed["updated_description_seen"])):
                 raise RuntimeError("Synthetic resumed-session observation was incomplete")
+            if args.repair_synthetic_record and not (resumed and resumed["synthetic_record_rewritten"]
+                    and resumed["updated_description_seen"]
+                    and resumed["resumed_deferred_records"].get("named_updated_description_in_record") is True):
+                raise RuntimeError("Synthetic record-change control did not expose the updated description")
             if args.require_prefix and not all(result.get(field) is True for field in (
                     "provider_cache_not_tested", "cache_key_stable", "all_tools_identical",
                     "all_instructions_identical", "all_input_transitions_append_only", "first_and_last_tools_identical",
