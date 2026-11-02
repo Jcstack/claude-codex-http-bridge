@@ -1,0 +1,33 @@
+name: isolated-mcp-definition-gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the integrity-locked client without scripts
+        run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+      - name: Select the pinned native client
+        run: python tests/claude_fixture.py
+      - name: Verify private offline comparison and launcher dispatch
+        run: python -m unittest tests.test_mcp_definition_audit tests.test_bridge.BridgeTests.test_mcp_definition_dispatch_does_not_start_or_verify_a_service -q
+      - name: Compare a retained synthetic definition from a real client
+        run: python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --audit-synthetic

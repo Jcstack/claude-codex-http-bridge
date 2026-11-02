@@ -4,10 +4,13 @@ from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
 import mcp_definition_audit as audit
+from tests.claude_fixture import isolated_environment
 
 
 NAME = "mcp__fixture__lookup"
@@ -120,6 +123,21 @@ class DefinitionAuditTests(unittest.TestCase):
             self.inventory.write_text('{"tools": []}', encoding="utf-8")
             with self.assertRaises(ValueError):
                 audit.unchanged(handle, before)
+
+    def test_real_launcher_dispatch_reads_only_synthetic_inputs(self):
+        self.write([record([tool()])], [tool("SYNTHETIC_CHANGED")])
+        bridge = self.root / "unused-bridge"
+        env = isolated_environment(self.root)
+        env["CLAUDE_CODEX_BRIDGE_HOME"] = str(bridge)
+        launcher = Path(__file__).resolve().parents[1] / "launcher.py"
+        result = subprocess.run([sys.executable, str(launcher), "mcp-definitions", "--session-file", str(self.session),
+                                 "--inventory", str(self.inventory)], cwd=self.root, env=env,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["description_differences"], 1)
+        self.assertNotIn(PRIVATE, result.stdout + result.stderr)
+        self.assertNotIn(NAME, result.stdout + result.stderr)
+        self.assertFalse(bridge.exists())
 
 
 if __name__ == "__main__":
