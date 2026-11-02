@@ -24,6 +24,66 @@ def write_records(path, records):
 
 
 class SessionAuditTests(unittest.TestCase):
+    def test_counter_patterns_are_bounded_metadata_not_duplicate_detection(self):
+        timeline = audit.CacheCounterPatterns()
+        def add(ident, value, model="PRIVATE_MODEL"):
+            timeline.add({"id": ident, "model": model, "usage": {"cache_read_input_tokens": value}})
+        add("PRIVATE_A", 10000)
+        add("PRIVATE_A", 9000)
+        add("PRIVATE_B", 20000)
+        add("PRIVATE_C", 20050)
+        add("PRIVATE_D", 19000)
+        add("PRIVATE_E", 22000)
+        timeline.compact_boundary()
+        add("PRIVATE_F", 21000)
+        add("PRIVATE_G", 42000, "PRIVATE_OTHER_MODEL")
+        timeline.add({"id": "PRIVATE_INVALID", "usage": {"cache_read_input_tokens": True}})
+        timeline.add({"usage": {"cache_read_input_tokens": 123}})
+        report = timeline.report()
+        self.assertEqual(report["responses_with_valid_cache_read"], 7)
+        self.assertEqual(report["near_double_pairs"], 2)
+        self.assertEqual(report["same_recorded_model_near_double_pairs"], 1)
+        self.assertEqual(report["near_double_pairs_with_three_similar_followups"], 1)
+        self.assertEqual(report["usage_records_without_valid_cache_read"], 1)
+        self.assertEqual(report["records_without_valid_identity"], 1)
+        self.assertIn("do not prove duplicated input", report["limits"])
+        self.assertNotIn("PRIVATE", json.dumps(report))
+
+    def test_counter_pattern_ambiguous_epoch_model_and_identity_limit(self):
+        timeline = audit.CacheCounterPatterns()
+        def add(ident, value, model):
+            timeline.add({"id": ident, "model": model, "usage": {"cache_read_input_tokens": value}})
+        with patch.object(audit, "IDENTITY_LIMIT", 2):
+            add("one", 10000, "model-a")
+            add("two", 20000, "model-a")
+            add("two", 20000, "model-b")
+            timeline.compact_boundary()
+            add("one", 10000, "model-a")
+            add("three", 40000, "model-a")
+        report = timeline.report()
+        self.assertEqual(report["ambiguous_epoch_responses"], 1)
+        self.assertEqual(report["ambiguous_model_responses"], 1)
+        self.assertEqual(report["omitted_records_at_limit"], 1)
+        self.assertEqual(report["same_recorded_model_near_double_pairs"], 0)
+
+    def test_scan_measures_only_retained_schema_sizes_without_contents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "PRIVATE_SESSION.jsonl"
+            schema = {"type": "object", "properties": {"secret": {"description": "PRIVATE_SECRET"}}}
+            write_records(path, [{"type": "attachment", "attachment": {"type": "deferred_tools_record", "entries": [
+                {"name": "mcp__PRIVATE__tool", "input_schema": schema}, {"name": "PRIVATE_INCOMPLETE"}]}},
+                {"type": "attachment", "attachment": {"type": "deferred_tools_record", "entries": "invalid"}}])
+            result = audit.scan(path, None, audit.Usage())
+            measured = result["retained_deferred_schema_sizes"]
+            self.assertEqual(measured["deferred_records"], 2)
+            self.assertEqual(measured["entries"], 2)
+            self.assertEqual(measured["entries_with_input_schema"], 1)
+            self.assertEqual(measured["unsupported_or_incomplete"], 2)
+            self.assertEqual(measured["largest_input_schema_utf8_bytes"],
+                             len(json.dumps(schema, ensure_ascii=False, separators=(",", ":")).encode("utf-8")))
+            self.assertIn("not a current server inventory", measured["limits"])
+            self.assertNotIn("PRIVATE", json.dumps(result))
+
     def test_child_coverage_cross_file_usage_dedup_and_allowlisted_labels(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

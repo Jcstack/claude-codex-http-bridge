@@ -23,6 +23,7 @@ IDENTITY_LIMIT = 100_000
 CHILD_LIMIT = 256
 MODE_LIMIT = 128
 TOOL_ERROR_TEXT_LIMIT = 8192
+COUNTER_BASELINE_MIN = 10_000
 INPUT_FIELDS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 USAGE_FIELDS = (*INPUT_FIELDS, "output_tokens")
 EFFORTS = {"none", "low", "medium", "high", "xhigh", "max", "ultra"}
@@ -159,6 +160,119 @@ class Usage:
                 "usage_records_without_valid_identity": self.invalid_identity_records}
 
 
+class CacheCounterPatterns:
+    """Count bounded usage-counter patterns, not duplicate request bodies."""
+
+    def __init__(self):
+        self.rows = {}
+        self.epoch = 0
+        self.omitted = 0
+        self.invalid_identity = 0
+        self.missing_or_invalid_counter = 0
+
+    def compact_boundary(self):
+        self.epoch += 1
+
+    def add(self, message: dict):
+        usage = message.get("usage")
+        if not isinstance(usage, dict):
+            return
+        value = usage.get("cache_read_input_tokens")
+        if type(value) is not int or not 0 <= value <= 10**12:
+            self.missing_or_invalid_counter += 1
+            return
+        key = identity(message.get("id"))
+        if key is None:
+            self.invalid_identity += 1
+            return
+        if key not in self.rows and len(self.rows) >= IDENTITY_LIMIT:
+            self.omitted += 1
+            return
+        model = identity(message.get("model"))
+        row = self.rows.setdefault(key, {"read": value, "epoch": self.epoch, "model": model,
+                                         "ambiguous_epoch": False, "ambiguous_model": False})
+        row["read"] = max(row["read"], value)
+        if row["epoch"] != self.epoch:
+            row["ambiguous_epoch"] = True
+        if model is not None and row["model"] is not None and row["model"] != model:
+            row["ambiguous_model"] = True
+        elif row["model"] is None and not row["ambiguous_model"]:
+            row["model"] = model
+
+    def report(self):
+        rows = list(self.rows.values())
+        pairs = same_model = near_double = same_model_near_double = followups = 0
+        for index in range(1, len(rows)):
+            before, after = rows[index - 1], rows[index]
+            if (before["ambiguous_epoch"] or after["ambiguous_epoch"] or before["epoch"] != after["epoch"]
+                    or before["read"] < COUNTER_BASELINE_MIN):
+                continue
+            pairs += 1
+            near = 18 * before["read"] <= 10 * after["read"] <= 22 * before["read"]
+            near_double += int(near)
+            matching = (not before["ambiguous_model"] and not after["ambiguous_model"]
+                        and before["model"] is not None and before["model"] == after["model"])
+            same_model += int(matching)
+            same_model_near_double += int(matching and near)
+            if not (near and matching):
+                continue
+            next_rows = rows[index + 1:index + 4]
+            if len(next_rows) == 3 and all(
+                    not row["ambiguous_epoch"] and not row["ambiguous_model"]
+                    and row["epoch"] == after["epoch"] and row["model"] == after["model"]
+                    and 9 * after["read"] <= 10 * row["read"] <= 11 * after["read"] for row in next_rows):
+                followups += 1
+        return {"responses_with_valid_cache_read": len(rows), "minimum_previous_cache_read": COUNTER_BASELINE_MIN,
+                "near_double_ratio_range": [1.8, 2.2], "similar_followup_ratio_range": [0.9, 1.1],
+                "ordered_pairs_without_recorded_compaction": pairs, "same_recorded_model_pairs": same_model,
+                "near_double_pairs": near_double, "same_recorded_model_near_double_pairs": same_model_near_double,
+                "near_double_pairs_with_three_similar_followups": followups,
+                "ambiguous_epoch_responses": sum(row["ambiguous_epoch"] for row in rows),
+                "ambiguous_model_responses": sum(row["ambiguous_model"] for row in rows),
+                "omitted_records_at_limit": self.omitted, "records_without_valid_identity": self.invalid_identity,
+                "usage_records_without_valid_cache_read": self.missing_or_invalid_counter,
+                "limits": "Counter patterns do not prove duplicated input, provider tokenization, root cause, or complete request order. "
+                          "Adjacent valid counters can skip responses with missing data; normal context growth, tool changes, "
+                          "unrecorded boundaries and concurrent work can produce similar ratios."}
+
+
+class DeferredSchemaSizes:
+    """Measure retained JSON schemas only; do not return their contents or names."""
+
+    def __init__(self):
+        self.records = self.entries = self.schemas = self.incomplete = self.max_bytes = 0
+
+    def add(self, record):
+        attachment = record.get("attachment") if record.get("type") == "attachment" else None
+        if not isinstance(attachment, dict) or attachment.get("type") != "deferred_tools_record":
+            return
+        self.records += 1
+        entries = attachment.get("entries")
+        if not isinstance(entries, list):
+            self.incomplete += 1
+            return
+        for entry in entries:
+            self.entries += 1
+            schema = entry.get("input_schema") if isinstance(entry, dict) else None
+            if not isinstance(schema, dict):
+                self.incomplete += 1
+                continue
+            try:
+                serialized = json.dumps(schema, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                size = len(serialized.encode("utf-8", errors="strict"))
+            except (ValueError, UnicodeError, RecursionError, OverflowError):
+                self.incomplete += 1
+                continue
+            self.schemas += 1
+            self.max_bytes = max(self.max_bytes, size)
+
+    def report(self):
+        return {"deferred_records": self.records, "entries": self.entries, "entries_with_input_schema": self.schemas,
+                "unsupported_or_incomplete": self.incomplete, "largest_input_schema_utf8_bytes": self.max_bytes,
+                "limits": "Retained records may repeat or omit tools and are not a current server inventory. "
+                          "JSON bytes do not determine model tokens or actual context use."}
+
+
 def tool_label(value: object) -> str:
     if isinstance(value, str):
         if value in TOOLS:
@@ -216,6 +330,7 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
         "tool_error_text_truncated"), 0)
     coverage.update(unterminated_tail=False, short_snapshot=False, changed_during_scan=False, read_failed=False)
     usage, modes, tools, results, errors, commands, statuses = Usage(), Counter(), Counter(), Counter(), Counter(), Counter(), Counter()
+    cache_patterns, deferred_sizes = CacheCounterPatterns(), DeferredSchemaSizes()
     calls, completed_tools, compactions = {}, set(), []
     recent_errors, error_categories, tool_error_categories = deque(maxlen=12), Counter(), Counter()
     first = last = last_request = None
@@ -234,6 +349,7 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
                 first = min(first, at) if first else at
                 last = max(last, at) if last else at
             kind = record.get("type")
+            deferred_sizes.add(record)
             if kind == "api-request":
                 params = record.get("params")
                 if not isinstance(params, dict):
@@ -251,6 +367,7 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
                 if at is not None and (last_request is None or at.isoformat() >= last_request["at"]):
                     last_request = {"at": at.isoformat(), "model": model, "effort": effort}
             if kind == "system" and record.get("subtype") == "compact_boundary":
+                cache_patterns.compact_boundary()
                 meta = record.get("compactMetadata")
                 if isinstance(meta, dict):
                     if len(compactions) >= IDENTITY_LIMIT:
@@ -282,6 +399,7 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
             elif kind == "assistant":
                 usage.add(message)
                 aggregate.add(message)
+                cache_patterns.add(message)
             content = message.get("content")
             if kind == "user":
                 texts = [content] if isinstance(content, str) else [part.get("text", "") for part in content
@@ -330,7 +448,9 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
         "command_record_mentions": dict(commands), "tool_calls": dict(tools), "tool_results": dict(results),
         "tool_error_results": dict(errors), "tool_error_categories": dict(tool_error_categories),
         "unpaired_tool_results": unpaired_results,
-        "cache_usage": usage.report(), "compaction_count": len(compactions) + coverage["compaction_records_at_limit"],
+        "cache_usage": usage.report(), "cache_counter_patterns": cache_patterns.report(),
+        "retained_deferred_schema_sizes": deferred_sizes.report(),
+        "compaction_count": len(compactions) + coverage["compaction_records_at_limit"],
         "compaction_seconds_median": round(statistics.median(seconds), 3) if seconds else None,
         "compaction_seconds_max": max(seconds) if seconds else None,
         "recent_compactions": sorted(compactions, key=lambda item: item["at"] or "")[-12:], "coverage": coverage}

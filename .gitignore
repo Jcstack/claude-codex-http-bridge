@@ -108,3 +108,4 @@
 !.github/workflows/statusline-scope-observation.yml
 !.github/workflows/mcp-dynamic-observation.yml
 !.github/workflows/mcp-definition-gate.yml
+!.github/workflows/session-metadata-gate.yml

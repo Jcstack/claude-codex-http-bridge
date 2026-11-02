@@ -48,6 +48,30 @@ before sharing. It is not automatically saved or committed.
   input tokens, not request hit rate, throughput, subscription allowance or
   billing. Cached input still occupies context; cumulative input is not a
   context window. Child durations can overlap.
+- Each main or child log also reports bounded `cache_counter_patterns` based
+  on the first recorded order of response identities and the maximum valid
+  cache-read counter for each identity. Adjacent valid counters can skip
+  responses with missing data. Pairs are sampled only
+  when the earlier counter is at least 10,000 and no recorded compaction lies
+  between them. The report counts ratios from 1.8 to 2.2 and the subset with
+  three later, similarly sized counters. Same-model counts use only the
+  recorded model label; ambiguous identities and omitted, invalid or missing
+  counters are counted. These are intentionally coarse observations, not
+  duplicate-history detection, request ordering proof or billing analysis.
+  Natural context growth, deferred tools, concurrency, unrecorded boundaries,
+  and changing providers can produce the same patterns. For context, an open
+  [Claude Code report](https://github.com/anthropics/claude-code/issues/102788)
+  describes a different environment where users observed possible duplicate
+  history; the report alone does not establish that this bridge or session
+  has that defect.
+- `retained_deferred_schema_sizes` summarizes UTF-8 JSON bytes for input
+  schemas found in retained `deferred_tools_record` entries. It reports counts,
+  incomplete entries and the largest schema without names or content. Entries
+  may repeat and do not enumerate current or eager tools. JSON bytes are not
+  model tokens. An open [Claude Code report](https://github.com/anthropics/claude-code/issues/102389)
+  describes a multi-megabyte schema and repeated compaction in a separate
+  environment; a small measured retained schema does not rule out that issue
+  in another session or future server state.
 - A tool error may be a valid failed test, missing file or denied operation.
   Command mentions and requested model labels do not certify successful
   execution, actual provider identity or compatibility with every plugin.
