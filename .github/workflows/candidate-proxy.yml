@@ -107,6 +107,7 @@ jobs:
           python tests/smoke_web_state.py "${{ matrix.binary }}" --claude-client
           python tests/probe_large_payload_latency.py runtime-bundle
           python tests/probe_catalog_handoff.py runtime-bundle
+          python tests/probe_managed_recovery.py runtime-bundle
           python tests/smoke_managed_runtime.py runtime-bundle --claude-client --background-client
       - uses: actions/upload-artifact@v4
         with:

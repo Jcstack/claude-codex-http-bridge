@@ -256,6 +256,101 @@ def catalog_matches(root: Path, value: dict, models: dict) -> bool:
     return blocks[0] == model_rows(models) + "\n"
 
 
+def preflight_backend(backend: subprocess.Popen, port: int, key: str, models: dict) -> None:
+    """Check a newly owned listener using local metadata, never inference."""
+    deadline = time.monotonic() + 20
+    while True:
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/models", headers={"Authorization": "Bearer " + key})
+        if launcher.listener_pids(port) != {backend.pid}:
+            raise RuntimeError("Replacement listener owner changed")
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), api_profile.NoRedirect())
+            with opener.open(request, timeout=2) as response:
+                ids = {item["id"] for item in json.load(response).get("data", [])}
+            if set(models).issubset(ids): return
+        except (urllib.error.URLError, ValueError, TimeoutError):
+            pass
+        if backend.poll() is not None or time.monotonic() >= deadline:
+            raise RuntimeError("Replacement catalog did not become ready")
+        time.sleep(.1)
+
+
+def initialize_tls(binary: Path, runtime: Path) -> None:
+    result = subprocess.run([str(binary), "--root", str(runtime), "--init-tls"],
+                            capture_output=True, timeout=20, cwd=runtime, env=process_environment())
+    if result.returncode:
+        raise RuntimeError("Could not initialize private loopback TLS identity")
+
+
+def restore_ingress(root: Path, runtime: Path, value: dict, models: dict,
+                    bundle: Path, manifest: dict, identity: str, before_publish=None) -> dict:
+    """Restore a dead ingress at its original address without trusting stale PIDs.
+
+    Called with the service and account locks held. Historical processes are
+    never signalled: their PIDs and ports might have been reused after reboot.
+    """
+    port = value["port"]
+    if launcher.listener_pids(port):
+        raise RuntimeError("Saved managed port is occupied; no key was sent")
+    for name in ("ca.pem", "ca-key.pem", "server.pem", "server-key.pem", "front-key", "origin-guard-key"):
+        runtime_bundle.safe_file(runtime / name, limit=65536)
+    private_key(runtime / "front-key")
+    private_key(runtime / "origin-guard-key")
+    ingress_binary = bundle / manifest["binaries"]["ingress"]["file"]
+    initialize_tls(ingress_binary, runtime)  # Existing CA is required; it is never replaced.
+
+    old_manifest_path = runtime / "backend.json"
+    runtime_bundle.safe_file(old_manifest_path, limit=65536)
+    old_manifest = old_manifest_path.read_bytes()
+    generation = "g-" + secrets.token_hex(12)
+    generation_dir = runtime / generation
+    runtime_bundle.private_dir(generation_dir)
+    key, backend_port = secrets.token_hex(32), free_port()
+    api_profile.write_private(generation_dir / "key", key + "\n")
+    api_profile.write_private(generation_dir / "config.yaml", backend_config(runtime, backend_port, port, models, key))
+    fingerprint = hashlib.sha256(runtime_bundle.canonical({"bundle": identity, "models": models,
+                                                           "quota_owner": "origin-v1"})).hexdigest()
+    backend = ingress = None
+    published = False
+    replacement = None
+    try:
+        proxy = bundle / manifest["binaries"]["proxy"]["file"]
+        backend = start(proxy, ["--local-model", "-config", str(generation_dir / "config.yaml")],
+                        generation_dir / "proxy.log", ca=runtime / "ca.pem", authority=f"127.0.0.1:{port}")
+        launcher.wait_for_private_listener(backend, backend_port)
+        preflight_backend(backend, backend_port, key, models)
+        if before_publish is not None: before_publish()
+        if launcher.listener_pids(port):
+            raise RuntimeError("Saved managed port became occupied; no key was sent")
+        write(old_manifest_path, {"generation": generation, "port": backend_port, "pid": backend.pid,
+                                  "key_file": str(generation_dir / "key")})
+        published = True
+        ingress = start(ingress_binary, ["--root", str(runtime), "--listen", f"127.0.0.1:{port}",
+            "--key-file", str(runtime / "front-key"), "--backend-file", str(old_manifest_path),
+            "--origin-key-file", str(runtime / "origin-guard-key"), "--origin-backend-file", str(runtime / "origin.json"), "--tls"],
+            runtime / "ingress.log")
+        replacement = {"pid": ingress.pid, "port": port, "ingress_bundle": identity, "current": generation,
+                       "generations": {generation: {"pid": backend.pid, "port": backend_port, "fingerprint": fingerprint}}}
+        launcher.wait_for_private_listener(ingress, port)
+        # Once listening, a client may have been admitted. Record ownership
+        # before testing it, and never kill this replacement on a later error.
+        write(runtime / "service.json", replacement)
+        endpoint_status(root, replacement)
+        return replacement
+    except BaseException:
+        if ingress is not None and replacement is not None and launcher.listener_pids(port) == {ingress.pid}:
+            write(runtime / "service.json", replacement)
+        else:
+            launcher.stop_process(ingress)
+            if published:
+                runtime_bundle.write_file(old_manifest_path, old_manifest, 0o600)
+                if os.name == "nt":
+                    import windows_acl
+                    windows_acl.lock([old_manifest_path])
+            launcher.stop_process(backend)
+        raise
+
+
 def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: bool = False,
            before_publish=None) -> dict:
     with launcher.service_lock():
@@ -264,17 +359,20 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
         bundle, manifest, identity = chosen
         runtime = directory(root)
         runtime_bundle.private_dir(runtime / "empty-auth")
-        origin_manifest(root, runtime, base_runtime, base)
         value = state(root)
+        owners = launcher.listener_pids(value["port"]) if value is not None else set()
+        if value is not None and owners and owners != {value["pid"]}:
+            raise RuntimeError("Saved managed port is occupied; no key was sent")
+        origin_manifest(root, runtime, base_runtime, base)
+        if value is not None and not owners:
+            return restore_ingress(root, runtime, value, models, bundle, manifest, identity, before_publish)
         original_state = json.loads(json.dumps(value)) if value is not None else None
         ingress = None
         backend = None
         previous_manifest = (runtime / "backend.json").read_bytes() if (runtime / "backend.json").exists() else None
         try:
             ingress_binary = bundle / manifest["binaries"]["ingress"]["file"]
-            initialized = subprocess.run([str(ingress_binary), "--root", str(runtime), "--init-tls"],
-                                        capture_output=True, timeout=20, cwd=runtime, env=process_environment())
-            if initialized.returncode: raise RuntimeError("Could not initialize private loopback TLS identity")
+            initialize_tls(ingress_binary, runtime)
             if value is not None:
                 endpoint_status(root, value)
             if value is None:
@@ -304,18 +402,7 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
             backend = start(proxy, ["--local-model", "-config", str(generation_dir / "config.yaml")],
                             generation_dir / "proxy.log", ca=runtime / "ca.pem", authority=f'127.0.0.1:{value["port"]}')
             launcher.wait_for_private_listener(backend, port)
-            # Preflight only localhost metadata, never a paid model request.
-            deadline = time.monotonic() + 20
-            while True:
-                request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/models", headers={"Authorization": "Bearer " + key})
-                if launcher.listener_pids(port) != {backend.pid}: raise RuntimeError("Replacement listener owner changed")
-                try:
-                    with urllib.request.build_opener(urllib.request.ProxyHandler({}), api_profile.NoRedirect()).open(request, timeout=2) as response:
-                        ids = {item["id"] for item in json.load(response).get("data", [])}
-                    if set(models).issubset(ids): break
-                except (urllib.error.URLError, ValueError, TimeoutError): pass
-                if backend.poll() is not None or time.monotonic() >= deadline: raise RuntimeError("Replacement catalog did not become ready")
-                time.sleep(.1)
+            preflight_backend(backend, port, key, models)
             if before_publish is not None:
                 before_publish()
             value["generations"][generation] = {"pid": backend.pid, "port": port, "fingerprint": fingerprint}

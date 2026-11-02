@@ -37,6 +37,8 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
         return "diagnostics", "", arguments[1:]
     if arguments and arguments[0] == "mcp-audit":
         return "mcp-audit", "", arguments[1:]
+    if arguments and arguments[0] == "autostart":
+        return "autostart", "", arguments[1:]
     if arguments and arguments[0] == "--help":
         return "help", "", []
     if arguments and arguments[0] in ("codex-login", "models", "--list-models", "usage"):
@@ -515,6 +517,24 @@ def bridge_stop(route: str = "subscription") -> int:
         return 0
 
 
+def bridge_start(route: str = "subscription") -> int:
+    runtime, state, _ = ensure_service(route=route)
+    if route == "subscription":
+        import quota_recovery
+        quota_recovery.ensure_watch(ROOT)
+    if route == "subscription" and (ROOT / "runtime-selected.json").exists():
+        import accounts
+        import rolling_runtime
+        with accounts.switch_lock(ROOT, wait_seconds=30):
+            models, verify = managed_catalog(state)
+            managed = rolling_runtime.ensure(ROOT, runtime, state, models, before_publish=verify)
+        print(f"Managed TLS endpoint is running on https://127.0.0.1:{managed['port']}")
+        return 0
+    label = "OpenAI API" if route == "api" else "Codex"
+    print(f"{label} bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
+    return 0
+
+
 def managed_catalog(state: dict):
     """Call while holding the account lock; verify again before publication."""
     import accounts
@@ -562,6 +582,8 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
                 raise RuntimeError("Model catalog changed during session preparation; retry the launch")
             managed = rolling_runtime.ensure(ROOT, runtime, state, models, before_publish=verify)
     if route == "subscription":
+        import autostart
+        with autostart.operation_lock(ROOT): autostart.unpause(ROOT)
         import quota_recovery
         quota_recovery.ensure_watch(ROOT)
     directory = Path(tempfile.mkdtemp(prefix="ui-", dir=runtime))
@@ -639,6 +661,7 @@ def main() -> int:
         print("Independent accounts: claude-codex account login ALIAS; account check ALIAS; account use ALIAS; account list.")
         print("Direct OpenAI API: claude-codex api key set; claude-codex api models; claude-codex api --model sol.")
         print("Run claude-codex [api] bridge start | status | stop to manage each private localhost service.")
+        print("macOS/Windows login recovery: claude-codex autostart enable | status | disable.")
         print("Reviewed runtime: claude-codex bridge upgrade BUNDLE; bridge reload drains replaced backends.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
         print("Optional native capabilities: claude-codex tools install | status | enable | disable (Python 3.11+).")
@@ -656,6 +679,10 @@ def main() -> int:
         import mcp_name_audit
         return mcp_name_audit.main(claude_args)
     helper_output("verify")
+    if mode == "autostart":
+        if route != "subscription": raise ValueError("Login recovery uses the Codex subscription profile")
+        import autostart
+        return autostart.main(claude_args, root=ROOT)
     if mode == "quota":
         if route != "subscription": raise ValueError("Quota recovery uses the Codex subscription profile")
         import quota_recovery
@@ -680,7 +707,12 @@ def main() -> int:
     if mode == "bridge-status":
         return bridge_status(route)
     if mode == "bridge-stop":
-        return bridge_stop(route)
+        if route == "api": return bridge_stop(route)
+        import autostart
+        with autostart.operation_lock(ROOT):
+            result = bridge_stop(route)
+            if result == 0: autostart.pause(ROOT)
+            return result
     if mode in ("bridge-upgrade", "bridge-reload"):
         if route != "subscription": raise ValueError("Managed runtime currently wraps the Codex subscription route")
         import rolling_runtime
@@ -713,21 +745,12 @@ def main() -> int:
         print(f"Managed TLS endpoint ready: https://127.0.0.1:{managed['port']}; legacy sessions retain their original service")
         return 0
     if mode == "bridge-start":
-        runtime, state, _ = ensure_service(route=route)
-        if route == "subscription":
-            import quota_recovery
-            quota_recovery.ensure_watch(ROOT)
-        if route == "subscription" and (ROOT / "runtime-selected.json").exists():
-            import accounts
-            import rolling_runtime
-            with accounts.switch_lock(ROOT, wait_seconds=30):
-                models, verify = managed_catalog(state)
-                managed = rolling_runtime.ensure(ROOT, runtime, state, models, before_publish=verify)
-            print(f"Managed TLS endpoint is running on https://127.0.0.1:{managed['port']}")
-            return 0
-        label = "OpenAI API" if route == "api" else "Codex"
-        print(f"{label} bridge is running on 127.0.0.1:{state['port']} (PID {state['pid']})")
-        return 0
+        if route == "api": return bridge_start(route)
+        import autostart
+        with autostart.operation_lock(ROOT):
+            result = bridge_start(route)
+            if result == 0: autostart.unpause(ROOT)
+            return result
     if mode == "login":
         import accounts
         accounts.initial_login(ROOT)

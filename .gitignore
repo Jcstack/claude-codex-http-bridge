@@ -40,6 +40,7 @@
 !bridge_models.py
 !api_profile.py
 !accounts.py
+!autostart.py
 !rolling_runtime.py
 !runtime_bundle.py
 !capabilities.py

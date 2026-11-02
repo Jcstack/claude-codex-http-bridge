@@ -48,6 +48,9 @@ The tracked session's anonymous marker is stored locally in the private installa
 - [ ] Continue investigating TLS/EOF and 500/503 errors, separating preconnection failures, interrupted streams, client cancellation, and application errors. Do not mask the cause with fixed retries or restarts.
 - [x] Add allowlisted URL-host categories for recent handshake EOF mentions, preserving the possibility that errors were forwarded. Real logs mention the official ChatGPT host; later credential-free TLS checks passed, but the root cause remains unknown.
 - [x] Add bounded same-log completion correlations for handshake failures, preserving ambiguous and unmatched cases without exposing local tags. One later EOF had a unique HTTP 200 match 12 seconds afterward; neither this correlation nor HTTP 200 proves retry behavior or a complete SSE stream.
+- [x] Restore a dead managed endpoint using its existing loopback port, CA, and client key, while refusing occupied ports and avoiding signals to stale PIDs. A disposable synthetic-origin fixture covers a changed origin, recovery failure rollback, and requests after recovery.
+- [x] Add opt-in current-user login recovery on macOS and Windows, with local-only healthy checks, serialized manual stop, and retry after transient startup failure. A macOS launch agent was loaded and observed a healthy existing service; no actual computer reboot was performed.
+- [ ] Exercise an actual macOS reboot and an authenticated Windows login on their respective hosts, and investigate Linux user-service support. Neither synthetic recovery nor a loaded login entry proves post-reboot behavior on every host.
 
 Acceptance: reproduce successful requests and genuine quota-exhaustion negative cases; automatically recover after a reset; avoid duplicate tool effects; preserve the original account, listener, keys, sessions, and already-started streams.
 
