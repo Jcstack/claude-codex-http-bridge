@@ -68,6 +68,10 @@ jobs:
         run: python tests/probe_subagent_models.py
       - name: Verify per-model effort limits with a synthetic gateway
         run: python tests/probe_effort_limits.py
+      - name: Observe per-alias effort capabilities without an account
+        run: python tests/probe_effort_capability_sets.py
+      - name: Observe synthetic effort-rejection recovery
+        run: python tests/probe_effort_rejection.py
       - name: Observe MCP tool-name normalization and permission controls
         run: python tests/probe_mcp_name_collision.py
       - name: Verify experimental pre-client aliases with an isolated real Claude client

@@ -86,6 +86,8 @@ jobs:
           python tests/probe_toolsearch_cache_batch.py "${{ matrix.binary }}"
           python tests/probe_mcp_alias_gateway.py "${{ matrix.binary }}"
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}"
+          python tests/probe_effort_capability_tui.py "${{ matrix.binary }}"
+          python tests/probe_effort_rejection_gateway.py "${{ matrix.binary }}"
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}" --family astra
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}" --family luna
           python tests/probe_gateway_tool_names.py "names-${{ matrix.binary }}"

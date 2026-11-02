@@ -45,4 +45,40 @@ current full-effort eligibility requirement or silently capped user requests.
 Any future partial-capability support needs clear selection behavior and
 end-to-end tests across UI, subagents, switching, and upstream metadata.
 
+Claude documents alias-level [`_SUPPORTED_CAPABILITIES`](https://code.claude.com/docs/en/model-config#customize-pinned-model-display-and-capabilities)
+flags for pinned third-party models, including `xhigh_effort` and `max_effort`.
+Its [gateway protocol](https://code.claude.com/docs/en/llm-gateway-protocol#feature-pass-through)
+states that these flags do not apply to an `ANTHROPIC_BASE_URL` gateway. In a credential-free Claude
+Code 2.1.316 fixture using this project's custom model picker, setting the
+Sonnet alias capabilities to `effort,thinking` did **not** suppress `xhigh` or
+`max` requests: both explicit CLI choices and interactive `/effort` reached
+the fake upstream unchanged. In the CLI fixture, omitting `behavesAs` or using
+the Sonnet alias did not change the observed `max` request. These are specific
+synthetic configurations, not a claim about every provider or client version;
+they show that those flags alone do not safely enforce this bridge's dynamic
+per-model effort set. The existing eligibility gate remains unchanged.
+
+A separate synthetic rejection test exposed a distinct risk even when the
+catalog advertises every level. Claude Code 2.1.316 retried a recognizable
+HTTP 400 for `output_config.effort` without any effort value, then continued
+omitting it on the next turn in the same process. Through the currently
+reviewed translator, a fake upstream saw `max` on the rejected request and
+`xhigh` on the subsequent request. These were fake errors and do not establish
+that the real Codex backend has rejected the user's effort. A narrow guard is
+being developed and must pass negative, cross-platform, and rolling-handoff
+tests before use; the running service has not been changed for it.
+In a separate direct-client control, a differently worded 400 was visible as
+an error and retained `max` on all three synthetic attempts, even with
+`x-should-retry: false`. That header alone did not eliminate retries in this
+fixture, so any guard must check actual behavior rather than promise one try.
+
+Claude Code's [native gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery)
+is an additional constraint on dynamic GPT discovery: the documented picker
+accepts discovered IDs containing `claude` or `anthropic`, caches results,
+and refreshes them at startup. A `modelPicker` using `replaceBuiltInOptions`
+hides discovered rows. The bridge currently builds its picker from the real
+account catalog instead of inventing Claude-shaped IDs or writing an internal
+Claude cache. It does not yet update the startup picker or context settings of
+an already-running Claude process when the account catalog changes.
+
 There is no controlled head-to-head **of this bridge**. Independent same-harness model results and paired harness evidence are assessed in [MODEL_HARNESS_EVIDENCE.md](MODEL_HARNESS_EVIDENCE.md); the proposed direct API-route acceptance tests are in [API_ROUTE_RESEARCH.md](API_ROUTE_RESEARCH.md). To compare on a specific repository, use the same task, effort budget, tools, and acceptance tests, then inspect the resulting code and time to completion. The bridge's compatibility alias is a Claude Code UI/capability mapping; it does not change the underlying Codex model.
