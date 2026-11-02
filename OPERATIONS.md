@@ -218,6 +218,18 @@ original files; the corrected attempt passed the synthetic checks before
 enabling the opt-in. See [SECURITY.md](SECURITY.md) for the local package
 modifications, privacy behavior and remaining limits.
 
+The cache-telemetry controller files were then installed under the account and
+service locks after their [source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41455750069)
+passed. Original files were backed up privately, and the selected and previous
+runtime bundles, origin and ingress were checked again. The shared subscription
+preference was enabled locally; it is disabled by default in a new installation.
+The separately patched HUD and installed adapter passed a synthetic display
+check. No actual user-session refresh or real inference was forced. Use
+`claude-codex cache telemetry status` or `claude-codex cache telemetry disable`
+to inspect or change the shared preference; an explicit session override wins.
+This was a targeted two-file update, not an atomic general-purpose controller
+installer. See [CACHE_AUDIT.md](CACHE_AUDIT.md) for interpretation and limits.
+
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
 Remaining work, updated 2026-11-01; execution order and acceptance gates are in [PLAN.md](PLAN.md):

@@ -233,8 +233,10 @@ even though the fake service supplied no lifetime. The [reproducible probe](test
 uses a temporary home and no provider. Its optional `--hud-dir` path pipes
 the real client's synthetic status through the bridge adapter and the reviewed
 HUD, then checks the displayed fraction and the absence of a timer. This full
-chain has passed locally on macOS with fake responses; it does not establish
-the values in a real session. Windows console behavior remains unverified.
+chain passed on macOS and Linux in the [HUD gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41456511723),
+and locally with the installed HUD package. These are fake responses and do not
+establish the values in a real session. Windows console behavior remains
+unverified; the Windows job covers non-interactive synthetic rendering.
 
 The adapter continues to remove the standard `prompt_cache` object by
 default. In an opt-in extension, it passes the validated `requests`,
@@ -245,12 +247,13 @@ report is not proof that caching is off. These values describe counters
 reported to Claude for the main conversation, not a provider-wide hit rate, a
 guaranteed cache lifetime, or a bill. A continuing session can span account or
 model changes, so the counters do not establish account-level cache isolation.
-The extension passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41447807601)
-and is installed locally. A candidate local preference can enable or disable
-the extension on the next status-line refresh for existing and future
-subscription sessions. An explicit per-session environment setting takes
-precedence. The preference implementation has not yet been installed; plugins
-still need explicit support for the extension to display it.
+The shared preference passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41455750069)
+and was installed and enabled locally without restarting the origin, ingress,
+or Claude clients. It applies on the next status-line refresh for existing and
+future subscription sessions. An explicit per-session environment setting
+takes precedence. `claude-codex cache telemetry status` reports the shared
+choice; `disable` turns it off. Plugins need explicit support for the extension
+to display it. The default remains disabled for a new installation.
 
 An experimental [HUD adapter patch](upstream/patches/claude-hud-v0.15-reported-cache.patch)
 teaches the reviewed HUD version to display the extension as “Reported
@@ -259,8 +262,10 @@ The [synthetic display fixture](tests/probe_hud_cache_display.py) checks the
 token fraction, disabled and missing cases, malformed values and unchanged
 native cache display. It never invents a lifetime or warmth. The reviewed patch
 is installed in the local HUD 0.15.0 package; it does not change an upstream
-release. The shared preference is still disabled until the controller update is
-verified. The main-session counter may include model or account changes.
+release. The installed adapter and HUD were also checked together with a
+synthetic frame after the shared preference was enabled. A real user-session
+refresh with a cache report has not yet been observed. The main-session counter
+may include model or account changes.
 
 Passing a partial object as the standard `prompt_cache` is unsafe for some
 plugins. For example, [this status-line implementation](https://github.com/tsalkin/claude-code-statusline/blob/17396d0bb11a47b184c7eb3709088dac36d7c91d/statusline.sh)

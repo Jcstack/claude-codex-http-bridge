@@ -130,6 +130,14 @@ file for its diagnostic commands, with private POSIX file mode in the tested
 fixture. The input can contain session metadata and paths; it is not included in
 this repository. Temporary-home tests are not a complete plugin privacy audit.
 
+The local HUD also has a separately reviewed cache-counter display patch. When
+the bridge preference is enabled, validated main-session cache counters are sent
+to the configured status-line command and may be retained in the HUD heartbeat.
+They are usage metadata, not credentials. The preference file is private, and a
+new installation defaults to disabled; the current local installation was
+explicitly enabled after synthetic checks. Plugin updates can replace the patch,
+and the feature is not a claim about every plugin's data handling.
+
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 
 The bridge's WebFetch PDF hook processes the tool result locally and replaces only the binary-PDF summary with a warning and the path Claude Code already returned. It does not upload or copy the PDF. Claude Code's own WebFetch may leave downloaded binaries in its session `tool-results` directory; the hook does not remove them. Review that directory according to your local retention policy. [Upstream retention report](https://github.com/anthropics/claude-code/issues/104178).
