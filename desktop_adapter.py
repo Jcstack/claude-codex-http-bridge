@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -29,6 +30,27 @@ BINARIES = {
     "windows-x86_64": ("windows/amd64/open-computer-use.exe", "6bafd71418b85d83ace19937bcae4a4934a153244c14926ffd13e3fbac4da40f"),
     "windows-arm64": ("windows/arm64/open-computer-use.exe", "19e4dbaeb164dd306b39dc028eb34294bd2eb9fa87fc5e9e00db04a55746ca3f"),
 }
+
+
+class _MCPStdioPrivacyFilter(logging.Filter):
+    """Keep parser failures visible without logging a child's message body."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = "MCP stdio transport error; details withheld"
+        record.args = ()
+        record.exc_info = None
+        record.exc_text = None
+        record.stack_info = None
+        return True
+
+
+_MCP_STDIO_PRIVACY_FILTER = _MCPStdioPrivacyFilter()
+
+
+def protect_mcp_stdio_logs() -> None:
+    # The SDK can include malformed stdout in parser exception logs. Install
+    # before its client starts; do not change unrelated loggers or levels.
+    logging.getLogger("mcp.client.stdio").addFilter(_MCP_STDIO_PRIVACY_FILTER)
 
 
 def asset() -> tuple[str, str]:
@@ -143,6 +165,7 @@ class DesktopSession:
         return handle
 
     async def _run(self):
+        protect_mcp_stdio_logs()
         from mcp import Client, StdioServerParameters
         # One owner task enters and exits the SDK's anyio task group. Requests
         # never enter its cancel scope from a different MCP request task.

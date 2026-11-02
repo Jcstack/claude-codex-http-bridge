@@ -110,6 +110,22 @@ FastMCP proxies are affected, but they justify testing schemas, resource links,
 dynamic lists, and privacy before adopting a dependency. Neither project has
 yet been shown to meet this repository's complete compatibility requirements.
 
+The existing hash-locked capability environment also includes the official
+Python MCP SDK. In a local synthetic check of SDK 2.3.0, ordinary tool-call
+parameters survived its generic JSON-RPC parse/serialize step, but an unknown
+top-level extension field was dropped. With a handler attached to the SDK's
+stdio parser logger, one deliberately malformed synthetic message appeared in
+the captured error log. This does not establish that valid messages are logged
+or that every SDK configuration behaves the same way. It does mean a proposed
+SDK-based transport must separately verify future extension preservation and
+ensure parse diagnostics cannot disclose message contents. The probe records
+only version and boolean results; it starts no server and keeps its synthetic
+message and captured log in memory. The desktop adapter now filters this
+specific SDK logger before starting its MCP client; the same synthetic parse
+error retains a generic diagnostic without its contents. This filter does not
+cover other loggers, the desktop child's stderr, or already running processes.
+New processes receive it only after an updated capability snapshot is selected.
+
 ## Offline partial audit
 
 `claude-codex mcp-audit` reads server keys from the default local Claude

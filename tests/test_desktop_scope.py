@@ -1,7 +1,9 @@
 """Window policy failures must precede desktop dispatch; no real app accesses."""
 
 import asyncio
+import io
 import json
+import logging
 from pathlib import Path
 import tempfile
 import time
@@ -74,6 +76,33 @@ class DesktopPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("OPENAI_API_KEY", env); self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
         self.assertEqual(env["OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS"], "0")
         self.assertEqual(env["OPEN_COMPUTER_USE_DISABLE_APP_AGENT_PROXY"], "1")
+
+    async def test_mcp_stdio_logger_redacts_payloads_and_exception_text(self):
+        logger = logging.getLogger("mcp.client.stdio")
+        output = io.StringIO()
+        handler = logging.StreamHandler(output)
+        previous_level, previous_propagation = logger.level, logger.propagate
+        already_installed = desktop_adapter._MCP_STDIO_PRIVACY_FILTER in logger.filters
+        logger.addHandler(handler)
+        logger.setLevel(logging.ERROR)
+        logger.propagate = False
+        try:
+            desktop_adapter.protect_mcp_stdio_logs()
+            desktop_adapter.protect_mcp_stdio_logs()
+            try:
+                raise ValueError("SYNTHETIC_PRIVATE_EXCEPTION")
+            except ValueError:
+                logger.exception("SYNTHETIC_PRIVATE_MESSAGE %s", "SYNTHETIC_PRIVATE_ARGUMENT")
+            text = output.getvalue()
+            self.assertIn("MCP stdio transport error; details withheld", text)
+            self.assertNotIn("SYNTHETIC_PRIVATE", text)
+            self.assertEqual(logger.filters.count(desktop_adapter._MCP_STDIO_PRIVACY_FILTER), 1)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(previous_level)
+            logger.propagate = previous_propagation
+            if not already_installed:
+                logger.removeFilter(desktop_adapter._MCP_STDIO_PRIVACY_FILTER)
 
     async def test_windows_worker_does_not_replay_uncertain_actions_or_read_other_windows(self):
         from desktop_windows import WindowsWorker

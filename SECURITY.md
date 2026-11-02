@@ -35,6 +35,15 @@ If a credential is accidentally committed, revoke or rotate it first, then remov
 
 The optional [native capability pack](NATIVE_TOOLS.md) pins dependency hashes and immutable source snapshots. Native media calls use only the private TLS endpoint key, never OAuth. Workspace inputs reject symlink/reparse paths, absolute paths and traversal; artifacts stay private. No microphone recording or automatic playback is implemented. Desktop requires an explicit per-workspace window selection and existing OS permissions. The child receives no model credentials or global-input opt-in. Windows dispatches each action directly to one native worker, avoiding upstream uncertain-action retries, and disables screen-region GDI. These are application guardrails, not an OS sandbox against same-user programs or the selected app itself.
 
+The desktop adapter installs a content-redacting filter on the Python MCP SDK's
+`mcp.client.stdio` logger before starting its client. In an isolated test with
+the locked SDK, a deliberately malformed synthetic message appeared in that
+logger's unprotected parser exception, while the filter retained a generic
+error without the synthetic content or exception text. This protects that
+specific logger in newly started processes using an updated capability source
+snapshot; it does not sanitize the child program's own stderr, other loggers,
+or already running processes. See [MCP naming and SDK assessment](MCP_NAMING.md).
+
 New launches default `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, respecting an
 explicit operator override. This follows [Claude's documented telemetry control](https://code.claude.com/docs/en/data-usage#telemetry-services);
 it can disable Remote Control/feature-flag evaluation and is not a zero-egress
