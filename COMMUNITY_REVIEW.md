@@ -208,6 +208,25 @@ different synthetic identity was rejected. These are three separate checks,
 not a network latency or throughput benchmark, and the timings do not predict
 other machines. The fixture passed no user credentials and contacted no model.
 
+The same [benchmark run's individual platform jobs](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41441024856)
+reported median in-process versus subprocess identity checks of 0.220 versus
+55.164 ms on macOS, 0.214 versus 31.832 ms on Linux, and 0.212 versus 76.240 ms
+on Windows, with 12 samples per platform. These are separate shared runners
+and do not support cross-machine speed rankings.
+
+A separate local [native identity experiment](tests/probe_native_identity.py)
+matched the Python controller's identity for an owned process whose executable
+path contains Unicode on macOS. It rejected a different process, changed birth time,
+changed executable and an exited process. Across 1,000 local samples its median
+was 0.002709 ms and p95 was 0.005 ms. The check is not integrated into the
+gateway, the negative controls do not reproduce an actual reused PID, and the
+measurement is not an end-to-end request or portability guarantee.
+Linux procfs and Windows API variants cross-compiled locally; their native
+runtime behavior and additional path-encoding cases still require their own
+platform tests. Windows uses the same invariant-locale case mapping as
+[Python's `normcase`](https://raw.githubusercontent.com/python/cpython/3.11/Lib/ntpath.py)
+instead of assuming that Go's Unicode case conversion is identical.
+
 Apple's [libproc source](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)
 uses `proc_pidinfo` and `proc_pidpath`; Windows documents [process creation
 times](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)

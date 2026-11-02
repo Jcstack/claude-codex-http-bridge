@@ -60,6 +60,10 @@
 !tests/effort_guard_fixture.go
 !tests/midconversation_effort_fixture.go
 !tests/scoped_system_fixture.go
+!tests/native_identity_probe_darwin.go
+!tests/native_identity_probe_linux.go
+!tests/native_identity_probe_windows.go
+!tests/native_identity_probe.go
 !tests/native_cache_fixture.go
 !tests/native_gateway_names_fixture.go
 !tests/native_incomplete_fixture.go
