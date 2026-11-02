@@ -135,10 +135,15 @@ observation [passed on all three operating systems](https://github.com/Jcstack/c
 the separate immediate-terminal test passed. The original failure did not
 recur in that bounded sample, so these observations do not prove its cause.
 The upstream [write hook](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/runtime/executor/codex_websockets_session.go)
-is reached before the payload is written. A further test-only negative control
-deliberately prolongs that hold to check whether the suspected ordering can
-produce the same error and whether the fake-server barrier prevents it. Neither
-test patches production code or establishes real WebSocket behavior.
+is reached before the payload is written. In the [three-platform negative control](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41490027317),
+deliberately prolonging that hold produced five matching closed-connection test
+failures on each platform; the fake-server barrier passed five repeats with the
+same hold. Each platform also passed the unmodified bounded sample, the patched
+normal sample, and the separate immediate-terminal test. This demonstrates a
+possible fixture race but does not prove what caused the earlier failed run.
+The candidate workflow applies the barrier only to the pinned upstream test
+file; production code and binaries do not include it. These checks do not
+establish real WebSocket behavior.
 
 A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
 on Claude Code 2.1.201 reported an additional content-progress timeout that

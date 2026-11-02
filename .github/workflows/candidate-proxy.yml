@@ -61,6 +61,9 @@ jobs:
           go test ./internal/runtime/executor/helps
           cp ../tests/native_cache_fixture.go internal/runtime/executor/bridge_native_cache_fixture_local_test.go
           cp ../tests/native_incomplete_fixture.go internal/runtime/executor/bridge_incomplete_local_test.go
+          # Only the upstream test file changes; production binaries do not include it.
+          git apply --check ../tests/upstream_keepalive_fixture.patch
+          git apply ../tests/upstream_keepalive_fixture.patch
           go test -timeout 90s -run 'TestCodex|TestBridgeCompact' ./internal/runtime/executor
           cp ../tests/auth_handoff_fixture.go sdk/cliproxy/auth/bridge_handoff_local_test.go
           go test -timeout 60s -run '^TestBridgeAccountHandoff' ./sdk/cliproxy/auth

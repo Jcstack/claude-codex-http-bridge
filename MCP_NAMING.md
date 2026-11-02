@@ -201,6 +201,12 @@ selected translator with a fake API-compatible Responses origin. The
 read-only definition comparison implementation reported the schema difference from that
 fixture's retained record and supplied snapshot. This does not establish how
 interactive clients, real plugins, models, or the subscription executor behave.
+The [direct-client observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487736135)
+passed on macOS, Linux and Windows, including the fixture-only refusal cases
+below. In [candidate run 41487752563](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487752563),
+Linux and Windows completed the translator controls; the macOS build failed an
+unrelated synthetic upstream WebSocket test before reaching those controls.
+That failed attempt is not a three-platform translator pass.
 
 An additional fake model sent the old empty arguments after the list changed.
 The unguarded test-only adapter passed that synthetic call to the fake tool
