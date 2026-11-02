@@ -25,6 +25,7 @@ import path from 'node:path';
 const hud = process.argv[1], home = process.argv[2];
 const { getContextPercent } = await import(pathToFileURL(path.join(hud, 'dist', 'stdin.js')));
 const { applyContextWindowFallback } = await import(pathToFileURL(path.join(hud, 'dist', 'context-cache.js')));
+const { formatContextValue } = await import(pathToFileURL(path.join(hud, 'dist', 'utils', 'format.js')));
 let raw = ''; for await (const part of process.stdin) raw += part;
 const frames = JSON.parse(raw), now = Date.now();
 const deps = { homeDir: () => home, now: () => now, random: () => 1 };
@@ -36,8 +37,11 @@ const withoutHint = getContextPercent(frames.after);
 frames.after.transcript_path = transcript;
 applyContextWindowFallback(frames.after, deps, undefined,
   { lastCompactBoundaryAt: new Date(now + 1000), lastCompactPostTokens: 51271 });
+const afterHint = getContextPercent(frames.after);
+const both = formatContextValue({stdin: frames.after, config: {display: {}}}, afterHint, 'both');
 console.log(JSON.stringify({before, withoutHint, afterHint: getContextPercent(frames.after),
-  afterUsageStillUnknown: frames.after.context_window.current_usage === null}));
+  afterUsageStillUnknown: frames.after.context_window.current_usage === null,
+  bothModeShowsZeroTokensWithNonzeroPercent: afterHint > 0 && /\(0\//.test(both)}));
 """
 
 
@@ -72,6 +76,7 @@ def main() -> None:
     print(json.dumps({"synthetic_only": True, "hud_version": version, "adapter_reports_unknown": True,
                       "before_percent": observed["before"], "without_compact_hint_percent": observed["withoutHint"],
                       "with_compact_hint_percent": observed["afterHint"],
+                      "both_mode_shows_zero_tokens_with_nonzero_percent": observed.get("bothModeShowsZeroTokensWithNonzeroPercent") is True,
                       "hint_keeps_usage_unknown": observed.get("afterUsageStillUnknown") is True}, sort_keys=True))
 
 

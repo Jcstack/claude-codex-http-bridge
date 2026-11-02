@@ -240,7 +240,9 @@ default. In an opt-in extension, it passes the validated `requests`,
 expiry, lifetime, miss diagnosis and cache-write accounting. An absent cache
 report is not proof that caching is off. These values describe counters
 reported to Claude for the main conversation, not a provider-wide hit rate, a
-guaranteed cache lifetime, or a bill. Existing plugins need explicit support
+guaranteed cache lifetime, or a bill. A continuing session can span account or
+model changes, so the counters do not establish account-level cache isolation.
+Existing plugins need explicit support
 for the extension; it has not yet been installed in the live status-line path.
 
 Passing a partial object as the standard `prompt_cache` is unsafe for some

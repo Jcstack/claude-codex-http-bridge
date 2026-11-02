@@ -48,10 +48,23 @@ installed Claude HUD 0.8.0 used only synthetic frames. Its percentage helper
 returned `0%` when invoked without a transcript or compact hint, even when the
 adapter supplied null. With a synthetic recent compact boundary and post-token
 hint, HUD returned `6%` for 51,271 out of 872,000 tokens and kept
-`current_usage` null. This samples the plugin's calculation and fallback
-functions, not its complete UI or other plugin versions. The post-token hint
+`current_usage` null. In the same synthetic observation its `both` formatter
+displayed zero tokens beside that nonzero percentage; the adapter must not
+invent fresh/cache token breakdowns to hide this plugin limitation. This
+samples the plugin's calculation and fallback functions, not its complete UI
+or other plugin versions. The post-token hint
 is not a provider usage report. The probe executes the explicitly supplied HUD
 JavaScript with a temporary home and configuration; it is not an OS sandbox.
+
+A community [mixed-model subagent report](https://github.com/anthropics/claude-code/issues/83355)
+describes an older client using the parent's compact window for a smaller
+subagent. In a separate local [synthetic probe](tests/probe_subagent_compaction.py)
+with the locked Claude Code 2.1.316 client, a child set to 100k compacted after
+a fake 160k usage report whether its parent used 100k or 800k; an 800k child
+did not compact when its parent used 100k. The child also completed two
+synthetic Read calls. The sample exercises explicit per-model settings and
+fake token counts, not an actual long conversation, all agent types, Windows
+or a provider-enforced context limit. Cross-platform checks remain pending.
 
 For future models with fewer reasoning levels, Claude Code documents a
 per-model [`maxEffortLevel`](https://code.claude.com/docs/en/settings-reference#maxeffortlevel).
