@@ -45,6 +45,32 @@ console.log(JSON.stringify({failed_config_blocks_git: blocked, mock_only: true})
 if (!blocked) process.exitCode = 1;
 """
 
+OWNER_FAILURE_CATEGORIES = {
+    'the terminal filter keeps': 'terminal_keep',
+    'the terminal filter drops': 'terminal_drop',
+    'logic gets no PATH': 'environment',
+    'the cage grants reads': 'cage_permissions',
+    'on Windows, git': 'windows_executable_resolution',
+    "a repo's own git config": 'git_config_commands',
+    'a repo filter whose name': 'git_filter_names',
+    "a partial clone's lazy fetch": 'git_lazy_fetch',
+    '--extra-cmd': 'extra_command',
+    '`hud set`': 'config_write',
+    'the /hud skill': 'skill_permissions',
+    'doctor and report': 'diagnostic_output',
+}
+
+
+def owner_failures(output: str) -> list[str]:
+    categories = []
+    for line in output.splitlines():
+        if not line.startswith('FAIL ') or re.match(r'FAIL \d+/\d+', line):
+            continue
+        name = line[5:]
+        categories.append(next((category for prefix, category in OWNER_FAILURE_CATEGORIES.items()
+                                if name.startswith(prefix)), 'other'))
+    return categories
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -70,11 +96,11 @@ def main() -> None:
                                capture_output=True, text=True, timeout=120)
         failure = subprocess.run([node, '--input-type=module', '-e', CONFIG_FAILURE, str(hud), str(home)],
                                  cwd=home, env=env, capture_output=True, text=True, timeout=20)
+        failures = owner_failures(owner.stdout)
         print(json.dumps({'synthetic_only': True, 'hud_version': '0.15.0',
                           'native_owner_security_fixture_passed': owner.returncode == 0,
                           'config_failure_blocks_git_mock_passed': failure.returncode == 0,
-                          'owner_failure_count': sum(line.startswith('FAIL ') and not re.match(r'FAIL \d+/\d+', line)
-                                                     for line in owner.stdout.splitlines())},
+                          'owner_failure_categories': failures},
                          sort_keys=True))
         if owner.returncode or failure.returncode:
             raise RuntimeError('HUD safety fixture failed; raw output withheld')
