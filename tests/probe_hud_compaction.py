@@ -26,6 +26,8 @@ const hud = process.argv[1], home = process.argv[2];
 const { getContextPercent } = await import(pathToFileURL(path.join(hud, 'dist', 'stdin.js')));
 const { applyContextWindowFallback } = await import(pathToFileURL(path.join(hud, 'dist', 'context-cache.js')));
 const { formatContextValue } = await import(pathToFileURL(path.join(hud, 'dist', 'utils', 'format.js')));
+const { DEFAULT_CONFIG } = await import(pathToFileURL(path.join(hud, 'dist', 'config.js')));
+const { main } = await import(pathToFileURL(path.join(hud, 'dist', 'index.js')));
 let raw = ''; for await (const part of process.stdin) raw += part;
 const frames = JSON.parse(raw), now = Date.now();
 const deps = { homeDir: () => home, now: () => now, random: () => 1 };
@@ -34,14 +36,42 @@ frames.before.transcript_path = transcript;
 applyContextWindowFallback(frames.before, deps);
 const before = getContextPercent(frames.before);
 const withoutHint = getContextPercent(frames.after);
+const stale = structuredClone(frames.after);
+stale.transcript_path = transcript;
+applyContextWindowFallback(stale, deps);
+const noHintRestoredOldUsage = stale.context_window.current_usage?.cache_read_input_tokens === 82000;
 frames.after.transcript_path = transcript;
+const renderFrame = structuredClone(frames.after);
 applyContextWindowFallback(frames.after, deps, undefined,
   { lastCompactBoundaryAt: new Date(now + 1000), lastCompactPostTokens: 51271 });
 const afterHint = getContextPercent(frames.after);
 const both = formatContextValue({stdin: frames.after, config: {display: {}}}, afterHint, 'both');
+const config = structuredClone(DEFAULT_CONFIG);
+config.gitStatus.enabled = false;
+config.display.contextValue = 'both';
+config.display.autocompactBuffer = 'disabled';
+config.display.showUsage = false;
+config.display.showContextBar = false;
+const rendered = [], errors = [], oldLog = console.log;
+console.log = (...parts) => rendered.push(parts.join(' '));
+try {
+  await main({
+    readStdin: async () => renderFrame,
+    parseTranscript: async () => ({tools: [], skills: [], mcpServers: [], mcpErrors: [], agents: [], todos: [],
+      lastCompactBoundaryAt: new Date(now + 1000), lastCompactPostTokens: 51271}),
+    countConfigs: async () => ({claudeMdCount: 0, rulesCount: 0, mcpCount: 0, hooksCount: 0}),
+    loadConfig: async () => config,
+    applyContextWindowFallback: (input, _, name, hint) => applyContextWindowFallback(input, deps, name, hint),
+    parseExtraCmdArg: () => null,
+    log: (...parts) => errors.push(parts.join(' ')),
+  });
+} finally { console.log = oldLog; }
+const plain = rendered.join('\n').replace(/\x1b\[[0-9;]*m/g, '');
 console.log(JSON.stringify({before, withoutHint, afterHint: getContextPercent(frames.after),
   afterUsageStillUnknown: frames.after.context_window.current_usage === null,
-  bothModeShowsZeroTokensWithNonzeroPercent: afterHint > 0 && /\(0\//.test(both)}));
+  noHintRestoredOldUsage,
+  bothModeShowsZeroTokensWithNonzeroPercent: afterHint > 0 && /\(0\//.test(both),
+  realRendererShowsInconsistentBoth: errors.length === 0 && /6%\s*\(0\/872k\)/.test(plain)}));
 """
 
 
@@ -76,7 +106,9 @@ def main() -> None:
     print(json.dumps({"synthetic_only": True, "hud_version": version, "adapter_reports_unknown": True,
                       "before_percent": observed["before"], "without_compact_hint_percent": observed["withoutHint"],
                       "with_compact_hint_percent": observed["afterHint"],
+                      "no_hint_restored_old_usage": observed.get("noHintRestoredOldUsage") is True,
                       "both_mode_shows_zero_tokens_with_nonzero_percent": observed.get("bothModeShowsZeroTokensWithNonzeroPercent") is True,
+                      "real_renderer_shows_inconsistent_both": observed.get("realRendererShowsInconsistentBoth") is True,
                       "hint_keeps_usage_unknown": observed.get("afterUsageStillUnknown") is True}, sort_keys=True))
 
 

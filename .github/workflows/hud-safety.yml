@@ -1,0 +1,36 @@
+name: isolated-hud-safety-candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safety:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: jarrodwatts/claude-hud
+          ref: b86e1c3e5255880578de4b7cc87dc383228c2a18
+          path: external-hud
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply the fail-closed experiment to pinned upstream source
+        shell: bash
+        run: git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-git-safety.patch"
+      - name: Exercise upstream's owned-repository security controls and failed enumeration
+        run: python tests/probe_hud_security.py --hud-dir external-hud

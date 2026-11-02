@@ -189,6 +189,28 @@ The verified-runtime rollback controller passed the [three-platform candidate ga
 
 The status-line adapter's unknown-usage correction passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41446391248) and was installed as a standalone file. A synthetic child process verified that an unknown `current_usage` remains unknown and that the standard cache object is still withheld. The origin, managed ingress and Claude processes were not restarted. Individual plugins can still choose their own fallback for unknown usage; the local HUD 0.8.0 sample is documented in [COMPATIBILITY.md](COMPATIBILITY.md).
 
+On 2026-11-02 the fuller account-catalog reconciliation and optional cache
+telemetry controller passed their [source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41447807601);
+the matching runtime passed the [three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41445355599).
+The selected Mac bundle and its binaries were checked against their reviewed
+source lock and hashes. The controller was installed under the account and
+service locks, and the backend was rolled through the managed handoff. The
+original service and managed TLS ingress kept their processes and ports. A
+read-only catalog check found eight eligible models and a matching full
+fingerprint; both catalog routes and the previous rollback bundle validated.
+These checks did not send a model request or prove all active streams completed.
+The selected bundle includes the identity-checking ingress, but the current
+ingress is still the previous process and does not enforce that new check.
+Login recovery remains installed and healthy; a real reboot was not performed.
+
+Separately, the installed Claude HUD's Git-status display was temporarily
+disabled after reviewing upstream security advisories. The original HUD config
+was backed up under the private installation root; no plugin package or Claude
+process was replaced. A synthetic upstream 0.15.0 security check then failed on
+this Mac, so its experimental local correction has not been activated. The
+separate terminal-escape advisory is not resolved by disabling Git. See
+[SECURITY.md](SECURITY.md) for the limited evidence and outstanding work.
+
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
 Remaining work, updated 2026-11-01; execution order and acceptance gates are in [PLAN.md](PLAN.md):

@@ -1,0 +1,26 @@
+--- a/collector.mjs
++++ b/collector.mjs
+@@ -401,9 +401,12 @@
+   const overrides = ['-c', 'core.quotePath=false', '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'protocol.allow=never'];
+   let listed;
+   try {
+-    listed = await runGit(cwd, ['config', '--show-scope', '-z', '--get-regexp', '^filter\\.'], 1000);
+-  } catch {
+-    return overrides; // exits 1 when no filter is configured
++    // A regexp under a UTF-8 locale can fail to match a non-UTF-8 filter
++    // subsection even though Git will execute that filter. Enumerate all config
++    // instead, and fail closed if enumeration is incomplete or fails.
++    listed = await runGit(cwd, ['config', '--show-scope', '-z', '--list'], 1000);
++  } catch {
++    throw new Error('cannot safely enumerate git config');
+   }
+   const drivers = new Set();
+   const fields = listed.split('\0');
+@@ -411,6 +414,7 @@
+     const [scope, entry] = [fields[i], fields[i + 1]];
+     if (scope === 'global' || scope === 'system') continue;
+     const key = entry.split('\n', 1)[0];
++    if (!key.startsWith('filter.')) continue;
+     const name = key.slice('filter.'.length, key.lastIndexOf('.'));
+     if (!/^[\w.-]+$/.test(name)) throw new Error('a repo filter driver git could not be told to skip');
+     drivers.add(name);

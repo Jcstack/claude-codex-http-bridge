@@ -64,6 +64,28 @@ The read-only diagnostic report never opens key files or contacts an endpoint. I
 
 Review updates to the pinned proxy release and its security advisories before changing the version or hashes. Do not enable LAN binding, request body logging, or the management interface without a separate security review.
 
+The separate Claude HUD plugin also needs its own security review. The local
+0.8.0 installation is within the affected ranges of upstream advisories on
+[repository Git configuration](https://github.com/jarrodwatts/claude-hud/security/advisories/GHSA-fq7j-8hxj-jfqh),
+[partial-clone fetches](https://github.com/jarrodwatts/claude-hud/security/advisories/GHSA-25hg-g83m-4w35),
+and [terminal escapes](https://github.com/jarrodwatts/claude-hud/security/advisories/GHSA-q436-5523-5x82).
+Git-status collection was temporarily disabled in the local HUD configuration
+using the upstream workaround; the former configuration was backed up privately.
+This does not address the terminal-escape issue or prove prior compromise. No
+Claude process or bridge service was restarted.
+
+Upstream 0.15.0 was downloaded at commit `b86e1c3e5255880578de4b7cc87dc383228c2a18`
+and each archive file was matched against that Git tree. A controlled invocation
+of its own owner security fixture failed on this Mac. The separate
+[fail-closed experiment](upstream/patches/claude-hud-v0.15-git-safety.patch)
+passed the fixture and a synthetic config-enumeration failure check locally;
+it is not an upstream fix, a complete security audit, or an installed plugin.
+The [fixture runner](tests/probe_hud_security.py) runs reviewed plugin code with
+a temporary home and filtered environment, not an OS sandbox. The user's
+existing HUD command selects plugin versions dynamically, so changing the cache
+would affect running sessions at their next status refresh and requires more
+compatibility and safe-update validation first.
+
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 
 The bridge's WebFetch PDF hook processes the tool result locally and replaces only the binary-PDF summary with a warning and the path Claude Code already returned. It does not upload or copy the PDF. Claude Code's own WebFetch may leave downloaded binaries in its session `tool-results` directory; the hook does not remove them. Review that directory according to your local retention policy. [Upstream retention report](https://github.com/anthropics/claude-code/issues/104178).

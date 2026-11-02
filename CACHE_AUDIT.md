@@ -233,7 +233,7 @@ even though the fake service supplied no lifetime. The [reproducible probe](test
 uses a temporary home and no provider. Its interactive path has been tested
 locally on macOS; Windows console behavior remains unverified.
 
-A source candidate continues to remove the standard `prompt_cache` object by
+The adapter continues to remove the standard `prompt_cache` object by
 default. In an opt-in extension, it passes the validated `requests`,
 `caching_observed` and `hit_ratio` fields under
 `claude_codex_bridge.reported_main_cache`, while withholding inferred warmth,
@@ -242,8 +242,10 @@ report is not proof that caching is off. These values describe counters
 reported to Claude for the main conversation, not a provider-wide hit rate, a
 guaranteed cache lifetime, or a bill. A continuing session can span account or
 model changes, so the counters do not establish account-level cache isolation.
-Existing plugins need explicit support
-for the extension; it has not yet been installed in the live status-line path.
+The extension passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41447807601)
+and is installed locally. Set `CLAUDE_CODEX_STATUSLINE_CACHE_METRICS=1` before
+starting a new session to enable it for that session; existing session profiles
+are unchanged. Plugins need explicit support for the extension to display it.
 
 Passing a partial object as the standard `prompt_cache` is unsafe for some
 plugins. For example, [this status-line implementation](https://github.com/tsalkin/claude-code-statusline/blob/17396d0bb11a47b184c7eb3709088dac36d7c91d/statusline.sh)

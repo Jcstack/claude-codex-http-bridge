@@ -90,7 +90,9 @@
 !upstream/patches/effort-downgrade-guard.patch
 !upstream/patches/midconversation-effort.patch
 !upstream/patches/midconversation-system-fidelity.patch
+!upstream/patches/claude-hud-v0.15-git-safety.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml
 !.github/workflows/candidate-proxy.yml
+!.github/workflows/hud-safety.yml

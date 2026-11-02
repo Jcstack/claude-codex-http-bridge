@@ -87,14 +87,13 @@ protocol are not certified by the handoff tests.
 The managed translator's model list is a snapshot taken when its backend
 generation starts. During `account use`, the launcher verifies the selected
 account against the account-specific model IDs and available model metadata.
-The installed controller compares eligible model IDs, context windows and
-effort levels and, when they differ, prepares and checks a replacement backend,
-verifies the snapshot again before publication, and keeps the existing TLS
-ingress and admitted streams. A source candidate also compares the fingerprint
-of the snapshot's input modalities, search flag and effective compact window,
-and checks the prepared client's compact windows against that snapshot. This
-candidate has not yet been activated on the running installation. The generated
-backend model rows still do not encode input modalities; detecting a change does
+The installed controller compares the fingerprint of eligible model IDs,
+context windows, effort levels, input modalities, the search flag and the
+effective compact window. When that snapshot differs, it prepares and checks a
+replacement backend, verifies the snapshot again before publication, and keeps
+the existing TLS ingress and admitted streams. New managed launches also check
+their prepared context and compact windows against the selected snapshot. The
+generated backend model rows still do not encode input modalities; detecting a change does
 not by itself update an existing client's capability display or establish image
 support on the new account. The snapshot covers the fields listed above, not
 unknown metadata that a future provider version may introduce.
