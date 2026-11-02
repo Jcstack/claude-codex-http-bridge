@@ -112,3 +112,4 @@
 !.github/workflows/mcp-definition-gate.yml
 !.github/workflows/session-metadata-gate.yml
 !.github/workflows/ws-keepalive-observation.yml
+!.github/workflows/controller-layout-observation.yml

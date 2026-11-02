@@ -75,6 +75,31 @@ handoff exists, let direct sessions finish on their existing service and use
 the managed endpoint for new sessions; resuming a session is a new client
 process, not proof that the old stream was preserved.
 
+## Controller-source publication
+
+The current installer replaces controller modules individually. An immutable
+versioned source directory and an atomic selection are a possible way to avoid
+mixed module generations, but moving the current files there is not sufficient.
+On this Mac, a disposable directory experiment set the launcher's installation
+root to a synthetic parent while loading copied code from a child generation.
+The launcher used the parent, while the model, usage and status-line helpers
+still resolved their root from the child. A synthetic status-line update wrote
+its model ledger under the child. The autostart entry's current source-directory
+check would reject that parent, and a source lock stored only at the parent was
+not found by the copied runtime module. These are observations of a deliberately
+naive layout, not evidence of a defect in the running installation.
+
+A safe design must bind each launched process to one complete, verified source
+generation while keeping credentials, account selection, service state, login
+recovery, status-line preferences and session ledgers in the authorized private
+installation root. Executables spawned later by a running controller must use a
+consistent generation. Define how the generation and root are authenticated,
+how Windows ACLs and macOS launch agents are handled, what happens if the
+selection or files are replaced during a launch, how old processes retain their
+source files, and how rollback and cleanup avoid deleting an in-use generation.
+Existing sessions and autostart state cannot be assumed to migrate merely
+because an atomic pointer changes. No versioned installer is activated.
+
 ## Acceptance before any live activation
 
 - Exercise new and old real locked Claude clients with fake models, including
