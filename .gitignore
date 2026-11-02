@@ -80,6 +80,11 @@
 !tests/claude-client/
 !tests/claude-client/package.json
 !tests/claude-client/package-lock.json
+!tests/validator-fixture/
+!tests/validator-fixture/go.mod
+!tests/validator-fixture/go.sum
+!tests/validator-fixture/validator_test.go
+!tests/validator-fixture/audit.py
 !gateway/
 !gateway/go.mod
 !gateway/*.go

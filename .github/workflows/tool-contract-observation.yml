@@ -30,6 +30,19 @@ jobs:
         with:
           go-version: '1.27.3'
           cache: false
+      - name: Verify validator dependency-audit failure handling
+        run: python -m unittest tests.test_validator_dependency_audit -q
+      - name: Exercise the separate synthetic schema-validator fixture
+        working-directory: tests/validator-fixture
+        shell: bash
+        env:
+          GOFLAGS: -mod=readonly
+        run: |
+          set -euo pipefail
+          go mod download all
+          go mod verify
+          python audit.py
+          go test -v -count=1 -timeout 20s ./...
       - name: Build and test the isolated request-guard candidate
         shell: bash
         run: |

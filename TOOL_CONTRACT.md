@@ -78,9 +78,34 @@ library. Any candidate must disable uncontrolled external reference fetching,
 bound time and memory, protect error contents, verify dialect and numeric
 semantics, and pass positive and adversarial controls before adding a dependency.
 
+A separate [validator fixture](tests/validator-fixture/validator_test.go) uses
+`santhosh-tekuri/jsonschema` v6.0.3 with synthetic data only; it is a standalone
+test module, not a production dependency or an output guard. It bounds fixture
+input bytes, nesting, token count, number length and exponent before compiling
+or validating; duplicate keys and external reference loading are rejected. A
+large-integer const, local references and selected invalid arguments passed
+their positive/negative controls. In this configuration, Draft 2020's default
+format behavior accepted an invalid IPv4 string until format assertions were
+explicitly enabled. An unknown format remained unenforced even with assertions,
+so a production design needs an explicit format/dialect policy. These examples
+do not establish bounded CPU or memory for every schema, streaming safety,
+complete JSON Schema equivalence, or protection against every numeric edge.
+
+The fixture initially resolved `golang.org/x/text` v0.14.0, for which OSV
+reported [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) and
+[GO-2026-6629](https://pkg.go.dev/vuln/GO-2026-6629). It was repinned to
+v0.42.0, already used by the reviewed upstream source. At this check, OSV
+reported no matches for the resulting six public modules; that is not a
+reachability analysis or proof of safety. The fixture's [offline checksum lock](tests/validator-fixture/go.sum)
+and [public-module OSV check](tests/validator-fixture/audit.py) are separate
+from the active runtime and send no user prompts or credentials.
+
 The [manually dispatched workflow](.github/workflows/tool-contract-observation.yml)
 builds the isolated candidate from pinned public source on macOS, Linux and
-Windows. Passing its preflight gate does **not** remove the release blocker.
+Windows. The [first three-platform observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41519344980)
+passed the preflight, native-executor and existing tool-contract checks; it did
+not include the subsequently added standalone validator fixture. Passing the
+preflight gate does **not** remove the release blocker.
 [A synthetic benchmark fixture](tests/tool_contract_benchmark.go) provides a
 bounded starting point for measuring translation overhead; it is not an
 end-to-end latency or model-quality benchmark.
