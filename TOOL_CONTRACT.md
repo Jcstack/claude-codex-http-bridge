@@ -123,17 +123,17 @@ runtime change.
 
 The [selected public-suite fixture](tests/validator-fixture/conformance_test.go)
 also runs 25 files from a [pinned JSON Schema Test Suite commit](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/3f05891cac5d51ffa068d7076d1372130e00c829).
-On macOS, 836 cases reached validation: none were falsely accepted and 17 were
-falsely rejected against the suite's expected results. All 17 concerned
+On macOS, Linux and Windows, 836 cases reached validation on each runner: none
+were falsely accepted and 17 were falsely rejected against the suite's expected
+results. All 17 concerned
 `format` values: the fixture explicitly asserts formats, whereas those draft
 2020-12 cases treat the format as an annotation by default. One additional
 case was refused by the fixture's exponent limit before validation. This is a
 deliberate fixture-policy comparison, not a claim that the library or the
 suite is wrong. The selected cases omit many files, optional and remote-reference
 scenarios; the separate regexp counterexample below demonstrates why the zero
-false-acceptance count does not establish complete safety. The validator step
-including this subset succeeded on all three platforms in [this observation run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41523384353);
-other steps in that run may still be in progress.
+false-acceptance count does not establish complete safety. The [full observation run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41522713263)
+passed on all three platforms.
 
 The default Go regexp engine adds another concrete incompatibility. In the
 local fixture, the schema pattern `^.$` accepted a carriage return and the
@@ -164,12 +164,27 @@ and refusal of external schema references. A deliberately hanging child was
 canceled after an explicit readiness signal, a waiting second call timed out,
 and a later call reused the released slot; oversized synthetic output was
 discarded. The process receives a minimal environment and test-only data; a
-synthetic unrelated secret variable was not inherited in the local control.
+synthetic unrelated secret variable was not inherited in the control on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41523801706).
 This fixture has no hard memory or CPU quota, process-tree sandbox, production
 protocol, streamed tool handling, or deployed integration; it does not solve
-the known regex and format differences. Its validator step succeeded on macOS,
-Linux and Windows in the same observation run before the later local synthetic
-environment-variable control was added.
+the known regex and format differences.
+
+A separate [synthetic stream-gate fixture](tests/validator-fixture/stream_gate_test.go)
+prototypes a narrower release rule: buffer at most eight synthetic function
+calls, compare item/call identities and accumulated arguments against their
+terminal counterparts, and validate every call before exposing any of them.
+It accepts only a small object schema subset whose properties are all required
+strings and whose additional properties are forbidden; schemas using patterns,
+formats or other keywords are refused. Local cases cover interleaved valid
+calls, an invalid parallel call, missing or changed terminal data, duplicate
+identities, late deltas, cancellation, an oversized argument and a different
+request's call. The fixture and its worker passed a local Go race-detector run.
+
+This is an abstract, sequential event model: it does not parse actual Responses
+or Messages streams, authenticate real session/tool identities, execute tools,
+cover post-release cancellation or implement eager streaming. It has no CPU or
+memory quota and is not activated. Its narrow schema subset is a temporary
+fail-closed research constraint, not complete strict-tool compatibility.
 
 The fixture initially resolved `golang.org/x/text` v0.14.0, for which OSV
 reported [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) and
