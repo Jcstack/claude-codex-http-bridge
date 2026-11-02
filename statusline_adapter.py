@@ -22,16 +22,20 @@ def corrected_payload(payload: dict, context_windows: dict[str, int], codex_limi
         context = result.get("context_window")
         context = dict(context) if isinstance(context, dict) else {}
         usage = context.get("current_usage")
-        usage = usage if isinstance(usage, dict) else {}
-        tokens = sum(
-            value for name in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
-            if type(value := usage.get(name)) is int and value > 0
-        )
-        percent = min(100, int(tokens * 100 / window + 0.5)) if tokens else 0
+        names = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+        values = [usage.get(name) for name in names] if isinstance(usage, dict) else []
+        if len(values) == len(names) and all(type(value) is int and value >= 0 for value in values):
+            tokens = sum(values)
+            # Integer arithmetic avoids overflowing a float on malformed input.
+            percent = min(100, (tokens * 200 + window) // (window * 2))
+        else:
+            # Claude can clear current_usage after /compact or before its first
+            # response. An unknown usage must not be reported as zero.
+            percent = None
         context.update({
             "context_window_size": window,
             "used_percentage": percent,
-            "remaining_percentage": 100 - percent,
+            "remaining_percentage": 100 - percent if percent is not None else None,
         })
         result["context_window"] = context
     elif isinstance(result.get("context_window"), dict):

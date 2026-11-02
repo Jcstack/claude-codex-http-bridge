@@ -510,6 +510,28 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(future["context_window"]["context_window_size"], 4_000_000)
         self.assertEqual(future["context_window"]["used_percentage"], 3)
 
+    def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
+        name = "gpt-6-astra"
+        for usage in (None, {}, {"input_tokens": 100},
+                      {"input_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": -1},
+                      {"input_tokens": True, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}):
+            with self.subTest(usage=usage):
+                payload = {"model": {"id": name}, "context_window": {"context_window_size": 1_000_000,
+                           "used_percentage": 50, "remaining_percentage": 50, "current_usage": usage}}
+                result = statusline_adapter.corrected_payload(payload, {name: 872_000})
+                self.assertEqual(result["context_window"]["context_window_size"], 872_000)
+                self.assertIsNone(result["context_window"]["used_percentage"])
+                self.assertIsNone(result["context_window"]["remaining_percentage"])
+                self.assertEqual(payload["context_window"]["used_percentage"], 50)
+        values = {"input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+        payload = {"model": {"id": name}, "context_window": {"current_usage": values}}
+        known_zero = statusline_adapter.corrected_payload(payload, {name: 872_000})
+        self.assertEqual(known_zero["context_window"]["used_percentage"], 0)
+        self.assertEqual(known_zero["context_window"]["remaining_percentage"], 100)
+        values["cache_read_input_tokens"] = 10**400
+        huge = statusline_adapter.corrected_payload(payload, {name: 872_000})
+        self.assertEqual(huge["context_window"]["used_percentage"], 100)
+
     def test_codex_quota_maps_only_real_windows_and_requires_matching_account(self) -> None:
         response = {"rateLimitsByLimitId": {"codex": {
             "primary": {"windowDurationMins": 10080, "usedPercent": 55, "resetsAt": 1793774315},

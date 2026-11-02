@@ -35,6 +35,22 @@ Checked 2026-10-30. Claude Code is the harness. The local proxy supplies model i
 
 Sources: [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [OpenAI model selection](https://developers.openai.com/api/docs/guides/model-selection), [Claude model overview](https://platform.claude.com/docs/en/models/overview), [Claude Code model configuration](https://code.claude.com/docs/en/model-config), and [status-line input schema](https://code.claude.com/docs/en/statusline).
 
+Claude Code documents that `current_usage` may be null before the first API
+response and immediately after `/compact`. The existing adapter can turn that
+unknown state into `0%`. A source candidate preserves null percentages until
+all three input counters are available, while retaining a discovered context
+size. It has not yet been installed into the running status-line path.
+
+An isolated [HUD observation](tests/probe_hud_compaction.py) with the locally
+installed Claude HUD 0.8.0 used only synthetic frames. Its percentage helper
+returned `0%` when invoked without a transcript or compact hint, even when the
+adapter supplied null. With a synthetic recent compact boundary and post-token
+hint, HUD returned `6%` for 51,271 out of 872,000 tokens and kept
+`current_usage` null. This samples the plugin's calculation and fallback
+functions, not its complete UI or other plugin versions. The post-token hint
+is not a provider usage report. The probe executes the explicitly supplied HUD
+JavaScript with a temporary home and configuration; it is not an OS sandbox.
+
 For future models with fewer reasoning levels, Claude Code documents a
 per-model [`maxEffortLevel`](https://code.claude.com/docs/en/settings-reference#maxeffortlevel).
 In a credential-free Claude Code 2.1.316 fixture, a `high` cap changed an
