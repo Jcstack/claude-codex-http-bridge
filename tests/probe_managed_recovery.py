@@ -122,7 +122,28 @@ def main():
                     assert rolling_runtime.catalog_matches(root, value, {MODEL: SPEC})
                     payload = {"model": MODEL, "max_tokens": 100,
                                "messages": [{"role": "user", "content": "fixture"}]}
-                    blocks, _ = stream(initial_port, front, payload, ca_file=runtime / "ca.pem")
+                    try:
+                        origin_metadata = rolling_runtime.get_json(runtime, initial_port, "/bridge/origin/v1/models",
+                                                                  rolling_runtime.private_key(runtime / "origin-guard-key"))
+                        assert MODEL in {item["id"] for item in origin_metadata.get("data", [])}
+                        blocks, _ = stream(initial_port, front, payload, ca_file=runtime / "ca.pem")
+                    except Exception:
+                        # Only fixed diagnostic labels leave the disposable fixture.
+                        # Runtime logs can contain keys or requests, so never print them.
+                        labels = ("unknown authority", "certificate", "tls handshake", "connection refused",
+                                  "deadline", "timeout", "unauthorized", "forbidden", "502", "503", "eof")
+                        row = value["generations"][value["current"]]
+                        classes = {}
+                        for name, path in (("ingress", runtime / "ingress.log"),
+                                           ("backend", runtime / value["current"] / "proxy.log")):
+                            text = path.read_text(errors="replace").lower() if path.is_file() else ""
+                            classes[name] = [label for label in labels if label in text]
+                        print(json.dumps({"synthetic_recovery_failed": True,
+                            "front_owner_matches": launcher.listener_pids(value["port"]) == {value["pid"]},
+                            "backend_owner_matches": launcher.listener_pids(row["port"]) == {row["pid"]},
+                            "origin_owner_matches": launcher.listener_pids(base["port"]) == {base["pid"]},
+                            "origin_requests": len(Upstream.requests), "log_classes": classes}), flush=True)
+                        raise
                     assert "".join(block.get("text", "") for block in blocks) == "FIXTURE"
                     print(json.dumps({"synthetic_only": True, "same_port_ca_and_client_key": "pass",
                                       "new_origin_port": "pass", "occupied_port_refused": "pass",
