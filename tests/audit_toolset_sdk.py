@@ -125,6 +125,9 @@ def audit(root):
     wait = ast.unparse(browser["wait"]["fields"]["duration"])
     if (scroll, wait) != ("Optional[int]", "float"):
         raise ValueError("Expected numeric input annotations changed")
+    shared = set(browser) & set(computer)
+    different_fields = sorted(name for name in shared
+                              if set(browser[name]["fields"]) != set(computer[name]["fields"]))
     return {
         "expected_snapshot": SNAPSHOT,
         "source_integrity_verified_by_fixture": False,
@@ -132,7 +135,8 @@ def audit(root):
         "browser_members": len(browser),
         "computer_members": len(computer),
         "browser_disabled_by_default": disabled,
-        "shared_names_requiring_family_identity": sorted(set(browser) & set(computer)),
+        "shared_names_requiring_family_identity": sorted(shared),
+        "shared_names_with_different_input_field_names": different_fields,
         "browser_scroll_amount_annotation": scroll,
         "browser_wait_duration_annotation": wait,
         "schemas_or_executor_permissions_verified": False,

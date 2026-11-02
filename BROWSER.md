@@ -25,9 +25,13 @@ The official Python SDK's [version 2.4.0 source](https://github.com/anthropics/a
 contains generated member input models and discriminated response unions. The
 [static inventory](tests/audit_toolset_sdk.py) reads that source without
 importing or executing it: it found input classes for all 31 browser and 17
-computer members, with 16 names shared across the families. It also confirms
+computer members, with 16 names shared across the families. Each shared name
+has a different set of top-level input field names in these generated types.
+It also confirms
 that upload, JavaScript, console and network readers default to disabled in
-that snapshot. The audit does not verify the checkout's integrity itself: fetch
+that snapshot. The member inventory and negative controls passed on
+[macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41530229705);
+the field-name comparison was added afterward. The audit does not verify the checkout's integrity itself: fetch
 the public commit and verify its SHA and clean state independently, as the
 [isolated workflow](.github/workflows/toolset-sdk-inventory.yml) does. It is
 not a schema exporter, tool executor, or permission system.

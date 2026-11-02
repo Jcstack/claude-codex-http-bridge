@@ -43,6 +43,8 @@ class StaticInventoryTest(unittest.TestCase):
         self.assertEqual((result["browser_members"], result["computer_members"]), (31, 17))
         self.assertEqual(len(result["shared_names_requiring_family_identity"]), 16)
         self.assertIn("scroll", result["shared_names_requiring_family_identity"])
+        self.assertEqual(result["shared_names_with_different_input_field_names"],
+                         result["shared_names_requiring_family_identity"])
         self.assertFalse(result["source_integrity_verified_by_fixture"])
         self.assertFalse(result["schemas_or_executor_permissions_verified"])
 
