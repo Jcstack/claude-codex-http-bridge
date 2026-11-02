@@ -64,6 +64,9 @@ jobs:
         run: python tests/claude_fixture.py
       - name: Verify local Claude behavior without a model account
         run: python tests/probe_claude_client.py
+      - name: Verify picker reload in an isolated terminal
+        if: runner.os != 'Windows'
+        run: python tests/probe_picker_reload.py
       - name: Verify subagent default, alias and forced model routing
         run: python tests/probe_subagent_models.py
       - name: Verify per-model effort limits with a synthetic gateway

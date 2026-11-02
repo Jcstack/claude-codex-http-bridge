@@ -119,7 +119,6 @@ jobs:
           python tests/probe_parallel_stream.py "${{ matrix.binary }}"
           if [ "$RUNNER_OS" != "Windows" ]; then
             python tests/probe_parallel_stream.py "${{ matrix.binary }}" --resume-interrupted
-            python tests/probe_picker_reload.py
           fi
           python tests/smoke_model_state.py "${{ matrix.binary }}"
           python tests/smoke_native_compaction.py "${{ matrix.binary }}"

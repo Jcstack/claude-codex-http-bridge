@@ -399,11 +399,14 @@ class Management:
         self.base = f"http://127.0.0.1:{state['port']}/v0/management/"
 
     def call(self, method: str, path: str, body: dict | None = None) -> dict:
+        import launcher
         resource = path.partition("?")[0]
         if (method, resource) not in {
                 ("GET", "auth-files"), ("GET", "auth-files/models"),
                 ("POST", "auth-files"), ("PATCH", "auth-files/status")}:
             raise RuntimeError("Unapproved account management operation")
+        if not launcher.state_is_live(self.root / "runtime", self.state):
+            raise RuntimeError("Account management owner changed; no key was sent")
         return request_json(self.base + path, method=method,
                             headers={"Authorization": "Bearer " + self.key, "Content-Type": "application/json"},
                             data=json.dumps(body).encode() if body is not None else None)

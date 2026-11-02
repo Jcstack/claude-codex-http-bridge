@@ -28,7 +28,8 @@ instance when creating or reusing an origin. Its private state retains only a
 hash of the PID, creation identity and executable path. Legacy state without
 that hash is adopted only after the listener's executable matches this
 installation; identity or listener mismatches fail closed. This narrows PID
-reuse risk after reboot for controller operations. It does not yet add process
+reuse risk after reboot for controller operations. Account management rechecks
+the owner before each management request. It does not yet add process
 birth verification to each origin request in the already-running Go ingress;
 that hop still checks PID and port before sending the localhost key.
 

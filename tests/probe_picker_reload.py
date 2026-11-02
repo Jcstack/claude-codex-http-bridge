@@ -120,14 +120,27 @@ def run_case(claude, mode):
                 else:
                     write_settings(launch, picker(True))
                     time.sleep(3)
-                os.write(master, b"/model\r")
-                second = collect(15 if mode == "user" else 5, (ALPHA, BETA, GAMMA) if mode == "user" else (ALPHA, BETA))
+                # The hook can finish before the client has finished applying
+                # the file-watcher update. Reopen the picker while waiting for
+                # an eventual update; the same client must remain alive.
+                attempts = 0
+                deadline = time.monotonic() + (30 if mode == "user" else 5)
+                second = b""
+                while time.monotonic() < deadline:
+                    attempts += 1
+                    os.write(master, b"/model\r")
+                    second = collect(min(8, max(0, deadline - time.monotonic())),
+                                     (ALPHA, BETA, GAMMA) if mode == "user" else (ALPHA, BETA))
+                    if mode != "user" or (ALPHA in second and BETA in second and GAMMA in second):
+                        break
+                    os.write(master, b"\x1b")
+                    collect(.5)
                 assert ALPHA in second and BETA in second, "Reopened synthetic picker was not visible"
                 assert (GAMMA in second) == (mode == "user"), "Synthetic picker reload differed from the expected source behavior"
                 assert process.poll() is None, "Synthetic client exited during picker test"
                 assert not server.requests, "Synthetic picker unexpectedly sent a model request"
                 return {"case": mode, "initial_models_visible": True, "new_model_visible": GAMMA in second,
-                        "same_client_alive": True}
+                        "same_client_alive": True, "picker_open_attempts": attempts}
             finally:
                 if process.poll() is None:
                     process.terminate()
@@ -156,8 +169,14 @@ def main():
     for mode in ("launch", "user"):
         try:
             results.append(run_case(claude, mode))
-        except (OSError, ValueError, RuntimeError, AssertionError, subprocess.SubprocessError):
+        except (OSError, ValueError, RuntimeError, AssertionError, subprocess.SubprocessError) as error:
             print("Failed synthetic picker case: " + mode, file=sys.stderr)
+            allowed = {"Synthetic client exited during startup", "Initial synthetic picker was not visible",
+                       "Synthetic user settings change was not observed", "Reopened synthetic picker was not visible",
+                       "Synthetic picker reload differed from the expected source behavior",
+                       "Synthetic client exited during picker test", "Synthetic picker unexpectedly sent a model request"}
+            detail = str(error)
+            if detail in allowed: print("Synthetic picker failure stage: " + detail, file=sys.stderr)
             raise
     print(json.dumps({"mock_only": True, "cases": results}))
 

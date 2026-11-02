@@ -190,6 +190,10 @@ share was 94.8% of reported input tokens, which is not request hit rate and
 does not establish the compaction request's cache behavior. The main session
 continued afterward; one later HTTP 499 was recorded by both shared layers,
 without enough evidence here to identify the initiating client or cause.
+Within the recorded compaction interval the main log contained no assistant
+usage record that could be attributed to the summary request. An `xhigh`
+request was recorded immediately after the boundary; that later request does
+not establish the compaction's effort or cache usage.
 
 As a separate local-only control on 2026-11-02, a disposable TLS ingress,
 candidate translator and fake origin relayed synthetic messages of 100,000,

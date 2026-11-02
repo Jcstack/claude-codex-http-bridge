@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 import api_profile
+import accounts
 import launcher
 import process_identity
 import runtime_bundle
@@ -75,6 +76,18 @@ class ProcessIdentityTests(unittest.TestCase):
             api_profile.write_private(runtime / "service.json", json.dumps(state))
             with self.assertRaisesRegex(RuntimeError, "identity"):
                 launcher.read_state(runtime)
+
+    def test_account_management_rechecks_owner_before_sending_key(self):
+        owner = object.__new__(accounts.Management)
+        owner.root = Path("synthetic-root")
+        owner.state = {"pid": 1, "port": 1, "session": "session-fixture"}
+        owner.base = "http://127.0.0.1:1/v0/management/"
+        owner.key = "SYNTHETIC_PRIVATE_FIXTURE"
+        with patch.object(launcher, "state_is_live", return_value=False), \
+             patch.object(accounts, "request_json") as send:
+            with self.assertRaisesRegex(RuntimeError, "no key was sent"):
+                owner.call("GET", "auth-files")
+        send.assert_not_called()
 
 
 if __name__ == "__main__":
