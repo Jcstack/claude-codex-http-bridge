@@ -16,6 +16,14 @@ import windows_acl
 
 
 class AutostartTests(unittest.TestCase):
+    @staticmethod
+    def system_environment():
+        # Native Windows ACL tools still need the operating-system paths when
+        # a synthetic login environment removes inherited application keys.
+        allowed = {"SYSTEMROOT", "WINDIR", "PATH", "PATHEXT", "COMSPEC", "TEMP", "TMP",
+                   "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA"}
+        return {key: value for key, value in os.environ.items() if key.upper() in allowed}
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -77,7 +85,7 @@ class AutostartTests(unittest.TestCase):
     def test_macos_login_restores_system_proxy_without_persisting_url_or_credentials(self):
         proxy = "http://user:PRIVATE_FIXTURE_SENTINEL@127.0.0.1:4567"
         settings = {"exclude_simple": False, "exceptions": ["exact.example"]}
-        with patch.dict(os.environ, {"https_proxy": proxy, "no_proxy": "localhost"}, clear=True), \
+        with patch.dict(os.environ, {**self.system_environment(), "https_proxy": proxy, "no_proxy": "localhost"}, clear=True), \
              patch.object(autostart, "macos_proxy_settings", return_value=({"https": proxy}, settings)):
             policy = autostart.capture_macos_network_policy()
         self.assertNotIn("PRIVATE_FIXTURE_SENTINEL", json.dumps(policy))
@@ -85,7 +93,7 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(policy["bypass"], "localhost")
         runtime_bundle.write_file(self.root / "runtime" / "autostart-network.json",
                                   runtime_bundle.canonical(policy), 0o600)
-        with patch.dict(os.environ, {}, clear=True), \
+        with patch.dict(os.environ, self.system_environment(), clear=True), \
              patch.object(autostart.platform, "system", return_value="Darwin"), \
              patch.object(autostart, "macos_proxy_settings", return_value=({"https": proxy}, settings)):
             with autostart.startup_network_environment(self.root):
@@ -101,15 +109,43 @@ class AutostartTests(unittest.TestCase):
         policy = {"format": 1, "source": "system", "schemes": ["https"], "bypass": ""}
         runtime_bundle.write_file(self.root / "runtime" / "autostart-network.json",
                                   runtime_bundle.canonical(policy), 0o600)
-        with patch.dict(os.environ, {}, clear=True), \
+        with patch.dict(os.environ, self.system_environment(), clear=True), \
              patch.object(autostart.platform, "system", return_value="Darwin"), \
              patch.object(autostart, "macos_proxy_settings", return_value=({}, {})):
             with self.assertRaisesRegex(RuntimeError, "unavailable"):
                 with autostart.startup_network_environment(self.root): pass
             self.assertNotIn("HTTPS_PROXY", os.environ)
 
+    def test_recovery_uses_saved_system_proxy_and_fails_closed_if_missing(self):
+        policy = {"format": 1, "source": "system", "schemes": ["https"], "bypass": ""}
+        runtime_bundle.write_file(self.root / "runtime" / "autostart-network.json",
+                                  runtime_bundle.canonical(policy), 0o600)
+        proxy = "http://127.0.0.1:4567"
+
+        def start():
+            self.assertEqual(launcher.origin_process_environment()["HTTPS_PROXY"], proxy)
+            return 0
+
+        with patch.dict(os.environ, self.system_environment(), clear=True), \
+             patch.object(autostart.platform, "system", return_value="Darwin"), \
+             patch.object(autostart, "macos_proxy_settings", return_value=({"https": proxy}, {})), \
+             patch.object(autostart, "healthy", side_effect=[False, True]), \
+             patch.object(launcher, "helper_output"), patch.object(launcher, "bridge_start", side_effect=start):
+            self.assertEqual(autostart.run_once(self.root), 0)
+            self.assertNotIn("HTTPS_PROXY", os.environ)
+        self.assertEqual(self.result()["result"], "recovered")
+
+        with patch.dict(os.environ, self.system_environment(), clear=True), \
+             patch.object(autostart.platform, "system", return_value="Darwin"), \
+             patch.object(autostart, "macos_proxy_settings", return_value=({}, {})), \
+             patch.object(autostart, "healthy", return_value=False), \
+             patch.object(launcher, "bridge_start") as start_mock:
+            self.assertEqual(autostart.run_once(self.root), 1)
+            start_mock.assert_not_called()
+        self.assertEqual(self.result()["result"], "failed")
+
     def test_macos_proxy_capture_rejects_mismatch_and_unrepresentable_bypass(self):
-        with patch.dict(os.environ, {"https_proxy": "http://127.0.0.1:1111"}, clear=True), \
+        with patch.dict(os.environ, {**self.system_environment(), "https_proxy": "http://127.0.0.1:1111"}, clear=True), \
              patch.object(autostart, "macos_proxy_settings",
                           return_value=({"https": "http://127.0.0.1:2222"}, {})):
             with self.assertRaisesRegex(RuntimeError, "differ"):
@@ -122,21 +158,21 @@ class AutostartTests(unittest.TestCase):
                          "*.example.test,127.0.0.0/8")
 
     def test_explicit_startup_proxy_is_not_overwritten(self):
-        with patch.dict(os.environ, {"https_proxy": "http://127.0.0.1:3210"}, clear=True), \
+        with patch.dict(os.environ, {**self.system_environment(), "https_proxy": "http://127.0.0.1:3210"}, clear=True), \
              patch.object(autostart.platform, "system", return_value="Darwin"), \
              patch.object(autostart, "macos_proxy_settings", side_effect=AssertionError("unexpected system lookup")):
             with autostart.startup_network_environment(self.root):
                 self.assertEqual(os.environ["https_proxy"], "http://127.0.0.1:3210")
 
     def test_direct_system_network_allows_irrelevant_bypass_settings(self):
-        with patch.dict(os.environ, {}, clear=True), \
+        with patch.dict(os.environ, self.system_environment(), clear=True), \
              patch.object(autostart, "macos_proxy_settings",
                           return_value=({}, {"exclude_simple": True})):
             policy = autostart.capture_macos_network_policy()
         self.assertIsNone(policy["schemes"])
 
     def test_dynamic_system_policy_rejects_unrepresentable_bypass_at_login(self):
-        with patch.dict(os.environ, {}, clear=True), \
+        with patch.dict(os.environ, self.system_environment(), clear=True), \
              patch.object(autostart.platform, "system", return_value="Darwin"), \
              patch.object(autostart, "macos_proxy_settings",
                           return_value=({"https": "http://127.0.0.1:3210"},
