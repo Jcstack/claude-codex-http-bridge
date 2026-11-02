@@ -353,3 +353,40 @@ reproduction check. Neither a negative result nor a passing control proves
 that other servers, dynamic tool changes, plugins, permission rules, or future
 Claude versions are collision-free. Do not start unknown real MCP servers to
 run this fixture.
+
+## Offline definition comparison
+
+`claude-codex mcp-definitions` compares definitions retained in one explicitly
+specified local Claude session with a separately supplied snapshot. It does not
+initialize plugins, connect to MCP servers, change the conversation, or upload
+the inputs. A path on a network filesystem can still cause normal filesystem
+traffic. By default it prints counts and status only; `--show-names` prints the
+names with observed differences and can disclose private tool names locally.
+
+The snapshot format uses the exact full tool name Claude uses and Claude-style
+`input_schema`, for example:
+
+```json
+{"tools":[{"name":"mcp__example__lookup","description":"Synthetic lookup","input_schema":{"type":"object","properties":{}}}]}
+```
+
+```sh
+claude-codex mcp-definitions --session-file /private/session.jsonl --inventory /private/current-tools.json
+```
+
+The operator must obtain and protect the snapshot independently; descriptions
+and schemas can be confidential. This command does not prove that a snapshot
+is current, that two servers did not normalize to the same name, or that a
+tool is trustworthy. It compares only description and input-schema values in
+the observed `deferred_tools_record` format. Schema comparison ignores object
+key order but preserves array order and can flag semantically equivalent
+schemas as different. Other definition fields, eager
+tools, hidden client state, plugin precedence and actual model behavior are not
+checked. Missing, ambiguous, incomplete and unsupported entries are counted;
+zero differences with zero compared names is not a match. A changed input file,
+truncated record, symlinked file, unsupported recognized record, or size limit
+fails the check instead of silently accepting a partial result. An unrecognized
+future record format can be omitted, so no comparable records do not prove
+that the session has no retained definitions. Session input is limited
+to 256 MiB and each JSONL record to 8 MiB; the snapshot limit is 16 MiB. This
+is not a guard and does not prevent a stale tool call.

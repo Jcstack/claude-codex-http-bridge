@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m unittest tests.test_mcp_alias_policy -q
+          python -m unittest tests.test_mcp_alias_policy tests.test_mcp_definition_audit tests.test_bridge.BridgeTests.test_mcp_definition_dispatch_does_not_start_or_verify_a_service -q
           python tests/probe_mcp_alias_candidate.py
           python tests/probe_mcp_alias_candidate.py --diagnose-dynamic-race
           python tests/probe_mcp_alias_candidate.py --diagnose-removed-tool
@@ -44,6 +44,7 @@ jobs:
           python tests/probe_dynamic_toolsearch.py --description-change --fresh-description
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --repair-synthetic-record
+          python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --audit-synthetic
           python tests/probe_eager_tool_description.py --fresh-description
           python tests/probe_eager_tool_description.py
           python tests/probe_mcp_stream_recovery.py

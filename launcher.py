@@ -41,6 +41,8 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
         return "diagnostics", "", arguments[1:]
     if arguments and arguments[0] == "mcp-audit":
         return "mcp-audit", "", arguments[1:]
+    if arguments and arguments[0] == "mcp-definitions":
+        return "mcp-definitions", "", arguments[1:]
     if arguments and arguments[0] == "autostart":
         return "autostart", "", arguments[1:]
     if arguments and arguments[0] == "--help":
@@ -1086,6 +1088,7 @@ def main() -> int:
         print("Opt-in scoped computer use: claude-codex desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
         print("Read-only metadata: claude-codex diagnostics [--hours 2 | --lifetime] [--session UUID | --tracked] [--include-children].")
         print("Partial offline MCP name check: claude-codex mcp-audit [--config FILE] [--inventory FILE] [--show-names].")
+        print("Partial offline MCP definition check: claude-codex mcp-definitions --session-file FILE --inventory FILE.")
         print("Reported cache tokens: claude-codex cache telemetry enable | disable | status.")
         print("Reconcile a stale local quota gate after an upstream reset: claude-codex quota recover.")
         return 0
@@ -1095,6 +1098,9 @@ def main() -> int:
     if mode == "mcp-audit":
         import mcp_name_audit
         return mcp_name_audit.main(claude_args)
+    if mode == "mcp-definitions":
+        import mcp_definition_audit
+        return mcp_definition_audit.main(claude_args)
     if mode == "cache":
         if route != "subscription": raise ValueError("The shared cache telemetry preference uses the subscription route")
         import statusline_adapter

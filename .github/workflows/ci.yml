@@ -113,6 +113,8 @@ jobs:
         run: python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation
       - name: Test a description change only in a disposable session record
         run: python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --repair-synthetic-record
+      - name: Compare retained and current synthetic MCP definitions offline
+        run: python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --audit-synthetic
       - name: Check a fresh eager synthetic tool description
         run: python tests/probe_eager_tool_description.py --fresh-description
       - name: Observe a changed synthetic tool description with ToolSearch disabled

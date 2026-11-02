@@ -264,7 +264,7 @@ def main() -> None:
     private_dir(root / "bin")
     if windows:
         windows_acl.lock([root / "auth", root / "bin"])
-    for filename in ("bridge_models.py", "launcher.py", "diagnostics.py", "session_audit.py", "mcp_name_audit.py", "session_models.py", "statusline_adapter.py", "codex_usage.py",
+    for filename in ("bridge_models.py", "mcp_definition_audit.py", "launcher.py", "diagnostics.py", "session_audit.py", "mcp_name_audit.py", "session_models.py", "statusline_adapter.py", "codex_usage.py",
                      "api_profile.py", "accounts.py", "autostart.py", "process_identity.py", "quota_recovery.py", "rolling_runtime.py", "runtime_bundle.py", "capabilities.py",
                      "native_client.py", "native_services.py", "native_tools.py", "requirements-capabilities.lock",
                      "desktop_adapter.py", "desktop_scope.py", "desktop_windows.py",

@@ -297,6 +297,7 @@ def main():
     parser.add_argument("--fresh-description", action="store_true")
     parser.add_argument("--resume-observation", action="store_true")
     parser.add_argument("--repair-synthetic-record", action="store_true")
+    parser.add_argument("--audit-synthetic", action="store_true")
     args = parser.parse_args()
     if args.description_change and args.natural_query:
         raise RuntimeError("The synthetic description observation needs the exact selector")
@@ -306,6 +307,8 @@ def main():
         raise RuntimeError("The resume control requires the description-change scenario")
     if args.repair_synthetic_record and not args.resume_observation:
         raise RuntimeError("The synthetic record experiment requires the resume control")
+    if args.audit_synthetic and (not args.resume_observation or args.repair_synthetic_record):
+        raise RuntimeError("The synthetic audit needs the unchanged resume observation")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("The locked Claude fixture is required")
@@ -378,8 +381,24 @@ def main():
                 initial["forwarded"] = Path(str(marker) + ".forwarded").exists()
                 initial["hold_timed_out"] = Path(str(marker) + ".hold-timeout").exists()
                 resumed = None
+                audit_result = None
                 if args.resume_observation and sessions:
                     initial_records = synthetic_deferred_records(config, sessions[-1])
+                    if args.audit_synthetic:
+                        import mcp_definition_audit
+                        if not initial_records.get("available"):
+                            raise RuntimeError("Synthetic session for audit is unavailable")
+                        session_files = list((config / "projects").glob("*/" + sessions[-1] + ".jsonl"))
+                        if len(session_files) != 1:
+                            raise RuntimeError("Synthetic session for audit is unavailable")
+                        snapshot = root / "synthetic-inventory.json"
+                        snapshot.write_text(json.dumps({"tools": [{"name": ALIASES[0], "description": UPDATED_DESCRIPTION,
+                            "input_schema": {"type": "object", "properties": {}}}]}), encoding="utf-8")
+                        old, ambiguous, records, skipped = mcp_definition_audit.retained(session_files[0])
+                        current, duplicates = mcp_definition_audit.inventory(snapshot)
+                        audit_result = mcp_definition_audit.compare(old, ambiguous, current, duplicates, records, skipped)
+                        if audit_result["description_differences"] != 1 or audit_result["input_schema_differences"] != 0:
+                            raise RuntimeError("Synthetic offline audit did not detect the changed description")
                     rewritten = rewrite_synthetic_deferred_record(config, sessions[-1]) if args.repair_synthetic_record else False
                     for path in (server.refresh_marker, Path(str(marker) + ".forwarded")):
                         path.unlink(missing_ok=True)
@@ -405,6 +424,7 @@ def main():
                 "description_change": args.description_change,
                 "fresh_description": args.fresh_description,
                 "resume_observation": resumed,
+                "synthetic_offline_audit": audit_result,
                 "natural_query": args.natural_query, "intentional_refresh_barrier": args.hold_refresh,
                 "toolsearch_offered": initial["search_offered"], "old_search_result_seen": initial["old_result_seen"],
                 "old_discovery_found": initial["old_reference"], "first_original_called": bool(calls and calls[0] == ORIGINALS[0]),
