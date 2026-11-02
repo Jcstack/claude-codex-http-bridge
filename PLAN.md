@@ -53,6 +53,7 @@ The tracked session's anonymous marker is stored locally in the private installa
 - [ ] Exercise an actual macOS reboot and an authenticated Windows login on their respective hosts, and investigate Linux user-service support. Neither synthetic recovery nor a loaded login entry proves post-reboot behavior on every host.
 - [x] Implement controller-side process creation identity for new origin state and verify the executable before adopting legacy state. Local synthetic tests cover a reused PID/port, a changed creation identity, and an unrelated listener without exposing local keys. Windows and Linux source/install jobs passed; the existing macOS origin was enrolled without replacing its listener or process.
 - [ ] Extend process birth verification to each Go ingress-to-origin request without disrupting existing streams. The current ingress checks only PID and port at that boundary.
+- [x] Restrict new origin and isolated-account-validator environments so unrelated shell credentials and upstream remote-store selectors are not inherited. Preserve explicitly configured network proxies for the normal origin; the validator retains its direct-network policy. The existing origin continues with its original environment until its next natural restart.
 
 Acceptance: reproduce successful requests and genuine quota-exhaustion negative cases; automatically recover after a reset; avoid duplicate tool effects; preserve the original account, listener, keys, sessions, and already-started streams.
 

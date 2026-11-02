@@ -439,6 +439,19 @@ def service_environment(state: dict, runtime: Path, route: str = "subscription")
     return environment
 
 
+def origin_process_environment() -> dict[str, str]:
+    """Keep ambient credentials and unrelated proxy storage controls out."""
+    import rolling_runtime
+    environment = rolling_runtime.process_environment()
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
+    for name in ("NO_PROXY", "no_proxy"):
+        configured = os.environ.get(name, "").strip(", ")
+        environment[name] = ",".join(value for value in (configured, "127.0.0.1", "localhost") if value)
+    return environment
+
+
 def ensure_service(require_catalog: bool = True, route: str = "subscription") -> tuple[Path, dict, bool]:
     with service_lock(route) as runtime:
         state = read_state(runtime)
@@ -481,7 +494,8 @@ def ensure_service(require_catalog: bool = True, route: str = "subscription") ->
                 else:
                     detached = {"start_new_session": True}
                 proxy = subprocess.Popen([str(PROXY), "-config", str(config)], stdin=subprocess.DEVNULL,
-                                         stdout=log_handle, stderr=subprocess.STDOUT, cwd=directory, **detached)
+                                         stdout=log_handle, stderr=subprocess.STDOUT, cwd=directory,
+                                         env=origin_process_environment(), **detached)
             wait_for_private_listener(proxy, port)
             import process_identity
             identity = process_identity.capture(proxy.pid)

@@ -179,3 +179,18 @@ real user profile or migrate refresh credentials during evaluation. Its
 is useful for future design: account changes may affect continuation state and
 cache, not merely which account pays for a request. It does not prove identical
 behavior for this bridge's subscription route.
+
+## Mid-conversation instruction fidelity, 2026-11-02
+
+[CLIProxyAPI commit `f1ed891`](https://github.com/router-for-me/CLIProxyAPI/commit/f1ed8912bbed42e72499b4065c0eb93667123f98)
+explicitly introduced message-level system reminders as user-visible text.
+The [Magpie discussion](https://github.com/yetone/magpie/issues/2532) reports
+a related authority-versus-cache tradeoff in the opposite translation
+direction, and includes differing views about the impact. It does not prove
+behavior of this bridge or its users' sessions. Our own synthetic test found
+both the changed role and a separate expired-instruction mismatch. Official
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages)
+and [OpenAI](https://developers.openai.com/api/reference/go/resources/responses)
+specifications motivate the independent candidate and its negative controls;
+the private Codex backend, client/plugin behavior and provider cache effects
+still need verification before activation. See [the compatibility record](COMPATIBILITY.md).

@@ -33,6 +33,16 @@ the owner before each management request. It does not yet add process
 birth verification to each origin request in the already-running Go ingress;
 that hop still checks PID and port before sending the localhost key.
 
+New origin processes receive an allowlist of operating-system settings and
+explicitly configured HTTP/SOCKS proxy variables, rather than the full shell
+environment. This prevents unrelated credential variables and the upstream
+proxy's ambient remote-store selectors from changing credential storage.
+The isolated account validator uses its existing direct-network policy with
+the same restricted environment. A process started before this change keeps
+its original environment until it exits; the current origin was not restarted
+to apply it. A local check found none of the known storage or management
+override variable names in that existing process, without reporting values.
+
 The read-only diagnostic report never opens key files or contacts an endpoint. It emits only allowlisted counters, timing, hashed tags and compaction metadata. Origin and translator observations may describe the same request and are not additive. It does not export raw transcripts, error bodies or project paths.
 
 Review updates to the pinned proxy release and its security advisories before changing the version or hashes. Do not enable LAN binding, request body logging, or the management interface without a separate security review.

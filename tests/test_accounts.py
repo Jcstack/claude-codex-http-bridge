@@ -30,6 +30,25 @@ def tokens(account="synthetic-account-b", user=None):
 
 
 class AccountTests(unittest.TestCase):
+    def test_isolated_validator_does_not_inherit_storage_or_shell_credentials(self):
+        from types import SimpleNamespace
+        import launcher
+        import windows_acl
+        sentinel = "SYNTHETIC_PRIVATE_FIXTURE"
+        environment = {"GITSTORE_GIT_URL": sentinel, "PGSTORE_DSN": sentinel,
+                       "OBJECTSTORE_ENDPOINT": sentinel, "OPENAI_API_KEY": sentinel,
+                       "https_proxy": "http://127.0.0.1:8001"}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, environment), \
+             patch.object(windows_acl, "lock"), patch.object(windows_acl, "verify"), \
+             patch.object(accounts.subprocess, "run", return_value=SimpleNamespace(stdout="{}")), \
+             patch.object(accounts.subprocess, "Popen") as spawn, \
+             patch.object(launcher, "wait_for_private_listener"), patch.object(launcher, "wait_for_catalog"), \
+             patch.object(launcher, "stop_process"):
+            record = {"type": "codex", "access_token": "synthetic-access", "refresh_token": "synthetic-refresh"}
+            with accounts.isolated_account(Path(temporary), record):
+                child = spawn.call_args.kwargs["env"]
+                for name in environment: self.assertNotIn(name, child)
+
     def test_installed_inactive_validation_cannot_become_a_second_refresh_owner(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

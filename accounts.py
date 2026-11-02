@@ -310,6 +310,7 @@ def initial_login(root: Path) -> None:
 def isolated_account(root: Path, record: dict):
     """Run a disposable account validator; never edits the active auth directory."""
     import launcher
+    import rolling_runtime
     directory = root / "runtime-accounts"
     private_directory(directory)
     windows = platform.system() == "Windows"
@@ -339,9 +340,9 @@ def isolated_account(root: Path, record: dict):
         config_path, key_path = home / "config.yaml", home / "key"
         api_profile.write_private(config_path, config)
         api_profile.write_private(key_path, key + "\n")
-        environment = os.environ.copy()
-        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-            environment.pop(name, None)
+        # The validator keeps its existing direct-network policy and must not
+        # inherit credentials or upstream storage-selection environment vars.
+        environment = rolling_runtime.process_environment()
         process = subprocess.Popen([str(proxy), "-config", str(config_path)], cwd=home, env=environment,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:

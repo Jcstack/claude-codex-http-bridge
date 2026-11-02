@@ -16,6 +16,23 @@ import runtime_bundle
 
 
 class ProcessIdentityTests(unittest.TestCase):
+    def test_origin_environment_omits_unrelated_secrets_and_store_overrides(self):
+        sentinel = "SYNTHETIC_PRIVATE_FIXTURE"
+        values = {"OPENAI_API_KEY": sentinel, "GITHUB_TOKEN": sentinel, "HOME_JWT": sentinel,
+                  "PGSTORE_DSN": sentinel, "GITSTORE_GIT_URL": sentinel, "GITSTORE_GIT_TOKEN": sentinel,
+                  "OBJECTSTORE_ENDPOINT": sentinel, "OBJECTSTORE_SECRET_KEY": sentinel,
+                  "MANAGEMENT_PASSWORD": sentinel, "https_proxy": "http://127.0.0.1:8001",
+                  "no_proxy": "example.invalid", "SSL_CERT_FILE": "/fixture/ca.pem"}
+        with patch.dict(os.environ, values):
+            environment = launcher.origin_process_environment()
+        for name in ("OPENAI_API_KEY", "GITHUB_TOKEN", "HOME_JWT", "PGSTORE_DSN", "GITSTORE_GIT_URL",
+                     "GITSTORE_GIT_TOKEN", "OBJECTSTORE_ENDPOINT", "OBJECTSTORE_SECRET_KEY", "MANAGEMENT_PASSWORD"):
+            self.assertNotIn(name, environment)
+        self.assertEqual(environment["https_proxy"], "http://127.0.0.1:8001")
+        self.assertIn("example.invalid", environment["no_proxy"])
+        self.assertIn("127.0.0.1", environment["no_proxy"])
+        self.assertEqual(environment["SSL_CERT_FILE"], "/fixture/ca.pem")
+
     def test_real_self_identity_is_stable_and_invalid_birth_is_rejected(self):
         pid = os.getpid()
         identity = process_identity.capture(pid)
