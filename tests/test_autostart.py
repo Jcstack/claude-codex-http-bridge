@@ -5,6 +5,7 @@ import io
 import os
 from pathlib import Path
 import plistlib
+import socket
 import sys
 import tempfile
 import unittest
@@ -98,7 +99,8 @@ class AutostartTests(unittest.TestCase):
                                   runtime_bundle.canonical(policy), 0o600)
         with patch.dict(os.environ, self.system_environment(), clear=True), \
              patch.object(autostart.platform, "system", return_value="Darwin"), \
-             patch.object(autostart, "macos_proxy_settings", return_value=({"https": proxy}, settings)):
+             patch.object(autostart, "macos_proxy_settings", return_value=({"https": proxy}, settings)), \
+             patch.object(autostart, "verify_local_proxy_listener") as listener:
             with autostart.startup_network_environment(self.root):
                 child = launcher.origin_process_environment()
                 self.assertEqual(child["HTTPS_PROXY"], proxy)
@@ -107,6 +109,7 @@ class AutostartTests(unittest.TestCase):
                 self.assertNotIn("OPENAI_API_KEY", child)
             self.assertNotIn("HTTPS_PROXY", os.environ)
             self.assertNotIn("NO_PROXY", os.environ)
+            listener.assert_called_once_with("127.0.0.1", 4567)
 
     def test_macos_login_fails_closed_when_saved_system_proxy_disappears(self):
         policy = {"format": 1, "source": "system", "schemes": ["https"], "bypass": ""}
@@ -132,6 +135,7 @@ class AutostartTests(unittest.TestCase):
         with patch.dict(os.environ, self.system_environment(), clear=True), \
              patch.object(autostart.platform, "system", return_value="Darwin"), \
              patch.object(autostart, "macos_proxy_settings", return_value=({"https": proxy}, {})), \
+             patch.object(autostart, "verify_local_proxy_listener"), \
              patch.object(autostart, "healthy", side_effect=[False, True]), \
              patch.object(launcher, "helper_output"), patch.object(launcher, "bridge_start", side_effect=start):
             self.assertEqual(autostart.run_once(self.root), 0)
@@ -184,6 +188,17 @@ class AutostartTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "bypass"):
                 with autostart.startup_network_environment(self.root): pass
             self.assertNotIn("HTTPS_PROXY", os.environ)
+
+    def test_local_proxy_check_waits_for_a_listener_and_skips_remote_hosts(self):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+            with self.assertRaisesRegex(autostart.NetworkPolicyError, "unavailable"):
+                autostart.verify_local_proxy_listener("127.0.0.1", port)
+            listener.listen()
+            autostart.verify_local_proxy_listener("127.0.0.1", port)
+        with patch.object(autostart.socket, "create_connection", side_effect=AssertionError("external connection")):
+            autostart.verify_local_proxy_listener("proxy.example.test", 8080)
 
     @unittest.skipUnless(sys.platform == "darwin", "macOS SystemConfiguration required")
     def test_automatic_system_proxy_discovery_is_not_evaluated(self):

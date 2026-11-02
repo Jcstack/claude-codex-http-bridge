@@ -47,7 +47,9 @@ The macOS login policy stores only selected proxy schemes and bypass rules in
 the private runtime directory; proxy addresses and credentials are read from
 system settings in memory. When the saved policy expects a system proxy that is
 no longer configured, login recovery fails instead of silently connecting
-directly. Automatic proxy scripts and system bypass rules that cannot be mapped
+directly. A loopback proxy must accept a TCP connection before the origin starts;
+no credentials or inference request are sent in that check. Automatic proxy
+scripts and system bypass rules that cannot be mapped
 without changing their scope are not evaluated. The local health check verifies
 metadata routes, not upstream Internet connectivity or model inference.
 

@@ -13,6 +13,7 @@ import platform
 import plistlib
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -124,6 +125,19 @@ def read_macos_network_policy(root: Path) -> dict:
     return value
 
 
+def verify_local_proxy_listener(host: str, port: int) -> None:
+    """Check loopback proxy readiness without contacting an external host."""
+    try:
+        is_loopback = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        is_loopback = False
+    if not is_loopback: return
+    try:
+        with socket.create_connection((host, port), timeout=.5): pass
+    except OSError:
+        raise NetworkPolicyError("Local system proxy is unavailable") from None
+
+
 @contextmanager
 def startup_network_environment(root: Path):
     """Inherit explicit macOS system proxies for login starts when no override exists.
@@ -143,6 +157,7 @@ def startup_network_environment(root: Path):
         raise NetworkPolicyError("Cannot read the private login network policy") from None
     schemes = policy["schemes"]
     additions = {}
+    local_proxies = set()
     for scheme in ("http", "https"):
         if schemes is not None and scheme not in schemes: continue
         value = proxies.get(scheme)
@@ -156,11 +171,12 @@ def startup_network_environment(root: Path):
             if (parsed.scheme not in ("http", "https", "socks5") or not parsed.hostname or
                     parsed.query or parsed.fragment or parsed.path not in ("", "/")):
                 raise ValueError
-            _ = parsed.port
+            port = parsed.port or {"http": 80, "https": 443, "socks5": 1080}[parsed.scheme]
         except ValueError:
             raise NetworkPolicyError("Unsupported system proxy URL") from None
         additions[scheme.upper() + "_PROXY"] = value
         additions[scheme + "_proxy"] = value
+        local_proxies.add((parsed.hostname, port))
     if schemes is None and proxies.get("socks") and "HTTPS_PROXY" not in additions:
         raise NetworkPolicyError("SOCKS-only system proxy needs an explicit HTTPS_PROXY")
     if additions:
@@ -171,6 +187,7 @@ def startup_network_environment(root: Path):
         else:
             bypass = policy["bypass"] if policy["bypass"] is not None else macos_bypass(settings)
         additions["NO_PROXY"] = additions["no_proxy"] = bypass
+        for host, port in local_proxies: verify_local_proxy_listener(host, port)
     previous = {key: os.environ.get(key) for key in additions}
     try:
         os.environ.update(additions)
