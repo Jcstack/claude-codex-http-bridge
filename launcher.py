@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -12,6 +13,7 @@ import shlex
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -67,6 +69,10 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
         elif argument.startswith("--model="):
             selected = argument.partition("=")[2]
             index += 1
+        elif argument == "--settings" and index + 1 < len(arguments):
+            # Its value belongs to Claude, even if it looks like a model flag.
+            claude_args.extend(arguments[index:index + 2])
+            index += 2
         elif argument == "--":
             claude_args.extend(arguments[index:])
             break
@@ -265,9 +271,25 @@ def private_json(path: Path, value: dict) -> None:
         windows_acl.lock([path])
 
 
+def private_settings_json(path: Path, value: dict) -> None:
+    if len((json.dumps(value, separators=(",", ":")) + "\n").encode("utf-8")) > 2 * 1024 * 1024:
+        raise ValueError("Combined Claude settings exceed the client's 2 MiB limit")
+    private_json(path, value)
+
+
 def session_settings(base: Path, windows: dict[str, int], directory: Path,
                      route: str = "subscription") -> tuple[Path, list[Path]]:
-    status_line = configured_status_line()
+    settings = json.loads(base.read_text())
+    # An explicit launch setting has precedence over the user-level status line.
+    if "statusLine" in settings:
+        status_line = settings["statusLine"]
+        if (os.environ.get("CLAUDE_CODEX_STATUSLINE_ADAPTER") == "0" or
+            not isinstance(status_line, dict) or status_line.get("type") != "command" or
+            not isinstance(status_line.get("command"), str) or not status_line["command"].strip() or
+            "statusline_adapter.py" in status_line["command"]):
+            status_line = None
+    else:
+        status_line = configured_status_line()
     if status_line is None:
         return base, []
     profile_path = directory / "statusline-profile.json"
@@ -286,9 +308,8 @@ def session_settings(base: Path, windows: dict[str, int], directory: Path,
         command = f'{python_command} "{(ROOT / "statusline_adapter.py").as_posix()}" "{profile_path.as_posix()}"'
     else:
         command = shlex.join([sys.executable, str(ROOT / "statusline_adapter.py"), str(profile_path)])
-    settings = json.loads(base.read_text())
     settings["statusLine"] = {**status_line, "command": command + " | " + status_line["command"]}
-    private_json(settings_path, settings)
+    private_settings_json(settings_path, settings)
     return settings_path, [profile_path, settings_path]
 
 
@@ -627,8 +648,158 @@ def verify_prepared_model_settings(catalog_json: str, settings: Path, models: di
         raise RuntimeError("Model catalog or compact window changed during session preparation; retry the launch") from None
 
 
+SETTINGS_LIMIT = 2 * 1024 * 1024
+SETTINGS_NO_VALUE_OPTIONS = frozenset({
+    "--allow-dangerously-skip-permissions", "--dangerously-skip-permissions", "--restricted",
+    "--safe-mode", "--bare", "--strict-mcp-config", "--verbose", "--debug-to-stderr",
+    "--continue", "-c", "--fork-session", "--chrome", "--no-chrome", "--ide",
+    "--disable-slash-commands", "--include-partial-messages", "--replay-user-messages",
+    "--native-tools", "--no-native-tools", "--native-compaction", "--no-native-compaction",
+})
+SETTINGS_PROTECTED_ENV = frozenset({
+    "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS",
+    "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS", "NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "ANTHROPIC_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "DISABLE_COMPACT", "CLAUDE_CODE_EXTRA_BODY",
+    "CLAUDE_CODE_GATEWAY_HINT_HEADERS", "CLAUDE_CODE_ATTRIBUTION_HEADER",
+    "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING", "ENABLE_TOOL_SEARCH",
+})
+SETTINGS_PROTECTED_KEYS = frozenset({
+    "apiKeyHelper", "proxyAuthHelper", "forceLoginMethod", "forceLoginGatewayUrl",
+    "awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh", "policyHelper",
+})
+
+
+def load_launch_settings(value: str) -> dict:
+    """Read bounded JSON once; never include user values or paths in errors."""
+    try:
+        if value.lstrip().startswith("{"):
+            data = value.encode("utf-8")
+        else:
+            flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+            descriptor = os.open(value, flags)
+            with os.fdopen(descriptor, "rb") as handle:
+                info = os.fstat(handle.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > SETTINGS_LIMIT:
+                    raise ValueError("Invalid settings file")
+                data = handle.read(SETTINGS_LIMIT + 1)
+        if len(data) > SETTINGS_LIMIT:
+            raise ValueError("Settings are too large")
+
+        def unique_object(pairs):
+            result = {}
+            for key, item in pairs:
+                if key in result:
+                    raise ValueError("Duplicate setting")
+                result[key] = item
+            return result
+
+        def no_constant(_value):
+            raise ValueError("Invalid JSON constant")
+
+        def finite_float(raw):
+            result = float(raw)
+            if not math.isfinite(result):
+                raise ValueError("Non-finite JSON number")
+            return result
+
+        settings = json.loads(data.decode("utf-8-sig"), object_pairs_hook=unique_object,
+                              parse_constant=no_constant, parse_float=finite_float)
+        if not isinstance(settings, dict):
+            raise ValueError("Settings must be an object")
+    except (OSError, UnicodeError, ValueError, RecursionError):
+        raise ValueError("Custom --settings must be a readable regular JSON object no larger than 2 MiB, without duplicate keys") from None
+    if any(name in settings for name in SETTINGS_PROTECTED_KEYS):
+        raise ValueError("Custom --settings cannot replace bridge authentication or provider configuration")
+    environment = settings.get("env", {})
+    if not isinstance(environment, dict):
+        raise ValueError("Custom --settings env must be an object")
+    for name in environment:
+        upper = name.upper()
+        if upper in SETTINGS_PROTECTED_ENV or upper.startswith("ANTHROPIC_DEFAULT_"):
+            raise ValueError("Custom --settings cannot replace bridge routing, authentication, TLS, proxy, or protected model controls")
+    if "model" in settings and (not isinstance(settings["model"], str) or not settings["model"].strip()):
+        raise ValueError("Custom --settings model must be a nonempty model ID")
+    return settings
+
+
+def extract_launch_settings(arguments: list[str]) -> tuple[dict | None, list[str]]:
+    """Keep native last-occurrence behavior, but forward exactly one composed file."""
+    remaining = []
+    selected = None
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            remaining.extend(arguments[index:])
+            break
+        if argument == "--settings" or argument.startswith("--settings="):
+            # Avoid turning another option's literal value into a settings flag.
+            previous = arguments[index - 1] if index else ""
+            if previous.startswith("-") and "=" not in previous and previous not in SETTINGS_NO_VALUE_OPTIONS:
+                raise ValueError("Ambiguous --settings position; place it before options that take a value")
+            if argument == "--settings":
+                if index + 1 >= len(arguments) or arguments[index + 1] == "--":
+                    raise ValueError("Missing value after --settings")
+                selected = arguments[index + 1]
+                index += 2
+            else:
+                selected = argument.partition("=")[2]
+                index += 1
+            continue
+        remaining.append(argument)
+        index += 1
+    return (load_launch_settings(selected) if selected is not None else None), remaining
+
+
+def compose_launch_settings(base: dict, custom: dict) -> dict:
+    """Preserve hooks and per-model fields without weakening discovered windows."""
+    result = {**base, **custom}
+    for key in ("env", "hooks", "modelSettings"):
+        if key in custom and not isinstance(custom[key], dict):
+            raise ValueError(f"Custom --settings {key} must be an object")
+        if key in base and not isinstance(base[key], dict):
+            raise ValueError("Generated bridge settings have an invalid structure")
+    result["env"] = {**base.get("env", {}), **custom.get("env", {})}
+    hooks = dict(base.get("hooks", {}))
+    for event, entries in custom.get("hooks", {}).items():
+        previous = hooks.get(event, [])
+        if not isinstance(entries, list) or not isinstance(previous, list):
+            raise ValueError("Custom and bridge hook events must be lists")
+        hooks[event] = [*previous, *entries]
+    if hooks or "hooks" in base or "hooks" in custom:
+        result["hooks"] = hooks
+    model_settings = {name: dict(row) for name, row in base.get("modelSettings", {}).items()
+                      if isinstance(row, dict)}
+    if len(model_settings) != len(base.get("modelSettings", {})):
+        raise ValueError("Generated bridge model settings have an invalid structure")
+    custom_models = custom.get("modelSettings", {})
+    if any(not isinstance(row, dict) for row in custom_models.values()):
+        raise ValueError("Each custom modelSettings entry must be an object")
+
+    def checked_window(name, value):
+        ceiling = base.get("modelSettings", {}).get(name, {}).get("autoCompactWindow")
+        # Claude's current settings schema accepts 100k–1M. The upper bound
+        # here is the dynamically prepared model-specific bridge window.
+        if type(value) is not int or type(ceiling) is not int or not 100_000 <= value <= ceiling:
+            raise ValueError("A custom autoCompactWindow is not within the discovered bridge limit; set a safe value for a known model")
+        return value
+
+    if "autoCompactWindow" in custom:
+        for name, row in model_settings.items():
+            row["autoCompactWindow"] = checked_window(name, custom["autoCompactWindow"])
+    for name, row in custom_models.items():
+        if "autoCompactWindow" in row:
+            checked_window(name, row["autoCompactWindow"])
+        model_settings[name] = {**model_settings.get(name, {}), **row}
+    if model_settings or "modelSettings" in base or "modelSettings" in custom:
+        result["modelSettings"] = model_settings
+    return result
+
+
 def reject_extra_settings(arguments: list[str]) -> None:
-    """Fail closed while duplicate Claude --settings are not safely composed."""
     for argument in arguments:
         if argument == "--":
             break
@@ -638,9 +809,17 @@ def reject_extra_settings(arguments: list[str]) -> None:
 
 
 def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
-                route: str = "subscription", *, explicit_model: bool = True) -> int:
+                route: str = "subscription", *, explicit_model: bool = True,
+                experimental_settings: bool = False) -> int:
+    custom_settings = None
     if mode == "claude":
-        reject_extra_settings(claude_args)
+        if experimental_settings:
+            custom_settings, claude_args = extract_launch_settings(claude_args)
+        else:
+            reject_extra_settings(claude_args)
+        if custom_settings is not None and "model" in custom_settings and not explicit_model:
+            selected = custom_settings["model"]
+            explicit_model = True
     runtime, state, created = ensure_service(route=route)
     environment = service_environment(state, runtime, route)
     if mode == "models":
@@ -677,10 +856,12 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
     if platform.system() == "Windows":
         import windows_acl
         windows_acl.lock([directory])
-    settings_path, _ = session_settings(Path(settings), json.loads(catalog_json), directory, route)
-    if settings_path != Path(settings) and route == "subscription":
-        import codex_usage
-        codex_usage.start_refresh(runtime / "codex-usage.json")
+    settings_path = Path(settings)
+    if custom_settings is None:
+        settings_path, statusline_files = session_settings(settings_path, json.loads(catalog_json), directory, route)
+        if statusline_files and route == "subscription":
+            import codex_usage
+            codex_usage.start_refresh(runtime / "codex-usage.json")
     _, _, key_path, _ = state_paths(runtime, state)
     claude_environment_values = claude_environment(state["port"], key_path.read_text().strip(),
                                                   model, route, available_models=set(json.loads(catalog_json)))
@@ -691,8 +872,22 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         import runtime_bundle
         manifest = runtime_bundle.selected(ROOT)[1]
     claude_args = native_compaction_options(claude_environment_values, claude_args, route, manifest)
-    if managed:
+    if managed or custom_settings is not None:
+        import rolling_runtime
         settings_path = rolling_runtime.client_settings(settings_path, claude_environment_values, directory)
+    if custom_settings is not None:
+        combined = compose_launch_settings(json.loads(settings_path.read_text()), custom_settings)
+        compact = combined.get("modelSettings", {}).get(model, {}).get("autoCompactWindow", compact)
+        settings_path = directory / "composed-settings.json"
+        private_settings_json(settings_path, combined)
+        settings_path, statusline_files = session_settings(settings_path, json.loads(catalog_json), directory, route)
+        if statusline_files and route == "subscription":
+            import codex_usage
+            codex_usage.start_refresh(runtime / "codex-usage.json")
+        # If Claude rejects the composed settings, an inherited token must not
+        # follow a lower-priority user-configured endpoint. The authenticated
+        # token is supplied only by the private settings file for this launch.
+        claude_environment_values.pop("ANTHROPIC_AUTH_TOKEN", None)
     label = "OpenAI API" if route == "api" else "Codex"
     print(
         f"{label} bridge active on {claude_environment_values['ANTHROPIC_BASE_URL']}: "

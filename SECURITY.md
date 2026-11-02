@@ -154,6 +154,19 @@ and was installed locally without restarting the origin, ingress or clients.
 Ordinary Claude settings files remain available. Secure composition of custom
 settings remains open; the guard must not be represented as full compatibility.
 
+A composition candidate is available to isolated tests only; the command-line
+guard remains on. It snapshots bounded user JSON into a private per-launch file,
+combines hook event lists and per-model entries, and refuses custom authentication,
+provider, proxy, TLS and conflicting compact-window controls. It puts the local
+key into the composed settings rather than the child process's initial environment,
+so a rejected launch file cannot redirect that inherited key via user settings.
+Local tests with the locked Claude client and fake endpoints covered normal and
+`--bare` startup, hooks, a denied tool, malformed settings and routing. This is
+not proof for arbitrary plugins, all settings, future clients, or protection from
+other processes running as the same user. Cross-platform checks and an installed
+rollout remain pending. Editing the original per-launch file after startup is not
+propagated by this snapshot; existing user/project settings remain Claude's own.
+
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 
 The bridge's WebFetch PDF hook processes the tool result locally and replaces only the binary-PDF summary with a warning and the path Claude Code already returned. It does not upload or copy the PDF. Claude Code's own WebFetch may leave downloaded binaries in its session `tool-results` directory; the hook does not remove them. Review that directory according to your local retention policy. [Upstream retention report](https://github.com/anthropics/claude-code/issues/104178).

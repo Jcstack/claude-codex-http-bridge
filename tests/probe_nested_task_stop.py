@@ -22,6 +22,7 @@ from claude_fixture import isolated_environment
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import taskstop_advisory  # noqa: E402
+import launcher  # noqa: E402
 
 
 MODEL = "gpt-6.1-sol"
@@ -30,6 +31,7 @@ PARENT_MARKER = "PARENT_SYNTHETIC_OWNERSHIP_FIXTURE"
 LEAF_MARKER = "LEAF_SYNTHETIC_OWNERSHIP_FIXTURE"
 PARENT_CALL, LEAF_CALL, STOP_CALL = "toolu_fixture_parent", "toolu_fixture_leaf", "toolu_fixture_stop"
 LEAF_WRITE = "toolu_fixture_write"
+DENIED_CALL = "toolu_fixture_denied"
 EFFECT = "synthetic leaf effect\n"
 
 
@@ -106,7 +108,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.observe_hook_context(body)
                 self.server.release_leaf.set()
                 self.server.leaf_tool_result_seen.wait(5)
-                block = {"type": "text", "text": "PARENT_DONE"}
+                denied = tool_result(body, DENIED_CALL)
+                if self.server.layered_hooks and denied is None:
+                    block = {"type": "tool_use", "id": DENIED_CALL, "name": "Bash",
+                             "input": {"command": "echo SYNTHETIC > denied-effect.txt"}}
+                else:
+                    if denied is not None:
+                        with self.server.lock:
+                            self.server.denied_result_seen = True
+                            self.server.denied_result_is_error = denied.get("is_error") is True
+                    block = {"type": "text", "text": "PARENT_DONE"}
             elif created is not None:
                 block = self.stop_created(created, "PARENT_NO_AGENT_ID")
             else:
@@ -193,9 +204,12 @@ class Handler(BaseHTTPRequestHandler):
             self.server.failure_hook_context_seen = "FIXTURE_FAILURE_HOOK_CONTEXT" in serialized
             self.server.batch_hook_context_seen = "FIXTURE_BATCH_HOOK_CONTEXT" in serialized
             self.server.advisory_context_seen = taskstop_advisory.ADVISORY in serialized
+            self.server.user_hook_context_seen = "FIXTURE_USER_HOOK_CONTEXT" in serialized
+            self.server.extra_hook_context_seen = "FIXTURE_EXTRA_HOOK_CONTEXT" in serialized
 
 
-def run_case(claude: str, mode: str, observe_hooks: bool, observe_advisory: bool) -> dict:
+def run_case(claude: str, mode: str, observe_hooks: bool, observe_advisory: bool, layered_hooks: bool,
+             extra_settings: bool, compose_settings: bool) -> dict:
     with tempfile.TemporaryDirectory(prefix="bridge-nested-stop-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
         root = Path(temporary).resolve(); work = root / "work"; config = root / "config"
         work.mkdir(); config.mkdir(mode=0o700)
@@ -224,9 +238,33 @@ def run_case(claude: str, mode: str, observe_hooks: bool, observe_advisory: bool
             hooks = config_data.setdefault("hooks", {})
             hooks.setdefault("PostToolUseFailure", []).append({"matcher": "TaskStop", "hooks": [{
                 "type": "command", "command": sys.executable, "args": [str(Path(taskstop_advisory.__file__))], "timeout": 5}]})
+        if layered_hooks:
+            user_hook = root / "fixture-user-hook.py"
+            user_hook.write_text('import json,sys\ndata=json.load(sys.stdin)\n'
+                'value={"hookSpecificOutput":{"hookEventName":"PostToolUseFailure",'
+                '"additionalContext":"FIXTURE_USER_HOOK_CONTEXT"}}\n'
+                'print(json.dumps(value) if data.get("tool_name")=="TaskStop" else "{}")\n', encoding="utf-8")
+            user_settings = {"hooks": {"PostToolUseFailure": [{"matcher": "TaskStop", "hooks": [{
+                "type": "command", "command": sys.executable, "args": [str(user_hook)], "timeout": 5}]}]},
+                "permissions": {"deny": ["Bash"]}}
+            (config / "settings.json").write_text(json.dumps(user_settings), encoding="utf-8")
+        if extra_settings or compose_settings:
+            extra_hook = root / "fixture-extra-hook.py"
+            extra_hook.write_text('import json,sys\ndata=json.load(sys.stdin)\n'
+                'value={"hookSpecificOutput":{"hookEventName":"PostToolUseFailure",'
+                '"additionalContext":"FIXTURE_EXTRA_HOOK_CONTEXT"}}\n'
+                'print(json.dumps(value) if data.get("tool_name")=="TaskStop" else "{}")\n', encoding="utf-8")
+            extra = root / "extra-settings.json"
+            extra.write_text(json.dumps({"hooks": {"PostToolUseFailure": [{"matcher": "TaskStop", "hooks": [{
+                "type": "command", "command": sys.executable, "args": [str(extra_hook)], "timeout": 5}]}]}}), encoding="utf-8")
+            if compose_settings:
+                custom, remaining = launcher.extract_launch_settings(["--settings", str(extra)])
+                if remaining or custom is None:
+                    raise RuntimeError("Synthetic settings extraction failed")
+                config_data = launcher.compose_launch_settings(config_data, custom)
         settings.write_text(json.dumps(config_data), encoding="utf-8")
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        server.lock = threading.Lock(); server.roles = {}; server.mode = mode
+        server.lock = threading.Lock(); server.roles = {}; server.mode = mode; server.layered_hooks = layered_hooks
         server.leaf_started = threading.Event(); server.leaf_finished = threading.Event(); server.release_leaf = threading.Event()
         server.leaf_response_written = threading.Event(); server.leaf_response_attempted = threading.Event()
         server.leaf_tool_result_seen = threading.Event(); server.effect_path = work / "synthetic-leaf-effect.txt"
@@ -235,16 +273,21 @@ def run_case(claude: str, mode: str, observe_hooks: bool, observe_advisory: bool
         server.agent_id_returned = server.leaf_running_before_stop = False
         server.synthetic_task_id = None; server.ownership_mentions_target = False
         server.failure_hook_context_seen = server.batch_hook_context_seen = False
-        server.advisory_context_seen = False
+        server.advisory_context_seen = server.user_hook_context_seen = server.extra_hook_context_seen = False
+        server.denied_result_seen = server.denied_result_is_error = False
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         env = isolated_environment(root)
         env.update(CLAUDE_CONFIG_DIR=str(config), ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
             ANTHROPIC_AUTH_TOKEN="fixture-only", ANTHROPIC_DEFAULT_SONNET_MODEL=MODEL,
             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
-        command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+        command = [claude, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
             "--settings", str(settings), "--permission-mode", "dontAsk", "--model", MODEL,
-            "--tools", "Agent,TaskStop,Write", "--allowedTools", "Agent,TaskStop,Write", "--output-format", "json",
+            "--tools", "Agent,TaskStop,Write,Bash", "--allowedTools", "Agent,TaskStop,Write,Bash", "--output-format", "json",
             "--max-turns", "8", "-p", ROOT_MARKER]
+        if not layered_hooks: command.insert(1, "--restricted")
+        if extra_settings:
+            index = command.index("--settings") + 2
+            command[index:index] = ["--settings", str(extra)]
         try:
             completed = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, timeout=70)
             try:
@@ -271,7 +314,12 @@ def run_case(claude: str, mode: str, observe_hooks: bool, observe_advisory: bool
                 "batch_hook_saw_ownership": any(row.get("event") == "PostToolBatch" and row.get("taskstop") and row.get("ownership") for row in hook_rows),
                 "failure_hook_context_seen": server.failure_hook_context_seen,
                 "batch_hook_context_seen": server.batch_hook_context_seen,
-                "advisory_observation_enabled": observe_advisory, "advisory_context_seen": server.advisory_context_seen}
+                "advisory_observation_enabled": observe_advisory, "advisory_context_seen": server.advisory_context_seen,
+                "layered_hooks_enabled": layered_hooks, "user_hook_context_seen": server.user_hook_context_seen,
+                "extra_settings_enabled": extra_settings, "composed_settings_enabled": compose_settings,
+                "extra_hook_context_seen": server.extra_hook_context_seen,
+                "denied_result_seen": server.denied_result_seen, "denied_result_is_error": server.denied_result_is_error,
+                "denied_effect_created": (work / "denied-effect.txt").exists()}
             return report
         finally:
             server.release_leaf.set(); server.shutdown(); server.server_close(); thread.join(timeout=2)
@@ -284,15 +332,34 @@ def main() -> None:
     parser.add_argument("--expect-hook-observation", action="store_true", help="Require the pinned client's observed hook contexts")
     parser.add_argument("--observe-advisory", action="store_true", help="Exercise the experimental local advisory hook")
     parser.add_argument("--expect-advisory", action="store_true", help="Require the advisory only on the synthetic denial")
+    parser.add_argument("--layered-hooks", action="store_true", help="Add a separate synthetic user-settings hook")
+    parser.add_argument("--expect-layered-hooks", action="store_true", help="Require the separate user hook to coexist")
+    parser.add_argument("--expect-layered-permission", action="store_true", help="Require the synthetic user deny rule to remain effective")
+    parser.add_argument("--extra-settings", action="store_true", help="Pass an additional synthetic --settings file")
+    parser.add_argument("--compose-extra-settings", action="store_true", help="Compose the extra synthetic settings into one launch file")
+    parser.add_argument("--expect-extra-settings", action="store_true", help="Require both composed launch-settings hooks to coexist")
+    parser.add_argument("--expect-extra-replacement", action="store_true", help="Require the pinned client's last-setting replacement behavior")
     args = parser.parse_args()
     if args.expect_hook_observation and not args.observe_hooks:
         parser.error("--expect-hook-observation requires --observe-hooks")
     if args.expect_advisory and not args.observe_advisory:
         parser.error("--expect-advisory requires --observe-advisory")
+    if args.expect_layered_hooks and not args.layered_hooks:
+        parser.error("--expect-layered-hooks requires --layered-hooks")
+    if args.expect_layered_permission and not args.layered_hooks:
+        parser.error("--expect-layered-permission requires --layered-hooks")
+    if args.extra_settings and args.compose_extra_settings:
+        parser.error("Choose duplicate or composed settings")
+    if args.expect_extra_settings and not (args.compose_extra_settings and args.observe_advisory):
+        parser.error("--expect-extra-settings requires --compose-extra-settings and --observe-advisory")
+    if args.expect_extra_replacement and not (args.extra_settings and args.observe_advisory):
+        parser.error("--expect-extra-replacement requires --extra-settings and --observe-advisory")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude: raise RuntimeError("The locked Claude fixture is required")
-    nested = run_case(claude, "nested", args.observe_hooks, args.observe_advisory)
-    control = run_case(claude, "root_control", args.observe_hooks, args.observe_advisory)
+    nested = run_case(claude, "nested", args.observe_hooks, args.observe_advisory, args.layered_hooks,
+                      args.extra_settings, args.compose_extra_settings)
+    control = run_case(claude, "root_control", args.observe_hooks, args.observe_advisory, args.layered_hooks,
+                       args.extra_settings, args.compose_extra_settings)
     print(json.dumps({"synthetic_only": True, "nested": nested, "root_control": control}, sort_keys=True))
     common = ("client_completed", "root_request_seen", "leaf_request_seen", "nested_agent_id_returned",
               "leaf_running_before_stop", "stop_result_seen")
@@ -310,6 +377,17 @@ def main() -> None:
         raise RuntimeError("The pinned client's synthetic hook behavior changed")
     if args.expect_advisory and not (nested["advisory_context_seen"] and not control["advisory_context_seen"]):
         raise RuntimeError("Synthetic ownership advisory was not scoped to the denial")
+    if args.expect_layered_hooks and not (nested["user_hook_context_seen"] and not control["user_hook_context_seen"]):
+        raise RuntimeError("Synthetic user-settings hook did not coexist")
+    if args.expect_layered_permission and not (nested["denied_result_seen"] and nested["denied_result_is_error"]
+                                                and not nested["denied_effect_created"]):
+        raise RuntimeError("Synthetic user deny rule was not preserved")
+    if args.expect_extra_settings and not (nested["advisory_context_seen"] and nested["extra_hook_context_seen"]
+                                           and not control["extra_hook_context_seen"]):
+        raise RuntimeError("Synthetic launch-settings hooks did not coexist")
+    if args.expect_extra_replacement and not (not nested["advisory_context_seen"] and nested["extra_hook_context_seen"]
+                                              and not control["extra_hook_context_seen"]):
+        raise RuntimeError("Pinned client's synthetic duplicate-settings replacement changed")
 
 
 if __name__ == "__main__":

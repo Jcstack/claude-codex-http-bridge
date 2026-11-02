@@ -613,12 +613,102 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(launcher.parse_args(["cache", "telemetry", "enable"]),
                          ("cache", "", ["telemetry", "enable"]))
 
-    def test_extra_launch_settings_are_rejected_before_starting_a_service(self) -> None:
-        for arguments in (["--settings", "fixture.json"], ["--settings={}"]):
-            with self.subTest(arguments=arguments), patch.object(launcher, "ensure_service", side_effect=AssertionError("must not start")):
-                with self.assertRaisesRegex(ValueError, "Extra --settings"):
-                    launcher.run_session("claude", "sol", list(arguments), "fixture-client")
+    def test_custom_launch_settings_are_extracted_without_forwarding_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text('{"env":{"FIXTURE_COLOR":"blue"}}', encoding="utf-8")
+            settings, rest = launcher.extract_launch_settings(["--settings", "{}", "--verbose", "--settings=" + str(path),
+                                                               "--effort", "high", "--", "--settings", "literal"])
+            self.assertEqual(settings, {"env": {"FIXTURE_COLOR": "blue"}})
+            self.assertEqual(rest, ["--verbose", "--effort", "high", "--", "--settings", "literal"])
+            self.assertEqual(launcher.parse_args(["--settings", "--model", "-p", "hi"])[2],
+                             ["--settings", "--model", "-p", "hi"])
+            with self.assertRaisesRegex(ValueError, "Ambiguous"):
+                launcher.extract_launch_settings(["--append-system-prompt", "--settings", str(path)])
+            with self.assertRaisesRegex(ValueError, "Missing value"):
+                launcher.extract_launch_settings(["--settings"])
+
+    def test_custom_launch_settings_fail_closed_without_disclosing_values(self) -> None:
+        cases = ['{"env":{"ANTHROPIC_BASE_URL":"fixture-private-value"}}',
+                 '{"env":{"https_proxy":"fixture-private-value"}}',
+                 '{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"fixture-private-value"}}',
+                 '{"apiKeyHelper":"fixture-private-value"}',
+                 '{"env":{"FIXTURE":1,"FIXTURE":2}}',
+                 '{"env":{"FIXTURE":NaN}}', '{"fixture":1e999}', '{"env":[]}', '{"model":null}']
+        for value in cases:
+            with self.subTest(case=value[:35]), patch.object(launcher, "ensure_service", side_effect=AssertionError("must not start")):
+                with self.assertRaises(ValueError) as failure:
+                    launcher.run_session("claude", "sol", ["--settings", value], "fixture-client",
+                                         experimental_settings=True)
+                self.assertNotIn("fixture-private-value", str(failure.exception))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            oversized = root / "large.json"
+            oversized.write_bytes(b"x" * (launcher.SETTINGS_LIMIT + 1))
+            with self.assertRaises(ValueError): launcher.load_launch_settings(str(oversized))
+            with self.assertRaises(ValueError): launcher.load_launch_settings(str(root))
+            if hasattr(os, "mkfifo"):
+                pipe = root / "pipe"
+                os.mkfifo(pipe)
+                with self.assertRaises(ValueError): launcher.load_launch_settings(str(pipe))
+
+    def test_extra_settings_guard_stays_on_during_composition_validation(self) -> None:
+        with patch.object(launcher, "ensure_service", side_effect=AssertionError("must not start")):
+            with self.assertRaisesRegex(ValueError, "temporarily unavailable"):
+                launcher.run_session("claude", "sol", ["--settings", "{}"], "fixture-client")
         launcher.reject_extra_settings(["--effort", "high", "--", "--settings", "literal"])
+
+    def test_custom_settings_preserve_hooks_permissions_models_and_route(self) -> None:
+        bridge_hook = {"matcher": "WebFetch", "hooks": [{"type": "command", "command": "bridge-hook"}]}
+        user_hook = {"matcher": "*", "hooks": [{"type": "command", "command": "user-hook"}]}
+        base = {"env": {"ANTHROPIC_BASE_URL": "https://127.0.0.1:1234", "ANTHROPIC_AUTH_TOKEN": "fixture-token"},
+                "modelPicker": {"options": [{"model": "fixture-a"}], "replaceBuiltInOptions": True},
+                "modelSettings": {"fixture-a": {"autoCompactWindow": 500000}, "fixture-b": {"autoCompactWindow": 300000}},
+                "hooks": {"PostToolUse": [bridge_hook]}}
+        custom = {"env": {"FIXTURE_THEME": "dark"}, "permissions": {"deny": ["Bash"]},
+                  "hooks": {"PostToolUse": [user_hook], "Stop": []},
+                  "modelSettings": {"fixture-a": {"effortLevel": "high", "autoCompactWindow": 250000},
+                                    "future-model": {"effortLevel": "low"}},
+                  "unknownFutureSetting": {"fixture": True}}
+        combined = launcher.compose_launch_settings(base, custom)
+        self.assertEqual(combined["env"]["ANTHROPIC_AUTH_TOKEN"], "fixture-token")
+        self.assertEqual(combined["env"]["FIXTURE_THEME"], "dark")
+        self.assertEqual(combined["hooks"]["PostToolUse"], [bridge_hook, user_hook])
+        self.assertEqual(combined["permissions"], custom["permissions"])
+        self.assertEqual(combined["modelPicker"], base["modelPicker"])
+        self.assertEqual(combined["modelSettings"]["fixture-a"], {"autoCompactWindow": 250000, "effortLevel": "high"})
+        self.assertEqual(combined["modelSettings"]["fixture-b"]["autoCompactWindow"], 300000)
+        self.assertEqual(combined["unknownFutureSetting"], {"fixture": True})
+        self.assertEqual(base["modelSettings"]["fixture-a"]["autoCompactWindow"], 500000)
+        global_window = launcher.compose_launch_settings(base, {"autoCompactWindow": 200000})
+        self.assertEqual(global_window["modelSettings"]["fixture-a"]["autoCompactWindow"], 200000)
+        self.assertEqual(global_window["modelSettings"]["fixture-b"]["autoCompactWindow"], 200000)
+        for override in ({"autoCompactWindow": 400000}, {"autoCompactWindow": "auto"},
+                         {"autoCompactWindow": 99999},
+                         {"modelSettings": {"fixture-a": {"autoCompactWindow": 500001}}},
+                         {"modelSettings": {"future-model": {"autoCompactWindow": 100000}}},
+                         {"hooks": {"PostToolUse": None}}):
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                launcher.compose_launch_settings(base, override)
+
+    def test_custom_statusline_has_launch_precedence_and_keeps_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); user = root / "user"; user.mkdir()
+            (user / "settings.json").write_text('{"statusLine":{"type":"command","command":"echo global"}}')
+            base = root / "base.json"
+            base.write_text('{"statusLine":{"type":"command","command":"echo launch","refreshInterval":17}}')
+            session = root / "session"; session.mkdir()
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(user)}, clear=True):
+                result, _ = launcher.session_settings(base, {"fixture": 500000}, session)
+            status = json.loads(result.read_text())["statusLine"]
+            self.assertIn(" | echo launch", status["command"])
+            self.assertNotIn("echo global", status["command"])
+            self.assertEqual(status["refreshInterval"], 17)
+            base.write_text('{"statusLine":null}')
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(user)}, clear=True):
+                result, files = launcher.session_settings(base, {}, root / "unused")
+            self.assertEqual(result, base)
+            self.assertEqual(files, [])
 
     def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
         name = "gpt-6-astra"
