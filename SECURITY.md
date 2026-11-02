@@ -144,6 +144,16 @@ specific error shape; it does not echo task IDs, paths, error text or other hook
 fields. It does not send messages, access the network or stop processes. Hook
 input can nevertheless contain session metadata and must be treated as private.
 
+An isolated locked-client test found that a second `--settings` argument
+replaced the bridge-generated launch settings. When that second file changed
+only the destination, Claude sent the synthetic inherited local key to the
+second synthetic endpoint. No real key or external endpoint was used. The
+source now temporarily rejects an extra `--settings` argument before launching
+a session; the local guard is not yet installed. Until it is verified and
+installed, do not pass an extra `--settings` to `claude-codex`. Ordinary Claude
+settings files remain available. Secure composition of custom settings remains
+open; the guard must not be represented as full compatibility.
+
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 
 The bridge's WebFetch PDF hook processes the tool result locally and replaces only the binary-PDF summary with a warning and the path Claude Code already returned. It does not upload or copy the PDF. Claude Code's own WebFetch may leave downloaded binaries in its session `tool-results` directory; the hook does not remove them. Review that directory according to your local retention policy. [Upstream retention report](https://github.com/anthropics/claude-code/issues/104178).

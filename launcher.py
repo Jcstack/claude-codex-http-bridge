@@ -627,8 +627,20 @@ def verify_prepared_model_settings(catalog_json: str, settings: Path, models: di
         raise RuntimeError("Model catalog or compact window changed during session preparation; retry the launch") from None
 
 
+def reject_extra_settings(arguments: list[str]) -> None:
+    """Fail closed while duplicate Claude --settings are not safely composed."""
+    for argument in arguments:
+        if argument == "--":
+            break
+        if argument == "--settings" or argument.startswith("--settings="):
+            raise ValueError("Extra --settings is temporarily unavailable: it can replace bridge routing and expose the local key. "
+                             "Use your ordinary Claude settings until secure composition is available.")
+
+
 def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
                 route: str = "subscription", *, explicit_model: bool = True) -> int:
+    if mode == "claude":
+        reject_extra_settings(claude_args)
     runtime, state, created = ensure_service(route=route)
     environment = service_environment(state, runtime, route)
     if mode == "models":

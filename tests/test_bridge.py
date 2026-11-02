@@ -613,6 +613,13 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(launcher.parse_args(["cache", "telemetry", "enable"]),
                          ("cache", "", ["telemetry", "enable"]))
 
+    def test_extra_launch_settings_are_rejected_before_starting_a_service(self) -> None:
+        for arguments in (["--settings", "fixture.json"], ["--settings={}"]):
+            with self.subTest(arguments=arguments), patch.object(launcher, "ensure_service", side_effect=AssertionError("must not start")):
+                with self.assertRaisesRegex(ValueError, "Extra --settings"):
+                    launcher.run_session("claude", "sol", list(arguments), "fixture-client")
+        launcher.reject_extra_settings(["--effort", "high", "--", "--settings", "literal"])
+
     def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
         name = "gpt-6-astra"
         for usage in (None, {}, {"input_tokens": 100},
