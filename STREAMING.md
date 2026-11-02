@@ -130,9 +130,15 @@ yet a proven root cause. A separate test-only patch makes three fake servers
 wait until their reader observes the payload before sending completion; the
 original requirement that the pong arrive while the write is held remains.
 The separate immediate-terminal test is left intact. The manually dispatched
-observation repeats both the original and modified fixtures on three operating
-systems. It does not patch production code, establish real WebSocket behavior,
-or count a failed or unfinished run as a pass.
+observation [passed on all three operating systems](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41489076037):
+30 repeats of each unmodified fixture, 50 of each modified fixture, and 10 of
+the separate immediate-terminal test passed. The original failure did not
+recur in that bounded sample, so these observations do not prove its cause.
+The upstream [write hook](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/runtime/executor/codex_websockets_session.go)
+is reached before the payload is written. A further test-only negative control
+deliberately prolongs that hold to check whether the suspected ordering can
+produce the same error and whether the fake-server barrier prevents it. Neither
+test patches production code or establishes real WebSocket behavior.
 
 A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
 on Claude Code 2.1.201 reported an additional content-progress timeout that

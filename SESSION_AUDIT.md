@@ -48,6 +48,10 @@ before sharing. It is not automatically saved or committed.
   input tokens, not request hit rate, throughput, subscription allowance or
   billing. Cached input still occupies context; cumulative input is not a
   context window. Child durations can overlap.
+  The [three-platform session-metadata gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41488570288)
+  passed before the updated audit module was installed locally. An installed
+  synthetic check confirmed both summaries, privacy and read-only behavior;
+  the origin, ingress, and existing session processes were not restarted.
 - Each main or child log also reports bounded `cache_counter_patterns` based
   on the first recorded order of response identities and the maximum valid
   cache-read counter for each identity. Adjacent valid counters can skip

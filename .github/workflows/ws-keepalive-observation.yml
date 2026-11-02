@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Check the synthetic failure classifier
+        run: python -m unittest tests.test_keepalive_log_check -q
       - uses: actions/setup-go@v6
         with:
           go-version: '1.27.3'
@@ -44,10 +46,21 @@ jobs:
           if go test -timeout 120s -count=30 -run '^TestCodexWebsockets_KeepalivePingDuringUpload_(WithSession|Sessionless|NonstreamSessionless)$' ./internal/runtime/executor > "$RUNNER_TEMP/keepalive-baseline.log" 2>&1; then
             echo 'Unmodified upstream fixture passed the bounded sample.'
           else
-            python -c 'import pathlib,re,sys; p=pathlib.Path(sys.argv[1]).read_text(errors="replace"); failures=re.findall(r"--- FAIL: (TestCodexWebsockets_KeepalivePingDuringUpload_[A-Za-z]+)",p); print("Unmodified upstream fixture failures:", len(failures)); sys.exit(0 if failures else 1)' "$RUNNER_TEMP/keepalive-baseline.log"
-            echo '::warning::At least one unmodified synthetic keepalive fixture failed; see the bounded count above.'
+            python ../tests/check_keepalive_baseline.py "$RUNNER_TEMP/keepalive-baseline.log"
+            echo '::warning::An unmodified synthetic keepalive fixture reported a closed-connection failure; see the bounded count above.'
+          fi
+          git apply --check ../tests/upstream_keepalive_delay_fixture.patch
+          git apply ../tests/upstream_keepalive_delay_fixture.patch
+          if go test -timeout 60s -count=5 -run '^TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless$' ./internal/runtime/executor > "$RUNNER_TEMP/keepalive-delayed.log" 2>&1; then
+            echo 'The synthetic delayed-write negative control unexpectedly passed.' >&2
+            exit 1
+          else
+            python ../tests/check_keepalive_baseline.py "$RUNNER_TEMP/keepalive-delayed.log"
           fi
           git apply --check ../tests/upstream_keepalive_fixture.patch
           git apply ../tests/upstream_keepalive_fixture.patch
+          go test -timeout 60s -count=5 -run '^TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless$' ./internal/runtime/executor
+          git apply --reverse --check ../tests/upstream_keepalive_delay_fixture.patch
+          git apply --reverse ../tests/upstream_keepalive_delay_fixture.patch
           go test -timeout 120s -count=50 -run '^TestCodexWebsockets_KeepalivePingDuringUpload_(WithSession|Sessionless|NonstreamSessionless)$' ./internal/runtime/executor
           go test -timeout 60s -count=10 -run '^TestCodexWebsockets_SessionlessBufferingImmediateTerminalClosesConnection$' ./internal/runtime/executor

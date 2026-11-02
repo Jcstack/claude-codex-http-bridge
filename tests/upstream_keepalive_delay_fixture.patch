@@ -1,0 +1,10 @@
+--- a/internal/runtime/executor/codex_websockets_executor_test.go
++++ b/internal/runtime/executor/codex_websockets_executor_test.go
+@@ -2839,6 +2839,7 @@
+ 		close(inWriteHook)
+ 		select {
+ 		case <-pongDeliveredDuringWrite:
++			time.Sleep(50 * time.Millisecond) // Synthetic control: keep the payload write blocked.
+ 		case <-time.After(2 * time.Second):
+ 			t.Error("timed out waiting for pong delivery while nonstream payload write was held in hook")
+ 		}

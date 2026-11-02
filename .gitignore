@@ -73,6 +73,7 @@
 !tests/native_incomplete_fixture.go
 !tests/translator_incomplete_fixture.go
 !tests/upstream_keepalive_fixture.patch
+!tests/upstream_keepalive_delay_fixture.patch
 !tests/claude-client/
 !tests/claude-client/package.json
 !tests/claude-client/package-lock.json

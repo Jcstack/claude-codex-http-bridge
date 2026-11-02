@@ -256,6 +256,13 @@ the targeted local file update preserved the running processes and recorded
 rollback bundle. A comparison of up to 32 recent shared backend logs did not
 find additional newly visible events. See [SESSION_AUDIT.md](SESSION_AUDIT.md).
 
+The later cache-counter and retained-schema summaries passed the [three-platform
+metadata gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41488570288)
+and were installed as one atomic module update with a private backup. The
+installed diagnostic and synthetic privacy checks passed without restarting
+the service. See [SESSION_AUDIT.md](SESSION_AUDIT.md) for the limits of both
+summaries.
+
 The local session audit also classifies bounded ownership-shaped `TaskStop`
 errors without returning their text or task identifiers. The classification was
 verified with synthetic positive, negative, duplicate and truncation cases on
