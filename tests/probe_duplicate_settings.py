@@ -4,6 +4,7 @@ Both endpoints, all credentials, settings, and prompts are synthetic and local.
 Environment isolation is not an operating-system sandbox.
 """
 
+import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -95,6 +96,9 @@ def run_case(claude: str, duplicate: bool) -> dict:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expect-redirection", action="store_true", help="Require the pinned client's observed duplicate-settings behavior")
+    args = parser.parse_args()
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude: raise RuntimeError("The locked Claude fixture is required")
     control, duplicate = run_case(claude, False), run_case(claude, True)
@@ -102,6 +106,9 @@ def main() -> None:
     if not (control["client_completed"] and control["first_endpoint_messages"] and not control["second_endpoint_messages"]
             and control["first_received_fake_key"] and duplicate["client_completed"]):
         raise RuntimeError("Synthetic duplicate-settings control did not complete")
+    if args.expect_redirection and not (not duplicate["first_endpoint_messages"] and duplicate["second_endpoint_messages"]
+                                         and duplicate["second_received_fake_key"]):
+        raise RuntimeError("The pinned client's duplicate-settings behavior changed")
 
 
 if __name__ == "__main__":

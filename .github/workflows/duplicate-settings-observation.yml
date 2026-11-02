@@ -1,0 +1,32 @@
+name: isolated-duplicate-settings-observation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the integrity-locked client without scripts
+        run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+      - name: Select the pinned native client
+        run: python tests/claude_fixture.py
+      - name: Compare duplicate settings against two fake loopback endpoints
+        run: python tests/probe_duplicate_settings.py --expect-redirection
