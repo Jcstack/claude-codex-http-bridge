@@ -20,12 +20,15 @@ class Handler(ResponsesHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         tools = body.get("tools", [])
+        state_only = next((item.get("output") for item in body.get("input", []) if isinstance(item, dict)
+                           and item.get("type") == "function_call_output" and item.get("call_id") == "call_fixture_tabs"), None)
         self.server.observations.append({
             "function_count": sum(isinstance(tool, dict) and tool.get("type") == "function" for tool in tools),
             "empty_function_names": sum(isinstance(tool, dict) and tool.get("type") == "function" and
                                         tool.get("name") == "" for tool in tools),
             "custom_navigate_present": any(isinstance(tool, dict) and tool.get("name") == "navigate" for tool in tools),
             "browser_state_marker_present": "SYNTHETIC_TAB_STATE" in json.dumps(body.get("input", [])),
+            "state_only_returned_as_string": isinstance(state_only, str) and "SYNTHETIC_ONLY_TAB" in state_only,
             "text_result_marker_present": "SYNTHETIC_NAV_DONE" in json.dumps(body.get("input", [])),
         })
         self.send_response_stream(len(self.server.observations), "call_fixture_new", "navigate",
@@ -49,6 +52,11 @@ def observe(binary):
         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_fixture", "toolset_name": "browser",
             "content": [{"type": "text", "text": "SYNTHETIC_NAV_DONE"},
                         {"type": "browser_state", "tabs": [{"tab_id": "SYNTHETIC_TAB_STATE", "title": "Synthetic tab",
+                                                               "url": "https://example.invalid", "active": True}]}]}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "call_fixture_tabs", "name": "list_tabs",
+            "toolset_name": "browser", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_fixture_tabs", "toolset_name": "browser",
+            "content": [{"type": "browser_state", "tabs": [{"tab_id": "SYNTHETIC_ONLY_TAB", "title": "Synthetic tab",
                                                                "url": "https://example.invalid", "active": True}]}]}]}],
         "tools": [{"type": "browser_toolset_20260801", "allowed_callers": ["direct"],
                    "configs": {"javascript_exec": {"enabled": True}}},
@@ -73,7 +81,7 @@ def observe(binary):
                   "stream_toolset_name_present": "toolset_name" in starts[0]}
         if not (same and result["function_count"] == 3 and result["empty_function_names"] == 2
                 and result["custom_navigate_present"] and not result["browser_state_marker_present"]
-                and result["text_result_marker_present"] and result["nonstream_tool_name_navigate"]
+                and result["state_only_returned_as_string"] and result["text_result_marker_present"] and result["nonstream_tool_name_navigate"]
                 and result["stream_tool_name_navigate"] and not result["nonstream_toolset_name_present"]
                 and not result["stream_toolset_name_present"]):
             raise RuntimeError("Synthetic toolset observation changed; reassess the compatibility finding")

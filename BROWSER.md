@@ -19,7 +19,9 @@ computer members, omitted `toolset_name` in replayed and returned calls, and
 dropped a `browser_state` block when a text result was also present. A separate
 [loopback fake-Responses fixture](tests/probe_toolset_http.py) observed the
 same request and streaming/nonstreaming response boundaries through both the
-locally selected Mac binary and the uninstalled caller-only candidate. This does not
+locally selected Mac binary and the uninstalled caller-only candidate. When
+the synthetic result contained only `browser_state`, its JSON arrived as a
+string rather than the original typed block. This does not
 establish that the current Claude Code client sends those API toolsets, nor
 that a real OpenAI backend would accept the synthetic request. Existing browser
 MCP behavior is a separate path. Do not treat these client toolsets as supported
