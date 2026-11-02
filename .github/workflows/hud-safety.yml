@@ -31,7 +31,11 @@ jobs:
           python-version: '3.11'
       - name: Apply the fail-closed experiment to pinned upstream source
         shell: bash
-        run: git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-git-safety.patch"
+        run: |
+          git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-git-safety.patch"
+          git -C external-hud apply "$GITHUB_WORKSPACE/upstream/patches/claude-hud-v0.15-bun-node-fallback.patch"
+      - name: Check Node resolution for existing Bun launchers
+        run: python tests/probe_hud_node_fallback.py --hud-dir external-hud
       - name: Exercise synthetic bridge status, activity, quota and post-compaction displays
         run: python tests/probe_hud_render.py --hud-dir external-hud
       - name: Exercise upstream's owned-repository security controls and failed enumeration

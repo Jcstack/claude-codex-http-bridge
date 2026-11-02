@@ -204,12 +204,14 @@ ingress is still the previous process and does not enforce that new check.
 Login recovery remains installed and healthy; a real reboot was not performed.
 
 Separately, the installed Claude HUD's Git-status display was temporarily
-disabled after reviewing upstream security advisories. The original HUD config
-was backed up under the private installation root; no plugin package or Claude
-process was replaced. A synthetic upstream 0.15.0 security check then failed on
-this Mac, so its experimental local correction has not been activated. The
-separate terminal-escape advisory is not resolved by disabling Git. See
-[SECURITY.md](SECURITY.md) for the limited evidence and outstanding work.
+disabled after reviewing upstream security advisories. The official plugin
+manager updated 0.8.0 to 0.15.0, retaining the old cached package and a private
+backup. A small local Bun-to-Node launcher correction was installed separately
+and tested with a synthetic frame and the PATH of an already-running client.
+No Claude process or bridge service was restarted. Upstream 0.15.0's synthetic
+Git security check failed on this Mac; the experimental Git correction was not
+activated and Git status remains disabled. See [SECURITY.md](SECURITY.md) for
+the local package modification, privacy behavior and outstanding checks.
 
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 

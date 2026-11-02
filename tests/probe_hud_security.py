@@ -90,6 +90,8 @@ def filter_failure_detail(output: str) -> str | None:
         if detail.startswith('Command failed:'):
             for command in ('init', 'add', 'commit', 'config'):
                 if re.search(r'\b' + command + r'\b', detail):
+                    if command == 'add':
+                        return 'git_add_initial' if '.gitattributes' in detail else 'git_add_positive_control'
                     return f'git_command_failed:{command}'
             return 'git_command_failed:other'
         return 'unclassified_fixture_failure'

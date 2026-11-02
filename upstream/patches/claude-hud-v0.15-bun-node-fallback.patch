@@ -1,0 +1,30 @@
+--- a/hud.mjs
++++ b/hud.mjs
+@@ -247,8 +247,26 @@
+ 
+ // Bun has no permission model, so logic always runs on Node: hand the whole run to `node`, found the
+ // way the collector finds git (on Windows, only in absolute PATH entries, never the repo's folder).
++// Existing Bun-based launchers can have a PATH without Node even when a
++// supported system installation exists. Never resolve a relative PATH entry
++// against the user's project. These fallback locations match HUD's doctor.
++export function resolvePosixNode(env = process.env, resolve = (candidate) => {
++  try {
++    fs.accessSync(candidate, fs.constants.X_OK);
++    const real = fs.realpathSync(candidate);
++    return fs.statSync(real).isFile() ? real : null;
++  } catch { return null; }
++}) {
++  const dirs = (env.PATH ?? '').split(path.delimiter).filter((dir) => path.isAbsolute(dir));
++  for (const dir of [...dirs, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']) {
++    const candidate = resolve(path.join(dir, 'node'));
++    if (candidate) return candidate;
++  }
++  return null;
++}
++
+ function relayToNode(argv) {
+-  const node = process.platform === 'win32' ? collector.resolveWindowsExecutable('node') : 'node';
++  const node = process.platform === 'win32' ? collector.resolveWindowsExecutable('node') : resolvePosixNode();
+   return new Promise((resolve) => {
+     if (!node) {
+       print([upgradeLine(`Bun ${process.versions.bun}`)]);

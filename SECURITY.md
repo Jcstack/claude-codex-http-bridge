@@ -64,15 +64,18 @@ The read-only diagnostic report never opens key files or contacts an endpoint. I
 
 Review updates to the pinned proxy release and its security advisories before changing the version or hashes. Do not enable LAN binding, request body logging, or the management interface without a separate security review.
 
-The separate Claude HUD plugin also needs its own security review. The local
-0.8.0 installation is within the affected ranges of upstream advisories on
+The separate Claude HUD plugin also needs its own security review. The former
+local 0.8.0 installation was within the affected ranges of upstream advisories on
 [repository Git configuration](https://github.com/jarrodwatts/claude-hud/security/advisories/GHSA-fq7j-8hxj-jfqh),
 [partial-clone fetches](https://github.com/jarrodwatts/claude-hud/security/advisories/GHSA-25hg-g83m-4w35),
 and [terminal escapes](https://github.com/jarrodwatts/claude-hud/security/advisories/GHSA-q436-5523-5x82).
 Git-status collection was temporarily disabled in the local HUD configuration
 using the upstream workaround; the former configuration was backed up privately.
-This does not address the terminal-escape issue or prove prior compromise. No
-Claude process or bridge service was restarted.
+This setting alone does not address the terminal-escape issue or prove prior
+compromise. The official plugin manager then updated the local package to
+0.15.0, which upstream lists as patched for those advisories; the 0.8.0 cache
+and a private backup remain available. No Claude process or bridge service was
+restarted.
 
 Upstream 0.15.0 was downloaded at commit `b86e1c3e5255880578de4b7cc87dc383228c2a18`
 and each archive file was matched against that Git tree. A controlled invocation
@@ -86,8 +89,23 @@ cause remains under investigation; a passing Unix run does not validate Windows.
 The [fixture runner](tests/probe_hud_security.py) runs reviewed plugin code with
 a temporary home and filtered environment, not an OS sandbox. The user's
 existing HUD command selects plugin versions dynamically, so changing the cache
-would affect running sessions at their next status refresh and requires more
-compatibility and safe-update validation first.
+can affect running sessions at their next status refresh. Git status remains
+disabled until the unresolved checks and safe-update review are complete.
+
+An existing Bun-based HUD launch could not find Node in one running Claude
+process's inherited `PATH`. A separate, locally installed
+[launcher compatibility patch](upstream/patches/claude-hud-v0.15-bun-node-fallback.patch)
+searches absolute PATH entries and standard system locations without modifying
+the parent process. The original upstream launcher was backed up privately.
+The installed 0.15.0 package is therefore locally modified, even though its
+plugin-manager version remains 0.15.0. A synthetic run using that process's
+PATH and a temporary home rendered the HUD without restarting the process.
+The compatibility patch is independent of the uninstalled Git-safety patch.
+
+Upstream 0.15.0 writes its most recent status-line input to a local heartbeat
+file for its diagnostic commands, with private POSIX file mode in the tested
+fixture. The input can contain session metadata and paths; it is not included in
+this repository. Temporary-home tests are not a complete plugin privacy audit.
 
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 

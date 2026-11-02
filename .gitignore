@@ -91,6 +91,7 @@
 !upstream/patches/midconversation-effort.patch
 !upstream/patches/midconversation-system-fidelity.patch
 !upstream/patches/claude-hud-v0.15-git-safety.patch
+!upstream/patches/claude-hud-v0.15-bun-node-fallback.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml
