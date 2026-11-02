@@ -215,6 +215,31 @@ input items remained a structural prefix. These comparisons use parsed JSON,
 not a byte-for-byte assertion or a provider cache-hit measurement. The same
 fixture skips the interactive console on Windows.
 
+## Status-line cache metrics
+
+[Claude's status-line schema](https://code.claude.com/docs/en/statusline#prompt-cache-fields)
+defines `hit_ratio` as cache-read tokens divided by the reported input tokens
+for the main conversation, not as the fraction of requests with a hit. The
+[OpenAI API caching guide](https://developers.openai.com/api/docs/guides/prompt-caching#monitor-cache-performance)
+also recommends comparing cached and total input tokens. The public API's
+controls, retention and pricing are not assumed to apply to the subscription
+route.
+
+In an isolated real-Claude terminal using a fake Messages service, two
+synthetic responses reported 2,000 fresh tokens, then 500 fresh plus 1,500
+cache-read tokens. Claude's status line reported two requests and a 0.375
+cache-read token fraction, while also displaying a `5m` lifetime and warmth
+even though the fake service supplied no lifetime. The [reproducible probe](tests/probe_statusline_cache.py)
+uses a temporary home and no provider. Its interactive path has been tested
+locally on macOS; Windows console behavior remains unverified.
+
+A source candidate preserves the validated `requests`, `caching_observed` and
+`hit_ratio` fields while withholding inferred warmth, expiry, lifetime, miss
+diagnosis and cache-write accounting. An absent cache report is not proof that
+caching is off. These values describe counters reported to Claude for the main
+conversation, not a provider-wide hit rate, a guaranteed cache lifetime, or a
+bill. The candidate has not yet been installed in the live status-line path.
+
 ## Next gates
 
 - Trace control fields across each hop using a fake origin, without enabling

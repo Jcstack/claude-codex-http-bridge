@@ -498,7 +498,7 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(corrected["context_window"]["context_window_size"], 500_000)
         self.assertEqual(corrected["context_window"]["used_percentage"], 23)
         self.assertNotIn("total_cost_usd", corrected["cost"])
-        self.assertNotIn("prompt_cache", corrected)
+        self.assertEqual(corrected["prompt_cache"], {"caching_observed": True})
         self.assertNotIn("rate_limits", corrected)
         self.assertEqual(corrected["workspace"], payload["workspace"])
         payload["model"]["id"] = "gpt-6-sol"
@@ -509,6 +509,20 @@ Model ID: `gpt-6.1-sol`
         future = statusline_adapter.corrected_payload(payload, {"gpt-future-fixture": 4_000_000})
         self.assertEqual(future["context_window"]["context_window_size"], 4_000_000)
         self.assertEqual(future["context_window"]["used_percentage"], 3)
+
+    def test_statusline_forwards_cache_read_counters_without_assumed_ttl(self) -> None:
+        payload = {"prompt_cache": {"caching_observed": True, "requests": 2, "hit_ratio": .375,
+                   "ttl": "5m", "warm": True, "expires_at": 123, "misses": 3, "unknown": "private"}}
+        corrected = statusline_adapter.corrected_payload(payload, {})
+        self.assertEqual(corrected["prompt_cache"], {"caching_observed": True, "requests": 2, "hit_ratio": .375})
+        self.assertIn("ttl", payload["prompt_cache"])
+        for bad in ({"caching_observed": 1, "requests": True, "hit_ratio": float("nan")},
+                    {"caching_observed": "true", "requests": -1, "hit_ratio": 1.1},
+                    {"hit_ratio": float("inf")}, {"ttl": "5m"}):
+            self.assertNotIn("prompt_cache", statusline_adapter.corrected_payload({"prompt_cache": bad}, {}))
+        zero = statusline_adapter.corrected_payload({"prompt_cache": {"caching_observed": False,
+                                                     "requests": 0, "hit_ratio": 0}}, {})
+        self.assertEqual(zero["prompt_cache"], {"caching_observed": False, "requests": 0, "hit_ratio": 0})
 
     def test_statusline_preserves_unknown_context_after_compaction(self) -> None:
         name = "gpt-6-astra"

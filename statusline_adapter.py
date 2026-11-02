@@ -48,8 +48,17 @@ def corrected_payload(payload: dict, context_windows: dict[str, int], codex_limi
         cost = dict(cost)
         cost.pop("total_cost_usd", None)
         result["cost"] = cost
-    # These fields describe Anthropic billing and prompt caching, not this Codex route.
-    result.pop("prompt_cache", None)
+    # Claude derives these counters from reported input/cache tokens. Its cache
+    # lifetime, warmth and miss diagnoses assume provider-specific semantics.
+    cache = result.pop("prompt_cache", None)
+    if isinstance(cache, dict):
+        safe_cache = {}
+        observed, requests, ratio = cache.get("caching_observed"), cache.get("requests"), cache.get("hit_ratio")
+        if type(observed) is bool: safe_cache["caching_observed"] = observed
+        if type(requests) is int and requests >= 0: safe_cache["requests"] = requests
+        if type(ratio) in (int, float) and 0 <= ratio <= 1: safe_cache["hit_ratio"] = ratio
+        if safe_cache: result["prompt_cache"] = safe_cache
+    # Rate limits here describe Anthropic billing, not this Codex route.
     result.pop("rate_limits", None)
     if codex_limits:
         result["rate_limits"] = codex_limits

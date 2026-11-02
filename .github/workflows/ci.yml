@@ -66,6 +66,9 @@ jobs:
         run: python tests/claude_fixture.py
       - name: Verify local Claude behavior without a model account
         run: python tests/probe_claude_client.py
+      - name: Verify reported cache counters in an isolated status line
+        if: runner.os != 'Windows'
+        run: python tests/probe_statusline_cache.py
       - name: Verify picker reload in an isolated terminal
         if: runner.os != 'Windows'
         run: python tests/probe_picker_reload.py
