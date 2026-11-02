@@ -268,8 +268,8 @@ report and is not evidence that the upstream issue is resolved.
 
 Our separate isolated fixture did reproduce a bridge-specific precedence issue:
 the generated command-line status line overrode project and local settings.
-The startup candidate leaves detected or uncertain cases to the native client,
-with no bridge context correction for that status line. Local synthetic tests
+The installed startup mitigation leaves detected or uncertain cases to the native
+client, with no bridge context correction for that status line. Local synthetic tests
 covered ordinary project/local files and a real linked Git worktree with its
 local setting in the main checkout. Mid-session file changes, `/cd`, unusual Git
 layouts, authenticated Windows interaction and arbitrary plugins remain open.

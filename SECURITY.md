@@ -183,13 +183,20 @@ launch status line remains eligible. The [three-platform gate](https://github.co
 and an installed-code isolated test passed, and the controller-only local update
 did not restart the origin, ingress or running clients. A separate synthetic
 client test found that the older fallback also overrode project/local status
-lines. The current source checks bounded settings metadata at startup and leaves
-detected or uncertain project/local precedence to Claude, without copying or
-printing those settings. In that case the project status line is not adapted,
-so its context, cost, quota and cache displays are not corrected by this bridge. This later source
-change is tracked separately from the installed controller. File changes after
-the check, `/cd`, unusual Git layouts, managed policies and real plugins still
-require investigation.
+lines. At startup the current source reads bounded settings files into memory to
+check whether they define a status line, and leaves detected or uncertain
+project/local precedence to Claude. It does not persist, print or upload those
+file contents. In that case the project status line is not adapted,
+so its context, cost, quota and cache displays are not corrected by this bridge.
+The [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41472944905)
+covered policy on Windows and locked-client project, local and linked-worktree
+cases on macOS/Linux. The local launcher was updated from commit `2322d92`,
+which changed only the warning text after that gate, without restarting the
+origin, ingress or running clients. Windows checks and installed-code fixtures
+covered the final source, including restricted-mode `true`; a private backup of
+the previous launcher was retained. File changes after the check,
+`/cd`, unusual Git layouts, managed policies and real plugins still require
+investigation.
 
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 
