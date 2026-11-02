@@ -209,9 +209,14 @@ manager updated 0.8.0 to 0.15.0, retaining the old cached package and a private
 backup. A small local Bun-to-Node launcher correction was installed separately
 and tested with a synthetic frame and the PATH of an already-running client.
 No Claude process or bridge service was restarted. Upstream 0.15.0's synthetic
-Git security check failed on this Mac; the experimental Git correction was not
-activated and Git status remains disabled. See [SECURITY.md](SECURITY.md) for
-the local package modification, privacy behavior and outstanding checks.
+Git security check failed on this Mac. After the corrected collector and
+version-gated opt-in passed their [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41454320316),
+the local package was patched and the guarded Git display was restored. The
+standard Git switch remains false for older and unmodified versions. One first
+installation attempt failed in its isolated test bootstrap and restored the
+original files; the corrected attempt passed the synthetic checks before
+enabling the opt-in. See [SECURITY.md](SECURITY.md) for the local package
+modifications, privacy behavior and remaining limits.
 
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 

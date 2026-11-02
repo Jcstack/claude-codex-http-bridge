@@ -82,29 +82,35 @@ and each archive file was matched against that Git tree. A controlled invocation
 of its own owner security fixture failed on this Mac. The separate
 [fail-closed experiment](upstream/patches/claude-hud-v0.15-git-safety.patch)
 passed the fixture and a synthetic config-enumeration failure check locally;
-it is not an upstream fix, a complete security audit, or an installed plugin.
+it is now installed locally, but is not an upstream fix or a complete audit.
 The first [platform run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41451134573)
 passed on macOS and Linux but failed one Git-filter fixture on Windows. Its
 first classified failure was the fixture's `git add` positive control, not a
 reported command execution by the candidate. A Windows-only test experiment
 normalizes the synthetic marker path to forward slashes while retaining the
-same assertions; its outcome remains to be checked. A passing Unix run does
-not validate Windows.
+same assertions; the later three-platform run passed. A passing Unix run alone
+would not validate Windows.
 The [fixture runner](tests/probe_hud_security.py) runs reviewed plugin code with
 a temporary home and filtered environment, not an OS sandbox. The user's
 existing HUD command selects plugin versions dynamically, so changing the cache
-can affect running sessions at their next status refresh. Git status remains
-disabled until the unresolved checks and safe-update review are complete.
+can affect running sessions at their next status refresh.
 
-A separate [version-gated Git opt-in experiment](upstream/patches/claude-hud-v0.15-guarded-git-optin.patch)
-keeps the ordinary HUD Git setting disabled for old and future plugin versions.
-It enables Git only when a private opt-in and the reviewed collector's
-per-process guard are both present. Its [synthetic controls](tests/probe_hud_guarded_git.py)
-check the opt-out, a missing collector guard or launcher relay even with an injected environment variable,
-the native `hud preview`/`set`/undo paths, and a fake repository command with an
-ordinary-Git positive control. This is a
-candidate, not proof against all repository configuration or update races, and
-has not been installed on the local plugin.
+A separate [version-gated Git opt-in](upstream/patches/claude-hud-v0.15-guarded-git-optin.patch)
+keeps the ordinary HUD Git setting disabled for the old version tested and for
+versions that ignore the bridge-specific setting. It enables Git only when a
+private opt-in and the reviewed collector's per-process guard are both present.
+Its [synthetic controls](tests/probe_hud_guarded_git.py) check the opt-out, a
+missing collector guard or launcher relay even with an injected environment
+variable, the native `hud preview`/`set`/undo paths, and a fake repository command with an
+ordinary-Git positive control. The [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41454320316)
+passed, including the Windows-specific fixture path adjustment. The local
+0.15.0 plugin now has the reviewed collector and guard patches, and its private
+`claudeCodexGuardedGit` opt-in is enabled while `gitStatus.enabled` remains
+false. A synthetic frame using a copy of the actual HUD config displayed the
+Git branch; no live user project was used in that test. This is not proof
+against all repository configuration, tampering or future update behavior.
+Use the patched HUD's normal `set gitStatus.enabled=false` command to turn off
+the guarded display; `set ...=true` and `set --undo` are covered by the fixture.
 
 An existing Bun-based HUD launch could not find Node in one running Claude
 process's inherited `PATH`. A separate, locally installed
@@ -114,7 +120,10 @@ the parent process. The original upstream launcher was backed up privately.
 The installed 0.15.0 package is therefore locally modified, even though its
 plugin-manager version remains 0.15.0. A synthetic run using that process's
 PATH and a temporary home rendered the HUD without restarting the process.
-The compatibility patch is independent of the uninstalled Git-safety patch.
+The compatibility patch and the installed Git-safety patches are separately
+reviewable. An official update can overwrite these local patches; verify the
+new version before restoring Git. Older versions must keep the ordinary Git
+setting disabled.
 
 Upstream 0.15.0 writes its most recent status-line input to a local heartbeat
 file for its diagnostic commands, with private POSIX file mode in the tested

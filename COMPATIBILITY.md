@@ -66,9 +66,10 @@ tool, MCP, skill, agent and todo; after a synthetic compact boundary with
 The hint is not a provider report. This does not establish every plugin or
 session behavior, and the candidate's security and rollout are separate gates.
 Those render checks also passed on three platform runners in the [candidate run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41451870244),
-whose Windows security fixture failed separately. The local plugin now uses
-0.15.0 with Git display temporarily disabled and a separately documented Bun
-launcher patch; see [SECURITY.md](SECURITY.md).
+whose Windows security fixture failed separately; the later adjusted fixture
+passed on [all three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41454320316).
+The local plugin now uses 0.15.0 with a guarded Git display and separately
+documented patches; see [SECURITY.md](SECURITY.md).
 
 A community [mixed-model subagent report](https://github.com/anthropics/claude-code/issues/83355)
 describes an older client using the parent's compact window for a smaller
