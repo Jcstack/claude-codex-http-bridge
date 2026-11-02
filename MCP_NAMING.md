@@ -85,7 +85,10 @@ Windows account, or production transport behavior.
 The same test-only adapter later failed once in the [macOS client job](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41444475594/job/125274061156)
 without a recorded case or failure category; its source was unchanged from an
 earlier passing run. A separate local run passed. Neither observation identifies
-the cause. The fixture now reports synthetic per-case boolean controls and
+the cause. Three further consecutive local macOS runs passed the resume, deny,
+and dynamic-list controls; the later [source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41455750069)
+also passed. These samples do not explain or rule out the original intermittent
+failure. The fixture now reports synthetic per-case boolean controls and
 exception types on failure, while continuing to withhold raw client output,
 request bodies, paths and tool arguments. The candidate remains experimental.
 
