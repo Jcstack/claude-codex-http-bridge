@@ -243,6 +243,10 @@ synthetic installed-command check verified the comparison without starting a
 service or modifying the input files. The command needs a separately supplied
 snapshot, checks only retained descriptions and input schemas, and does not
 prevent a stale call. See [MCP_NAMING.md](MCP_NAMING.md#offline-definition-comparison).
+The later input-replacement check passed its own [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41485934743)
+and was installed as a single atomic module update with a private backup. An
+installed-module test rejected a replaced synthetic path; the service state
+again remained unchanged. Metadata checks do not create an atomic file snapshot.
 
 The installed diagnostics now retain a managed backend when its only recognized
 in-window event is an incomplete-stream sentinel. They also expose its coverage
