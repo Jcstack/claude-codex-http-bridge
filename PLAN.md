@@ -147,7 +147,7 @@ Acceptance: independent tests can reproduce conclusions; one success, community 
 - [ ] Audit HOME, inherited environment, system credentials, and external-access boundaries for remaining real subscription probes and other proxy launch paths. Do not generalize isolation findings from updated fixtures to unverified paths.
 - [ ] Finish three-platform and real-plugin validation for the gateway MCP name candidate before assessing a safe release. Rewriting historical names in an existing session may change cache prefixes.
 - [ ] Prepare a reviewable migration plan for the original listener and ingress themselves. Only the validated translator handoff is currently considered non-disruptive.
-- [ ] Add a validated operator-facing rollback for an earlier selected bundle when the current launcher source lock has changed. Earlier immutable bundles remain private on disk, but a normal `bridge upgrade` verifies the current source lock and cannot simply select an older lock.
+- [ ] Complete the three-platform gate and safely install the operator-facing rollback for an earlier selected bundle when the current launcher source lock has changed. Local tests passed for hash validation, history mismatch, failed transitions, active-stream drain, and continuation of one isolated Claude process; the production command is not yet installed.
 - [ ] Inspect complete history, runtime-data exclusions, and dependency provenance for each commit. Explain the benefit, maintenance, issues, and security of new dependencies.
 - [ ] Record version, tests, actual limitations, rollback, and effects on existing sessions for each release; continue using main without a new branch.
 

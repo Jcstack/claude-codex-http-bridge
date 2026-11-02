@@ -1,16 +1,18 @@
 """Reject unreviewed or modified runtime code before changing an active choice."""
 
 import json
+import io
 import os
 from pathlib import Path
 import tempfile
 import unittest
-from contextlib import nullcontext
+from contextlib import nullcontext, redirect_stdout
 import sys
 from unittest.mock import patch
 
 import accounts
 import launcher
+import quota_recovery
 import rolling_runtime
 import runtime_bundle
 import windows_acl
@@ -102,6 +104,31 @@ class BundleTests(unittest.TestCase):
         runtime_bundle.pack(proxy, ingress, bundle)
         return bundle
 
+    def invoke_bridge(self, root, *arguments, ensure=None):
+        with patch.object(launcher, "ROOT", root), patch.object(launcher, "service_lock", return_value=nullcontext()), \
+             patch.object(launcher, "helper_output", return_value=""), \
+             patch.object(accounts, "switch_lock", return_value=nullcontext()), \
+             patch.object(launcher, "ensure_service", return_value=(root / "runtime", {"fixture": True}, None)), \
+             patch.object(launcher, "managed_catalog", return_value=({}, lambda: None)), \
+             patch.object(rolling_runtime, "ensure", side_effect=ensure or (lambda *_a, **_k: {"port": 12345})), \
+             patch.object(quota_recovery, "ensure_watch"), \
+             patch.object(sys, "argv", ["launcher.py", "bridge", *arguments]), redirect_stdout(io.StringIO()):
+            return launcher.main()
+
+    def versioned_install(self, root):
+        old_dir = root / "old"; old_dir.mkdir()
+        new_dir = root / "new"; new_dir.mkdir()
+        install = root / "install"; runtime_bundle.private_dir(install)
+        old_source = {"upstream": "1" * 40, "files": {}}
+        new_source = {"upstream": "2" * 40, "files": {}}
+        with patch.object(runtime_bundle, "source_lock", return_value=old_source):
+            old_bundle = self.fixture(old_dir)
+            old_identity = runtime_bundle.activate(install, old_bundle)
+        with patch.object(runtime_bundle, "source_lock", return_value=new_source):
+            new_bundle = self.fixture(new_dir)
+            new_identity = runtime_bundle.verify(new_bundle)[1]
+        return install, new_bundle, old_identity, new_identity, new_source
+
     def test_modified_binary_and_source_are_rejected_before_activation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); runtime_bundle.private_dir(root)
@@ -149,6 +176,112 @@ class BundleTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "identity"):
                     runtime_bundle.selected(destination)
 
+    def test_upgrade_and_rollback_keep_source_lock_and_swap_recorded_runtimes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install, bundle, old, new, new_source = self.versioned_install(Path(temporary))
+            with patch.object(runtime_bundle, "source_lock", return_value=new_source):
+                self.assertEqual(self.invoke_bridge(install, "upgrade", str(bundle)), 0)
+                self.assertEqual(runtime_bundle.selected(install)[2], new)
+                self.assertEqual(json.loads(runtime_bundle.history_snapshot(install)), {"current": new, "previous": old})
+                history = runtime_bundle.history_snapshot(install)
+                self.assertEqual(self.invoke_bridge(install, "upgrade", str(bundle)), 0)
+                self.assertEqual(runtime_bundle.history_snapshot(install), history)
+                self.assertEqual(self.invoke_bridge(install, "rollback"), 0)
+                self.assertEqual(runtime_bundle.selected(install)[2], old)
+                self.assertEqual(runtime_bundle.source_lock(), new_source)
+                self.assertEqual(json.loads(runtime_bundle.history_snapshot(install)), {"current": old, "previous": new})
+                self.assertEqual(self.invoke_bridge(install, "rollback"), 0)
+                self.assertEqual(runtime_bundle.selected(install)[2], new)
+
+    def test_failed_rollback_restores_selection_and_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install, bundle, _old, new, new_source = self.versioned_install(Path(temporary))
+            with patch.object(runtime_bundle, "source_lock", return_value=new_source):
+                self.invoke_bridge(install, "upgrade", str(bundle))
+                selection = runtime_bundle.selection_snapshot(install)
+                history = runtime_bundle.history_snapshot(install)
+                def fail(*_args, **_kwargs): raise RuntimeError("Synthetic readiness failure")
+                with self.assertRaisesRegex(RuntimeError, "readiness"):
+                    self.invoke_bridge(install, "rollback", ensure=fail)
+                self.assertEqual(runtime_bundle.selection_snapshot(install), selection)
+                self.assertEqual(runtime_bundle.history_snapshot(install), history)
+                self.assertEqual(runtime_bundle.selected(install)[2], new)
+
+    def test_failed_history_write_restores_the_prior_record(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install, bundle, old, new, new_source = self.versioned_install(Path(temporary))
+            old_history = runtime_bundle.history_transition(old, None)
+            runtime_bundle.write_history(install, old_history)
+            original = runtime_bundle.write_history
+            calls = []
+            def interrupted(root, content):
+                calls.append(content)
+                original(root, content)
+                if len(calls) == 1: raise RuntimeError("Synthetic post-write failure")
+            with patch.object(runtime_bundle, "source_lock", return_value=new_source), \
+                 patch.object(runtime_bundle, "write_history", side_effect=interrupted):
+                with self.assertRaisesRegex(RuntimeError, "post-write"):
+                    self.invoke_bridge(install, "upgrade", str(bundle))
+            self.assertEqual(runtime_bundle.selected(install)[2], old)
+            self.assertEqual(runtime_bundle.history_snapshot(install), old_history)
+            self.assertNotEqual(old, new)
+
+    def test_first_install_has_no_previous_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); source = root / "source"; source.mkdir()
+            bundle = self.fixture(source)
+            install = root / "install"; runtime_bundle.private_dir(install)
+            self.invoke_bridge(install, "upgrade", str(bundle))
+            selected = runtime_bundle.selected(install)[2]
+            history = runtime_bundle.history_snapshot(install)
+            self.assertEqual(json.loads(history), {"current": selected, "previous": None})
+            with self.assertRaisesRegex(RuntimeError, "No previously recorded"):
+                self.invoke_bridge(install, "rollback")
+            self.assertEqual(runtime_bundle.selected(install)[2], selected)
+            self.assertEqual(runtime_bundle.history_snapshot(install), history)
+
+    def test_tampered_previous_bundle_and_stale_history_fail_before_switch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install, bundle, old, new, new_source = self.versioned_install(Path(temporary))
+            with patch.object(runtime_bundle, "source_lock", return_value=new_source):
+                self.invoke_bridge(install, "upgrade", str(bundle))
+                selection = runtime_bundle.selection_snapshot(install)
+                history = runtime_bundle.history_snapshot(install)
+                previous = runtime_bundle.installed(install, old)
+                binary = previous[0] / previous[1]["binaries"]["proxy"]["file"]
+                binary.write_bytes(b"tampered")
+                with self.assertRaisesRegex(RuntimeError, "checksum"):
+                    self.invoke_bridge(install, "rollback")
+                self.assertEqual(runtime_bundle.selection_snapshot(install), selection)
+                self.assertEqual(runtime_bundle.history_snapshot(install), history)
+                runtime_bundle.write_history(install, runtime_bundle.history_transition(old, new))
+                with self.assertRaisesRegex(RuntimeError, "does not match"):
+                    self.invoke_bridge(install, "rollback")
+                self.assertEqual(runtime_bundle.selection_snapshot(install), selection)
+
+    def test_failed_history_restoration_does_not_clobber_another_writer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); runtime_bundle.private_dir(root)
+            previous = runtime_bundle.history_transition("a" * 64, "b" * 64)
+            attempted = runtime_bundle.history_transition("c" * 64, "a" * 64)
+            concurrent = runtime_bundle.history_transition("d" * 64, "c" * 64)
+            runtime_bundle.write_history(root, concurrent)
+            with self.assertRaisesRegex(RuntimeError, "history changed"):
+                runtime_bundle.rollback_history(root, previous, attempted)
+            self.assertEqual(runtime_bundle.history_snapshot(root), concurrent)
+
+    @unittest.skipIf(os.name == "nt", "Windows symlink creation requires an enabled privilege")
+    def test_broken_selection_and_history_symlinks_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); runtime_bundle.private_dir(root)
+            for name, read in (("runtime-selected.json", runtime_bundle.selection_snapshot),
+                               ("runtime-previous.json", runtime_bundle.history_snapshot)):
+                path = root / name
+                path.symlink_to(root / "missing")
+                with self.assertRaisesRegex(RuntimeError, "symlink"):
+                    read(root)
+                path.unlink()
+
     def test_upgrade_failure_restores_previous_runtime_selection(self):
         for had_previous in (False, True):
             with self.subTest(had_previous=had_previous), tempfile.TemporaryDirectory() as temporary:
@@ -175,6 +308,7 @@ class BundleTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "synthetic readiness failure"):
                         launcher.main()
                 self.assertEqual(runtime_bundle.selection_snapshot(install), before)
+                self.assertIsNone(runtime_bundle.history_snapshot(install))
                 if had_previous:
                     self.assertEqual(runtime_bundle.selected(install)[2], json.loads(before)["bundle"])
 
@@ -211,6 +345,7 @@ class BundleTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "synthetic post-selection failure"):
                     launcher.main()
             self.assertIsNone(runtime_bundle.selection_snapshot(install))
+            self.assertIsNone(runtime_bundle.history_snapshot(install))
 
 
 if __name__ == "__main__": unittest.main()

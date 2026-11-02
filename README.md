@@ -107,6 +107,7 @@ claude-codex bridge status            # localhost service state
 claude-codex autostart enable         # restore the subscription bridge at login (macOS/Windows)
 claude-codex autostart status         # login recovery and last local health result
 claude-codex bridge reload            # replace a managed backend and drain old requests
+claude-codex bridge rollback          # restore the previously recorded managed runtime
 claude-codex diagnostics --hours 2    # read-only cache, latency, failures and compaction
 claude-codex diagnostics --lifetime --tracked --include-children # audit a previously recorded private target
 claude-codex bridge stop              # after background work has finished

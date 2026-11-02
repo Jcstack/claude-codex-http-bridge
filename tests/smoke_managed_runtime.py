@@ -74,7 +74,7 @@ class Upstream(BaseHTTPRequestHandler):
                 if not self.release.wait(90): raise RuntimeError("Synthetic handoff barrier timed out")
 
 
-def persistent_claude(root, value, base_runtime, base, *, background=False):
+def persistent_claude(root, value, base_runtime, base, *, background=False, transition=None):
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude: raise RuntimeError("Claude fixture binary is required")
     config = root / "claude-config"; runtime_bundle.private_dir(config)
@@ -126,7 +126,8 @@ def persistent_claude(root, value, base_runtime, base, *, background=False):
 
     try:
         turn("fixture-first")
-        updated = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC}, force=True)
+        updated = (transition() if transition is not None else
+                   rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC}, force=True))
         assert updated["pid"] == value["pid"] and updated["port"] == value["port"]
         turn("fixture-second")
         assert "fixture-first" in json.dumps(Upstream.requests[-1]["input"])

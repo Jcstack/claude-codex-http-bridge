@@ -451,7 +451,10 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
             raise
         try:
             drain(root, value)
-        except (OSError, RuntimeError):
+        except Exception:
+            # Routing is already published. A retirement error must not make
+            # the launcher restore the selection while new traffic uses the
+            # replacement; an idle generation can be retired on a later pass.
             print("Managed endpoint is ready; old generation retirement is deferred", file=sys.stderr)
         return value
 

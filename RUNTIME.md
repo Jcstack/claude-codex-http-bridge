@@ -145,6 +145,32 @@ binary hashes. This does not admit an old or unknown bundle as a new upgrade.
 New activation always requires the current reviewed source lock. Changing a
 selected manifest, even to the new source hash, fails its recorded identity.
 
+`claude-codex bridge rollback` selects the most recently recorded previous
+installed bundle and uses the normal managed-backend handoff. The previous
+bundle's private manifest identity, platform and binary hashes are verified
+again; it may have a different source lock because it was selected before a
+launcher update. The command does not install an arbitrary old bundle. The
+current source lock remains in place for future upgrades. A second rollback
+switches back to the version replaced by the first, provided the recorded
+identity and files still validate. Reverting a runtime also reverts its fixes.
+
+New distinct upgrades record the former selection before publishing a new
+backend. First-time installs have no prior runtime; installations upgraded
+before this history mechanism was added do not automatically acquire one.
+History is private, contains only bundle identities, and is bound to the
+current selection. A missing, inconsistent or modified history or bundle
+fails closed. A handled prepublication failure restores the selection and
+history without overwriting a concurrent different writer. An abrupt process
+or computer failure between file updates can leave a mismatch requiring
+inspection; this is not a crash-atomic multi-file transaction.
+
+A credential-free [rollback probe](tests/probe_runtime_rollback.py) uses real
+gateway/translator binaries, a fake origin, and the same isolated Claude Code
+process across a rollback. It checks an old in-flight stream, new requests,
+stable TLS identity, a changed source lock, and a synthetic retirement failure
+after publication. It does not establish every plugin's behavior, real model
+acceptance, or real provider cache reuse after a rollback.
+
 Once installed, ordinary new `claude-codex` launches use the managed endpoint.
 The model catalog and HUD still come from the authenticated subscription route.
 No OpenAI API project route is enabled. `claude-codex bridge reload` starts and

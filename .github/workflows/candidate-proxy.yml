@@ -127,6 +127,7 @@ jobs:
           python tests/probe_large_payload_latency.py runtime-bundle
           python tests/probe_catalog_handoff.py runtime-bundle
           python tests/smoke_managed_runtime.py runtime-bundle --claude-client --background-client
+          python tests/probe_runtime_rollback.py runtime-bundle --claude-client
       - uses: actions/upload-artifact@v4
         with:
           name: proxy-candidate-${{ matrix.os }}

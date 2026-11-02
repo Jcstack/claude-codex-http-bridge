@@ -158,10 +158,85 @@ def activate(root: Path, source: Path) -> str:
 
 def selection_snapshot(root: Path) -> bytes | None:
     path = root / "runtime-selected.json"
+    if path.is_symlink(): raise RuntimeError("Runtime selection must not be symlinked")
     if not path.exists():
         return None
     safe_file(path, limit=65536)
     return path.read_bytes()
+
+
+def valid_identity(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def installed(root: Path, identity: str) -> tuple[Path, dict, str]:
+    """Verify a private installed bundle against its immutable identity."""
+    if not valid_identity(identity): raise RuntimeError("Invalid installed runtime identity")
+    if (root / "runtimes").is_symlink(): raise RuntimeError("Runtime directory must not be symlinked")
+    directory = root / "runtimes" / identity
+    manifest, actual = verify(directory, installed_identity=identity)
+    return directory, manifest, actual
+
+
+def history_snapshot(root: Path) -> bytes | None:
+    path = root / "runtime-previous.json"
+    if path.is_symlink(): raise RuntimeError("Runtime history must not be symlinked")
+    if not path.exists(): return None
+    safe_file(path, limit=65536)
+    return path.read_bytes()
+
+
+def history_transition(current: str, previous: str | None) -> bytes:
+    if not valid_identity(current) or (previous is not None and not valid_identity(previous)) or current == previous:
+        raise RuntimeError("Invalid runtime history transition")
+    return canonical({"current": current, "previous": previous})
+
+
+def write_history(root: Path, content: bytes) -> None:
+    write_file(root / "runtime-previous.json", content, 0o600)
+    if os.name == "nt":
+        import windows_acl
+        windows_acl.lock([root / "runtime-previous.json"])
+
+
+def rollback_history(root: Path, previous: bytes | None, attempted: bytes) -> None:
+    """Undo a failed transition without overwriting another history writer."""
+    current = history_snapshot(root)
+    if current == previous: return
+    if current != attempted:
+        raise RuntimeError("Runtime history changed during failed upgrade; recovery requires inspection")
+    if previous is None:
+        (root / "runtime-previous.json").unlink()
+    else:
+        write_history(root, previous)
+
+
+def previous_installed(root: Path, current: str) -> tuple[Path, dict, str]:
+    """Trust only a previous selection recorded for the currently selected bundle."""
+    content = history_snapshot(root)
+    if content is None: raise RuntimeError("No previously recorded runtime is available for rollback")
+    try:
+        history = json.loads(content)
+    except (ValueError, UnicodeDecodeError):
+        raise RuntimeError("Invalid runtime history") from None
+    if (not isinstance(history, dict) or set(history) != {"current", "previous"} or
+            not valid_identity(history["current"]) or
+            (history["previous"] is not None and not valid_identity(history["previous"])) or
+            history["current"] == history["previous"]):
+        raise RuntimeError("Invalid runtime history")
+    if history["current"] != current:
+        raise RuntimeError("Runtime history does not match the current selection")
+    if history["previous"] is None:
+        raise RuntimeError("No previously recorded runtime is available for rollback")
+    return installed(root, history["previous"])
+
+
+def select_installed(root: Path, identity: str) -> None:
+    installed(root, identity)
+    write_file(root / "runtime-selected.json", canonical({"bundle": identity}), 0o600)
+    if os.name == "nt":
+        import windows_acl
+        windows_acl.lock([root / "runtime-selected.json"])
 
 
 def rollback_selection(root: Path, previous: bytes | None, attempted_identity: str) -> None:
@@ -183,17 +258,14 @@ def rollback_selection(root: Path, previous: bytes | None, attempted_identity: s
 
 def selected(root: Path) -> tuple[Path, dict, str] | None:
     path = root / "runtime-selected.json"
+    if path.is_symlink(): raise RuntimeError("Runtime selection must not be symlinked")
     if not path.exists(): return None
     safe_file(path, limit=65536)
     value = json.loads(path.read_text())
     identity = value.get("bundle") if isinstance(value, dict) else None
-    if not isinstance(identity, str) or len(identity) != 64 or any(c not in "0123456789abcdef" for c in identity):
+    if not valid_identity(identity):
         raise RuntimeError("Invalid selected runtime identity")
-    if (root / "runtimes").is_symlink(): raise RuntimeError("Runtime directory must not be symlinked")
-    directory = root / "runtimes" / identity
-    manifest, actual = verify(directory, installed_identity=identity)
-    if actual != identity: raise RuntimeError("Selected runtime identity mismatch")
-    return directory, manifest, identity
+    return installed(root, identity)
 
 
 def main() -> None:

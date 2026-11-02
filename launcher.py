@@ -49,8 +49,8 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
     if arguments and arguments[0] == "bridge":
         if len(arguments) == 3 and arguments[1] == "upgrade":
             return "bridge-upgrade", arguments[2], []
-        if len(arguments) != 2 or arguments[1] not in ("start", "status", "stop", "reload"):
-            raise ValueError("Usage: claude-codex bridge start | status | stop | reload | upgrade BUNDLE")
+        if len(arguments) != 2 or arguments[1] not in ("start", "status", "stop", "reload", "rollback"):
+            raise ValueError("Usage: claude-codex bridge start | status | stop | reload | rollback | upgrade BUNDLE")
         return "bridge-" + arguments[1], "", []
     selected = "sol"
     claude_args: list[str] = []
@@ -713,7 +713,7 @@ def main() -> int:
         print("Direct OpenAI API: claude-codex api key set; claude-codex api models; claude-codex api --model sol.")
         print("Run claude-codex [api] bridge start | status | stop to manage each private localhost service.")
         print("macOS/Windows login recovery: claude-codex autostart enable | status | disable.")
-        print("Reviewed runtime: claude-codex bridge upgrade BUNDLE; bridge reload drains replaced backends.")
+        print("Reviewed runtime: claude-codex bridge upgrade BUNDLE | rollback | reload; replaced backends drain.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
         print("Optional native capabilities: claude-codex tools install | status | enable | disable (Python 3.11+).")
         print("Use --no-native-tools to omit them for one launch; --native-tools explicitly enables them with strict MCP config.")
@@ -764,22 +764,34 @@ def main() -> int:
             result = bridge_stop(route)
             if result == 0: autostart.pause(ROOT)
             return result
-    if mode in ("bridge-upgrade", "bridge-reload"):
+    if mode in ("bridge-upgrade", "bridge-rollback", "bridge-reload"):
         if route != "subscription": raise ValueError("Managed runtime currently wraps the Codex subscription route")
         import rolling_runtime
         import runtime_bundle
         import accounts
         with accounts.switch_lock(ROOT, wait_seconds=30):
-            previous_selection = attempted_identity = None
-            if mode == "bridge-upgrade":
+            previous_selection = attempted_identity = history_before = history_after = None
+            if mode in ("bridge-upgrade", "bridge-rollback"):
                 with service_lock():
-                    bundle = Path(selected).expanduser().absolute()
                     previous_selection = runtime_bundle.selection_snapshot(ROOT)
-                    _, attempted_identity = runtime_bundle.verify(bundle)
+                    current = runtime_bundle.selected(ROOT)
+                    current_identity = current[2] if current is not None else None
+                    if mode == "bridge-upgrade":
+                        bundle = Path(selected).expanduser().absolute()
+                        _, attempted_identity = runtime_bundle.verify(bundle)
+                    else:
+                        if current_identity is None: raise RuntimeError("No selected runtime is available for rollback")
+                        _, _, attempted_identity = runtime_bundle.previous_installed(ROOT, current_identity)
+                    history_before = runtime_bundle.history_snapshot(ROOT)
+                    if attempted_identity != current_identity:
+                        history_after = runtime_bundle.history_transition(attempted_identity, current_identity)
                     try:
-                        runtime_bundle.activate(ROOT, bundle)
+                        if history_after is not None: runtime_bundle.write_history(ROOT, history_after)
+                        if mode == "bridge-upgrade": runtime_bundle.activate(ROOT, bundle)
+                        else: runtime_bundle.select_installed(ROOT, attempted_identity)
                     except BaseException:
                         runtime_bundle.rollback_selection(ROOT, previous_selection, attempted_identity)
+                        if history_after is not None: runtime_bundle.rollback_history(ROOT, history_before, history_after)
                         raise
             try:
                 runtime, state, _ = ensure_service(route=route)
@@ -787,9 +799,10 @@ def main() -> int:
                 managed = rolling_runtime.ensure(ROOT, runtime, state, models, force=mode == "bridge-reload",
                                                  before_publish=verify)
             except BaseException:
-                if mode == "bridge-upgrade":
+                if mode in ("bridge-upgrade", "bridge-rollback"):
                     with service_lock():
                         runtime_bundle.rollback_selection(ROOT, previous_selection, attempted_identity)
+                        if history_after is not None: runtime_bundle.rollback_history(ROOT, history_before, history_after)
                 raise
         import quota_recovery
         quota_recovery.ensure_watch(ROOT)

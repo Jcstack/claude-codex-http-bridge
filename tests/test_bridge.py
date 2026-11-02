@@ -388,6 +388,7 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(launcher.parse_args(["usage"]), ("usage", "", []))
         self.assertEqual(launcher.parse_args(["--background"]), ("claude", "sol", ["--background"]))
         self.assertEqual(launcher.parse_args(["bridge", "stop"]), ("bridge-stop", "", []))
+        self.assertEqual(launcher.parse_args(["bridge", "rollback"]), ("bridge-rollback", "", []))
 
     def test_mcp_audit_dispatch_does_not_start_or_verify_a_service(self) -> None:
         with patch.object(sys, "argv", ["launcher.py", "mcp-audit", "--show-names"]), \
