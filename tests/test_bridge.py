@@ -105,6 +105,53 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(huge["context_window"], 2_000_000)
         self.assertEqual(bridge_models.compact_window(huge), 1_000_000)  # client setting range only
 
+    def test_catalog_snapshot_includes_the_effective_compact_window(self) -> None:
+        row = bridge_models.context_metadata({**model(272_000), "max_context_window": 872_000,
+                                             "auto_compact_token_limit": None})
+        name = "gpt-fixture"
+        snapshot = bridge_models.catalog_snapshot({name: row})
+        self.assertEqual(snapshot[name]["context_window"], 872_000)
+        self.assertEqual(snapshot[name]["auto_compact_window"], 784_800)
+        self.assertEqual(snapshot[name]["input_modalities"], ["text", "image"])
+        limited = bridge_models.catalog_snapshot({name: {**row, "auto_compact_token_limit": 700_123}})
+        self.assertEqual(limited[name]["auto_compact_window"], 700_123)
+        self.assertNotEqual(snapshot, limited)
+
+    def test_prepared_settings_must_match_catalog_context_and_compaction(self) -> None:
+        name = "gpt-fixture"
+        models = {name: {"context_window": 872_000, "auto_compact_window": 784_800}}
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = Path(temporary) / "settings.json"
+            api_profile.write_private(settings, json.dumps({"modelSettings": {
+                name: {"autoCompactWindow": 784_800}}}))
+            windows = json.dumps({name: 872_000})
+            launcher.verify_prepared_model_settings(windows, settings, models)
+            for changed in ({name: {**models[name], "context_window": 900_000}},
+                            {name: {**models[name], "auto_compact_window": 700_123}},
+                            {name: {"context_window": 872_000}}):
+                with self.assertRaisesRegex(RuntimeError, "changed during session preparation"):
+                    launcher.verify_prepared_model_settings(windows, settings, changed)
+            api_profile.write_private(settings, "not-json")
+            with self.assertRaisesRegex(RuntimeError, "changed during session preparation"):
+                launcher.verify_prepared_model_settings(windows, settings, models)
+
+    def test_real_model_preparation_detects_compact_metadata_drift(self) -> None:
+        name = "gpt-6.1-sol"
+        row = bridge_models.context_metadata({**model(272_000), "max_context_window": 872_000,
+                                             "auto_compact_token_limit": None})
+        chat = {name: row}
+        output = StringIO()
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(bridge_models, "ROOT", Path(temporary)), \
+                patch.object(bridge_models, "discover", return_value=(chat, [])), \
+                patch.object(sys, "argv", ["bridge_models.py", "prepare", name]), redirect_stdout(output):
+            self.assertEqual(bridge_models.main(), 0)
+            _, _, _, settings, windows = output.getvalue().strip().split("\t")
+            launcher.verify_prepared_model_settings(windows, Path(settings), bridge_models.catalog_snapshot(chat))
+            changed = {name: {**row, "auto_compact_token_limit": 700_123}}
+            with self.assertRaisesRegex(RuntimeError, "changed during session preparation"):
+                launcher.verify_prepared_model_settings(windows, Path(settings), bridge_models.catalog_snapshot(changed))
+
     def test_gateway_tool_streaming_defaults_on_and_respects_opt_out(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")

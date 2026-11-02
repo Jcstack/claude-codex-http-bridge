@@ -1,6 +1,6 @@
 """Synthetic catalog handoff tests: no live accounts or services."""
 
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from io import StringIO
 import json
 from pathlib import Path
@@ -25,6 +25,29 @@ SPEC = {"context_window": 872000, "input_modalities": ["text"], "supports_search
 
 
 class CatalogSyncTests(unittest.TestCase):
+    def test_compact_drift_stops_launch_before_backend_publication(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "runtime"
+            runtime_bundle.private_dir(runtime)
+            api_profile.write_private(root / "runtime-selected.json", "{}")
+            settings = root / "settings.json"
+            api_profile.write_private(settings, json.dumps({"modelSettings": {MODEL: {"autoCompactWindow": 784800}}}))
+            prepared = "\t".join((MODEL, "872000", "784800", str(settings), json.dumps({MODEL: 872000})))
+            changed = {MODEL: {**SPEC, "auto_compact_window": 700123}}
+            state = {"pid": 123, "port": 1234, "session": "session-fixture"}
+            with patch.object(launcher, "ROOT", root), \
+                    patch.object(launcher, "ensure_service", return_value=(runtime, state, False)), \
+                    patch.object(accounts, "switch_lock", return_value=nullcontext()), \
+                    patch.object(launcher, "helper_output", return_value=prepared), \
+                    patch.object(launcher, "managed_catalog", return_value=(changed, lambda: None)), \
+                    patch.object(rolling_runtime, "ensure") as ensure, \
+                    patch.object(launcher.os, "execvpe", create=True) as execute:
+                with self.assertRaisesRegex(RuntimeError, "compact window changed"):
+                    launcher.run_session("claude", MODEL, [], "synthetic-claude")
+                ensure.assert_not_called()
+                execute.assert_not_called()
+
     def test_selected_catalog_requires_the_same_account_and_its_models(self):
         class Manager:
             state = {"pid": 123, "port": 1234, "session": "session-test"}
@@ -57,7 +80,7 @@ class CatalogSyncTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "inconsistent"):
                     accounts.selected_catalog(root, manager)
 
-    def test_catalog_comparison_checks_context_and_effort_without_exposing_config(self):
+    def test_catalog_comparison_checks_complete_snapshot_without_exposing_config(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runtime = root / "runtime-managed"
@@ -67,12 +90,21 @@ class CatalogSyncTests(unittest.TestCase):
             config = runtime / ("g-" + "a" * 24) / "config.yaml"
             api_profile.write_private(config, rolling_runtime.backend_config(runtime, 1, 2, {MODEL: SPEC}, "fixture"))
             generation = config.parent.name
-            value = {"current": generation, "generations": {generation: {"pid": 123, "port": 1234}}}
-            with patch.object(launcher, "listener_pids", return_value={123}):
+            bundle_identity = "b" * 64
+            fingerprint = rolling_runtime.generation_fingerprint(bundle_identity, {MODEL: SPEC})
+            value = {"current": generation, "generations": {generation: {"pid": 123, "port": 1234,
+                                                                           "fingerprint": fingerprint}}}
+            with patch.object(launcher, "listener_pids", return_value={123}), \
+                    patch.object(runtime_bundle, "selected", return_value=(root, {}, bundle_identity)):
                 self.assertTrue(rolling_runtime.catalog_matches(root, value, {MODEL: SPEC}))
                 self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: {**SPEC, "context_window": 123456}}))
                 self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: {**SPEC, "supported_reasoning_levels": [{"effort": "low"}]}}))
+                self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: {**SPEC, "input_modalities": ["text", "image"]}}))
+                self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: {**SPEC, "supports_search_tool": False}}))
+                self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: {**SPEC, "auto_compact_window": 700_123}}))
                 self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: SPEC, "gpt-6.2-sol": SPEC}))
+                with patch.object(runtime_bundle, "selected", return_value=(root, {}, "c" * 64)):
+                    self.assertFalse(rolling_runtime.catalog_matches(root, value, {MODEL: SPEC}))
                 for bad in ({**SPEC, "supported_reasoning_levels": []},
                             {**SPEC, "supported_reasoning_levels": [{"effort": "low"}, {}]},
                             {**SPEC, "supported_reasoning_levels": [{"effort": "bad\nvalue"}]},

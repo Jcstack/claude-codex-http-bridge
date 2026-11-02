@@ -219,6 +219,16 @@ delivered tool calls cannot execute twice. Do not manufacture a successful
 terminal event, lower the user's effort, add an arbitrary execution deadline
 or replay committed tool actions merely to hide a disconnect.
 
+A subsequent two-hour read-only sample on 2026-11-02 included one tracked main
+log and 67 discovered child logs; two children contained request metadata in
+the window. The sampled main and children had no classified API-error records.
+Across 154 deduplicated responses reporting usage, cached input represented
+97.47% of reported input tokens; that is not a request hit rate. The shared
+origin log recorded 181 inference requests and 562 HTTP 200 completions across
+all its routes, with no parsed transport or stream-error mentions. Shared
+counts are not limited to that session, HTTP 200 does not prove a complete
+stream, and missing or unclassified records constrain these observations.
+
 ## First tool-safety gate
 
 `tests/probe_claude_stream_safety.py` uses the actual locked Claude client, a

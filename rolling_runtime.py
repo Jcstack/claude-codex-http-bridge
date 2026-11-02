@@ -270,8 +270,14 @@ def drain(root: Path, value: dict) -> None:
     write(root / "runtime-managed" / "service.json", value)
 
 
+def generation_fingerprint(identity: str, models: dict) -> str:
+    """Bind a backend to its bundle and the complete discovered catalog snapshot."""
+    return hashlib.sha256(runtime_bundle.canonical({"bundle": identity, "models": models,
+                                                   "quota_owner": "origin-v1"})).hexdigest()
+
+
 def catalog_matches(root: Path, value: dict, models: dict) -> bool:
-    """Compare only generated model metadata; never expose the private config."""
+    """Compare generated rows and the complete private catalog fingerprint."""
     row = value["generations"][value["current"]]
     if launcher.listener_pids(row["port"]) != {row["pid"]}:
         raise RuntimeError("Managed catalog backend is unavailable")
@@ -284,7 +290,12 @@ def catalog_matches(root: Path, value: dict, models: dict) -> bool:
     blocks = re.findall(r"(?ms)^      models:\n(.*?)^      keys:\n", text)
     if len(blocks) != 1:
         raise RuntimeError("Managed catalog configuration is invalid")
-    return blocks[0] == model_rows(models) + "\n"
+    if blocks[0] != model_rows(models) + "\n":
+        return False
+    selected = runtime_bundle.selected(root)
+    if selected is None:
+        raise RuntimeError("Managed runtime selection is unavailable")
+    return row.get("fingerprint") == generation_fingerprint(selected[2], models)
 
 
 def preflight_backend(backend: subprocess.Popen, port: int, key: str, models: dict) -> None:
@@ -443,8 +454,7 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
                 launcher.wait_for_private_listener(ingress, front_port)
                 value = {"pid": ingress.pid, "port": front_port, "ingress_bundle": identity, "current": "", "generations": {}}
                 endpoint_status(root, value)
-            fingerprint = hashlib.sha256(runtime_bundle.canonical({"bundle": identity, "models": models,
-                "quota_owner": "origin-v1"})).hexdigest()
+            fingerprint = generation_fingerprint(identity, models)
             old = value["generations"].get(value["current"])
             if not force and old and old["fingerprint"] == fingerprint and launcher.listener_pids(old["port"]) == {old["pid"]}:
                 drain(root, value)

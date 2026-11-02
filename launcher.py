@@ -602,6 +602,25 @@ def managed_catalog(state: dict):
     return models, verify_before_publish
 
 
+def verify_prepared_model_settings(catalog_json: str, settings: Path, models: dict) -> None:
+    """Reject a model or compact-window change during session preparation."""
+    import runtime_bundle
+    try:
+        windows = json.loads(catalog_json)
+        runtime_bundle.safe_file(settings, limit=2 * 1024 * 1024)
+        prepared = json.loads(settings.read_text())
+        configured = prepared.get("modelSettings") if isinstance(prepared, dict) else None
+        if not isinstance(configured, dict): raise ValueError("Missing model settings")
+        compact = {name: row.get("autoCompactWindow") if isinstance(row, dict) else None
+                   for name, row in configured.items()}
+        expected_windows = {name: spec["context_window"] for name, spec in models.items()}
+        expected_compact = {name: spec["auto_compact_window"] for name, spec in models.items()}
+        if windows != expected_windows or compact != expected_compact:
+            raise ValueError("Changed model settings")
+    except (KeyError, OSError, ValueError, TypeError):
+        raise RuntimeError("Model catalog or compact window changed during session preparation; retry the launch") from None
+
+
 def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
                 route: str = "subscription", *, explicit_model: bool = True) -> int:
     runtime, state, created = ensure_service(route=route)
@@ -629,8 +648,7 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
         model, context, compact, settings, catalog_json = model_info
         if managed_enabled:
             models, verify = managed_catalog(state)
-            if json.loads(catalog_json) != {name: spec["context_window"] for name, spec in models.items()}:
-                raise RuntimeError("Model catalog changed during session preparation; retry the launch")
+            verify_prepared_model_settings(catalog_json, Path(settings), models)
             managed = rolling_runtime.ensure(ROOT, runtime, state, models, before_publish=verify)
     if route == "subscription":
         import autostart

@@ -253,6 +253,13 @@ def eligible(row: dict) -> bool:
     )
 
 
+def catalog_snapshot(chat: dict) -> dict:
+    """Capture metadata used to prepare and reconcile managed sessions."""
+    fields = ("context_window", "supported_reasoning_levels", "supports_search_tool", "input_modalities")
+    return {slug: {**{key: row[key] for key in fields}, "auto_compact_window": compact_window(row)}
+            for slug, row in chat.items() if eligible(row)}
+
+
 def version_key(slug: str) -> tuple[int, int]:
     match = re.fullmatch(r"gpt-(\d+)(?:\.(\d+))?-[a-z0-9-]+", slug)
     return (int(match.group(1)), int(match.group(2) or 0)) if match else (-1, -1)
@@ -355,8 +362,7 @@ def main() -> int:
     chat, images = discover()
     if sys.argv[1] == "snapshot":
         if len(sys.argv) != 2: return 2
-        fields = ("context_window", "supported_reasoning_levels", "supports_search_tool", "input_modalities")
-        print(json.dumps({slug: {k: row[k] for k in fields} for slug, row in chat.items() if eligible(row)}, separators=(",", ":")))
+        print(json.dumps(catalog_snapshot(chat), separators=(",", ":")))
         return 0
     if sys.argv[1] == "catalog":
         if len(sys.argv) != 2:

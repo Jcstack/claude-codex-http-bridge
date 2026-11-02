@@ -87,12 +87,17 @@ protocol are not certified by the handoff tests.
 The managed translator's model list is a snapshot taken when its backend
 generation starts. During `account use`, the launcher verifies the selected
 account against the account-specific model IDs and available model metadata.
-If the eligible model IDs, context windows, or effort levels differ, it prepares
-and checks a replacement backend, verifies the snapshot again before publication,
-and keeps the existing TLS ingress and admitted streams. Unchanged values for
-those fields do not trigger a replacement. Input-modality metadata alone is not
-encoded in the generated backend's model rows; cross-account modality differences
-and the existing client's capability display therefore remain separate limitations.
+The installed controller compares eligible model IDs, context windows and
+effort levels and, when they differ, prepares and checks a replacement backend,
+verifies the snapshot again before publication, and keeps the existing TLS
+ingress and admitted streams. A source candidate also compares the fingerprint
+of the snapshot's input modalities, search flag and effective compact window,
+and checks the prepared client's compact windows against that snapshot. This
+candidate has not yet been activated on the running installation. The generated
+backend model rows still do not encode input modalities; detecting a change does
+not by itself update an existing client's capability display or establish image
+support on the new account. The snapshot covers the fields listed above, not
+unknown metadata that a future provider version may introduce.
 Account changes and managed launcher preparation use the same
 local lock. Failed reconciliation restores the previous selection and attempts
 to restore its catalog; an unverified recovery leaves the private journal for
@@ -121,11 +126,12 @@ caches, and fixed-host usage requests. The pinned upstream test
 its execution-session closer, mutate an admitted request's credential snapshot,
 cancel its context, or re-enable it when an old stream finishes.
 
-An isolated local endpoint also exercises unchanged catalogs, changed catalogs,
-a catalog changing during preparation, rollback, and a stream spanning a
-backend handoff. The account lock is exercised concurrently. These use synthetic
-accounts and a fake provider; they do not establish atomic admission during a
-live account switch or dynamic updates to an existing Claude model picker.
+An isolated local endpoint also exercises unchanged catalogs, changes to only
+input modalities or the effective compact window, a catalog changing during
+preparation, rollback, and a stream spanning several backend handoffs. The
+account lock is exercised concurrently. These use synthetic accounts and a fake
+provider; they do not establish atomic admission during a live account switch,
+new-account image support, or dynamic updates to an existing Claude model picker.
 
 A local account handoff also completed while a synthetic generation stream was
 still running. That stream spanned the switch and finished cleanly after about

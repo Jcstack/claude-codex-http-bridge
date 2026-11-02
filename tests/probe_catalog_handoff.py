@@ -44,11 +44,12 @@ def main() -> None:
                 api_profile.write_private(source / name, text)
             base = {"process_identity": process_identity.stamp(os.getpid()), "pid": os.getpid(), "port": server.server_port, "session": source.name}
             management = SimpleNamespace(state=base)
+            initial_models = {MODEL: {**SPEC, "auto_compact_window": 784800}}
             with patch.object(launcher, "ROOT", root):
                 runtime_bundle.activate(root, bundle)
                 value = None
                 try:
-                    value = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC})
+                    value = rolling_runtime.ensure(root, base_runtime, base, initial_models)
                     runtime = root / "runtime-managed"
                     key = rolling_runtime.private_key(runtime / "front-key")
                     request = {"model": MODEL, "max_tokens": 100,
@@ -59,8 +60,24 @@ def main() -> None:
                         pending = pool.submit(stream, value["port"], key, request, ca_file=runtime / "ca.pem")
                         if not Upstream.admitted.wait(15):
                             raise RuntimeError("Synthetic stream was not admitted")
-                        with patch.object(accounts, "selected_catalog", return_value={MODEL: SPEC}):
+                        with patch.object(accounts, "selected_catalog", return_value=initial_models):
                             assert not accounts.synchronize_managed_catalog(root, management)
+                        metadata_models = {MODEL: {**initial_models[MODEL], "input_modalities": ["text"]}}
+                        with patch.object(accounts, "selected_catalog", return_value=metadata_models):
+                            assert accounts.synchronize_managed_catalog(root, management)
+                        metadata_state = rolling_runtime.state(root)
+                        assert metadata_state["current"] != value["current"]
+                        assert (metadata_state["pid"], metadata_state["port"]) == (value["pid"], value["port"])
+                        assert rolling_runtime.catalog_matches(root, metadata_state, metadata_models)
+                        assert not rolling_runtime.catalog_matches(root, metadata_state, initial_models)
+                        compact_models = {MODEL: {**metadata_models[MODEL], "auto_compact_window": 700123}}
+                        with patch.object(accounts, "selected_catalog", return_value=compact_models):
+                            assert accounts.synchronize_managed_catalog(root, management)
+                        compact_state = rolling_runtime.state(root)
+                        assert compact_state["current"] != metadata_state["current"]
+                        assert (compact_state["pid"], compact_state["port"]) == (value["pid"], value["port"])
+                        assert rolling_runtime.catalog_matches(root, compact_state, compact_models)
+                        assert not rolling_runtime.catalog_matches(root, compact_state, metadata_models)
                         old_state = rolling_runtime.state(root)
                         old_manifest = (runtime / "backend.json").read_bytes()
                         with patch.object(accounts, "selected_catalog", side_effect=[updated_models, different_models]):
@@ -76,7 +93,7 @@ def main() -> None:
                             assert accounts.synchronize_managed_catalog(root, management)
                         updated = rolling_runtime.state(root)
                         assert updated["pid"] == value["pid"] and updated["port"] == value["port"]
-                        assert updated["current"] != value["current"]
+                        assert updated["current"] != compact_state["current"]
                         assert rolling_runtime.catalog_matches(root, updated, updated_models)
                         content, _ = stream(value["port"], key, request, ca_file=runtime / "ca.pem")
                         assert "FIXTURE" == "".join(block.get("text", "") for block in content)
@@ -84,6 +101,7 @@ def main() -> None:
                         pending.result(timeout=20)
                     rolling_runtime.ensure(root, base_runtime, base, updated_models)
                     print(json.dumps({"mock_only": True, "unchanged_catalog_no_roll": True,
+                        "input_modality_change_detected": True, "compact_window_change_detected": True,
                         "changed_during_prepare_rollback": True, "changed_catalog_published": True,
                         "old_stream_completed": True, "new_request_completed": True,
                         "ingress_unchanged": True}))
