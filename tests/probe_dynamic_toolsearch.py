@@ -321,10 +321,12 @@ def main():
     parser.add_argument("--require-discovery", action="store_true")
     parser.add_argument("--require-prefix", action="store_true")
     parser.add_argument("--require-resume-structure", action="store_true")
+    parser.add_argument("--require-fork-structure", action="store_true")
     parser.add_argument("--translator", type=Path, help="Reviewed translator for a synthetic Responses origin")
     parser.add_argument("--description-change", action="store_true")
     parser.add_argument("--fresh-description", action="store_true")
     parser.add_argument("--resume-observation", action="store_true")
+    parser.add_argument("--fork-observation", action="store_true")
     parser.add_argument("--repair-synthetic-record", action="store_true")
     parser.add_argument("--audit-synthetic", action="store_true")
     args = parser.parse_args()
@@ -340,6 +342,12 @@ def main():
         raise RuntimeError("The synthetic audit needs the unchanged resume observation")
     if args.require_resume_structure and (not args.resume_observation or args.translator is None):
         raise RuntimeError("The resume structure check requires the fake Responses translator route")
+    if args.fork_observation and (not args.resume_observation or args.repair_synthetic_record or args.audit_synthetic):
+        raise RuntimeError("The fork observation needs an unchanged synthetic resume fixture")
+    if args.require_fork_structure and (not args.fork_observation or args.translator is None):
+        raise RuntimeError("The fork structure check requires the fake Responses translator route")
+    if args.fork_observation and args.require_resume_structure:
+        raise RuntimeError("A fork is not the same-session resume control")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("The locked Claude fixture is required")
@@ -440,22 +448,30 @@ def main():
                     server.captured = []
                     server.old_description_seen = server.updated_description_seen = False
                     server.old_result_seen = server.old_reference = server.search_offered = False
-                    resumed_ok = run_dynamic_client([*command, "--resume", sessions[-1]], work, env,
-                        Path(str(marker) + ".forwarded"), prompt=prompt, delay=0.5)
+                    continuation = [*command, "--resume", sessions[-1]]
+                    if args.fork_observation:
+                        continuation.append("--fork-session")
+                    continued_sessions = []
+                    resumed_ok = run_dynamic_client(continuation, work, env,
+                        Path(str(marker) + ".forwarded"), prompt=prompt, delay=0.5, session_out=continued_sessions)
                     resumed_captured = list(server.captured)
+                    record_session = continued_sessions[-1] if args.fork_observation and continued_sessions else sessions[-1]
                     resumed = {"completed": resumed_ok,
                         "current_list_forwarded": Path(str(marker) + ".forwarded").exists(),
                         "search_result_seen": server.old_result_seen, "alias_discovered": server.old_reference,
                         "old_description_seen": server.old_description_seen,
                         "updated_description_seen": server.updated_description_seen,
                         "synthetic_record_rewritten": rewritten,
+                        "forked_session_id_differs": (bool(continued_sessions) and continued_sessions[-1] != sessions[-1])
+                            if args.fork_observation else None,
                         "initial_deferred_records": initial_records,
-                        "resumed_deferred_records": synthetic_deferred_records(config, sessions[-1])}
+                        "resumed_deferred_records": synthetic_deferred_records(config, record_session)}
             result = {"synthetic_only": True, "test_only_transport": True,
                 "through_translator": server.responses,
                 "discovery_form": "responses_additional_tools" if server.responses else "messages_tool_reference",
                 "description_change": args.description_change,
                 "fresh_description": args.fresh_description,
+                "fork_observation": args.fork_observation,
                 "resume_observation": resumed,
                 "synthetic_offline_audit": audit_result,
                 "natural_query": args.natural_query, "intentional_refresh_barrier": args.hold_refresh,
@@ -473,11 +489,19 @@ def main():
                               updated_description_seen=initial["updated_description_seen"],
                               original_called_once=calls == [ORIGINALS[0]])
             if server.responses and args.resume_observation:
-                result["resume_cache_structure"] = cache_resume_facts(captured, resumed_captured)
-                if not result["resume_cache_structure"]["complete"]:
+                facts = cache_resume_facts(captured, resumed_captured)
+                if not facts["complete"]:
                     raise RuntimeError("Synthetic initial or resumed translator requests were not captured")
-                if args.require_resume_structure and not all(result["resume_cache_structure"].values()):
+                if args.fork_observation:
+                    facts["cache_key_same_across_fork"] = facts.pop("cache_key_same_across_resume")
+                    result["fork_cache_structure"] = facts
+                else:
+                    result["resume_cache_structure"] = facts
+                if args.require_resume_structure and not all(facts.values()):
                     raise RuntimeError("Synthetic resume cache-key or prefix structure changed")
+                if args.require_fork_structure and (facts["cache_key_same_across_fork"] or
+                        not all(value for name, value in facts.items() if name != "cache_key_same_across_fork")):
+                    raise RuntimeError("Synthetic fork cache-key or prefix structure changed")
             if server.responses and len(captured) >= 2:
                 first_raw, first_body = captured[0]
                 last_raw, _ = captured[-1]
@@ -528,6 +552,8 @@ def main():
                     and resumed["search_result_seen"] and resumed["alias_discovered"]
                     and (resumed["old_description_seen"] or resumed["updated_description_seen"])):
                 raise RuntimeError("Synthetic resumed-session observation was incomplete")
+            if args.fork_observation and not resumed["forked_session_id_differs"]:
+                raise RuntimeError("Synthetic fork did not create a distinct session")
             if args.repair_synthetic_record and not (resumed and resumed["synthetic_record_rewritten"]
                     and resumed["updated_description_seen"]
                     and resumed["resumed_deferred_records"].get("named_updated_description_in_record") is True):

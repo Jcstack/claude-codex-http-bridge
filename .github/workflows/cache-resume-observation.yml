@@ -56,3 +56,7 @@ jobs:
         run: >-
           python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh
           --resume-observation --require-resume-structure --translator ${{ matrix.binary }}
+      - name: Observe synthetic cache structure across fork
+        run: >-
+          python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh
+          --resume-observation --fork-observation --require-fork-structure --translator ${{ matrix.binary }}

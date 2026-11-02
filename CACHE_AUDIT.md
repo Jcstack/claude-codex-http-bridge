@@ -86,6 +86,11 @@ fixture reports booleans without returning keys or request bodies. This is one
 synthetic resume with a stale tool description, not proof of a provider cache
 hit, correct plugin semantics, real subscription behavior, fork behavior or
 cross-account isolation.
+An additional local synthetic `--fork-session` continuation produced a
+different session ID and cache key while retaining the compared input prefix
+and unchanged sampled tools and instructions. The stale description remained
+visible in this fork. A distinct key does not prove provider-side isolation,
+cache misses or hits, correct plugin behavior, or real-account separation.
 Correct current tool semantics take priority over preserving a cache prefix.
 
 ## Live dynamic-tool cache observations
