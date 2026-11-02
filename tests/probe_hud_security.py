@@ -117,9 +117,9 @@ def main() -> None:
         config.write_text('', encoding='utf-8')
         env['GIT_CONFIG_GLOBAL'] = str(config)
         owner = subprocess.run([node, str(hud / 'verify' / 'owner.check.mjs')], cwd=home, env=env,
-                               capture_output=True, text=True, timeout=120)
+                               capture_output=True, text=True, encoding='utf-8', timeout=120)
         failure = subprocess.run([node, '--input-type=module', '-e', CONFIG_FAILURE, str(hud), str(home)],
-                                 cwd=home, env=env, capture_output=True, text=True, timeout=20)
+                                 cwd=home, env=env, capture_output=True, text=True, encoding='utf-8', timeout=20)
         failures = owner_failures(owner.stdout)
         print(json.dumps({'synthetic_only': True, 'hud_version': '0.15.0',
                           'native_owner_security_fixture_passed': owner.returncode == 0,

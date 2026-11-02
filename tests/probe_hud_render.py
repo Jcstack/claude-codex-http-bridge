@@ -86,7 +86,7 @@ def main() -> None:
             if 'prompt_cache' in corrected:
                 raise RuntimeError('The status adapter forwarded an unsupported cache timer')
             result = subprocess.run([node, str(hud / 'hud.mjs')], input=json.dumps(corrected), cwd=work, env=env,
-                                    capture_output=True, text=True, timeout=30, check=True)
+                                    capture_output=True, text=True, encoding='utf-8', timeout=30, check=True)
             return ANSI.sub('', result.stdout)
         before = render(frame)
         with transcript.open('a', encoding='utf-8') as handle:
