@@ -80,8 +80,9 @@ process, not proof that the old stream was preserved.
 The current installer replaces controller modules individually. An immutable
 versioned source directory and an atomic selection are a possible way to avoid
 mixed module generations, but moving the current files there is not sufficient.
-On this Mac, a disposable directory experiment set the launcher's installation
-root to a synthetic parent while loading copied code from a child generation.
+In a [three-platform disposable experiment](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41491394286),
+the launcher's installation root was a synthetic parent while copied code was
+loaded from a child generation.
 The launcher used the parent, while the model, usage and status-line helpers
 still resolved their root from the child. A synthetic status-line update wrote
 its model ledger under the child. The autostart entry's current source-directory
@@ -99,6 +100,15 @@ selection or files are replaced during a launch, how old processes retain their
 source files, and how rollback and cleanup avoid deleting an in-use generation.
 Existing sessions and autostart state cannot be assumed to migrate merely
 because an atomic pointer changes. No versioned installer is activated.
+
+Before activation, exercise publication, rollback and interrupted publication
+with two disposable generations while an old client keeps running and imports
+another module later. Verify child commands, status-line redraws and autostart
+continue to use the intended private state root. Include missing or altered
+files, symlinked selections, conflicting installation commands, mismatched
+source locks, concurrent launches and platform-specific access controls. A
+running Claude session may invoke a status-line helper long after its launcher
+exits, so process exit alone is not proof that an old generation can be deleted.
 
 ## Acceptance before any live activation
 
