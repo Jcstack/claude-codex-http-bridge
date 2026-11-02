@@ -653,7 +653,8 @@ SETTINGS_LIMIT = 2 * 1024 * 1024
 SETTINGS_NO_VALUE_OPTIONS = frozenset({
     "--allow-dangerously-skip-permissions", "--dangerously-skip-permissions", "--restricted",
     "--safe-mode", "--bare", "--strict-mcp-config", "--verbose", "--debug-to-stderr",
-    "--continue", "-c", "--fork-session", "--chrome", "--no-chrome", "--ide",
+    "--continue", "-c", "--print", "-p", "--bg", "--background", "--no-session-persistence",
+    "--fork-session", "--chrome", "--no-chrome", "--ide",
     "--disable-slash-commands", "--include-partial-messages", "--replay-user-messages",
     "--native-tools", "--no-native-tools", "--native-compaction", "--no-native-compaction",
 })
@@ -800,24 +801,11 @@ def compose_launch_settings(base: dict, custom: dict) -> dict:
     return result
 
 
-def reject_extra_settings(arguments: list[str]) -> None:
-    for argument in arguments:
-        if argument == "--":
-            break
-        if argument == "--settings" or argument.startswith("--settings="):
-            raise ValueError("Extra --settings is temporarily unavailable: it can replace bridge routing and expose the local key. "
-                             "Use your ordinary Claude settings until secure composition is available.")
-
-
 def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
-                route: str = "subscription", *, explicit_model: bool = True,
-                experimental_settings: bool = False) -> int:
+                route: str = "subscription", *, explicit_model: bool = True) -> int:
     custom_settings = None
     if mode == "claude":
-        if experimental_settings:
-            custom_settings, claude_args = extract_launch_settings(claude_args)
-        else:
-            reject_extra_settings(claude_args)
+        custom_settings, claude_args = extract_launch_settings(claude_args)
         if custom_settings is not None and "model" in custom_settings and not explicit_model:
             selected = custom_settings["model"]
             explicit_model = True

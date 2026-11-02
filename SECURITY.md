@@ -147,25 +147,25 @@ input can nevertheless contain session metadata and must be treated as private.
 An isolated locked-client test found that a second `--settings` argument
 replaced the bridge-generated launch settings. When that second file changed
 only the destination, Claude sent the synthetic inherited local key to the
-second synthetic endpoint. No real key or external endpoint was used. The
-source temporarily rejects an extra `--settings` argument before launching a
-session. The exact guard passed the [three-platform unit-test steps](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41463928859)
-and was installed locally without restarting the origin, ingress or clients.
-Ordinary Claude settings files remain available. Secure composition of custom
-settings remains open; the guard must not be represented as full compatibility.
+second synthetic endpoint. No real key or external endpoint was used. A
+temporary guard was installed locally after [three-platform unit-test steps](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41463928859),
+without restarting the origin, ingress or clients.
 
-A composition candidate is available to isolated tests only; the command-line
-guard remains on. It snapshots bounded user JSON into a private per-launch file,
+The current source composes custom settings into one launch file. It snapshots
+bounded user JSON into a private per-launch file,
 combines hook event lists and per-model entries, and refuses custom authentication,
 provider, proxy, TLS and conflicting compact-window controls. It puts the local
 key into the composed settings rather than the child process's initial environment,
 so a rejected launch file cannot redirect that inherited key via user settings.
-Local tests with the locked Claude client and fake endpoints covered normal and
-`--bare` startup, hooks, a denied tool, malformed settings and routing. This is
+The [three-platform isolated gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41466134016)
+used the locked Claude client and fake endpoints to cover normal and `--bare`
+startup, hooks, a denied tool, malformed settings and routing. This is
 not proof for arbitrary plugins, all settings, future clients, or protection from
-other processes running as the same user. Cross-platform checks and an installed
-rollout remain pending. Editing the original per-launch file after startup is not
+other processes running as the same user. Local installation of the newer
+launcher is tracked separately. Editing the original per-launch file after startup is not
 propagated by this snapshot; existing user/project settings remain Claude's own.
+An explicit custom `modelPicker` replaces the generated picker, as in Claude's
+settings precedence, so its author is responsible for keeping that list current.
 The private `runtime/ui-*` snapshot can contain custom values and remains on
 disk after a client exits. The explicit bridge-stop cleanup removes its known
 settings files when service state is present; it is not a per-session retention

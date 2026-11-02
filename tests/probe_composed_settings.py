@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 from claude_fixture import isolated_environment
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, os.environ.get("CLAUDE_CODEX_TEST_LAUNCHER_ROOT") or str(Path(__file__).resolve().parents[1]))
 import launcher  # noqa: E402
 import runtime_bundle  # noqa: E402
 
@@ -133,7 +133,7 @@ def run(claude, *, bare=False):
         (config / "settings.json").write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": urls[1]},
             "hooks": {"UserPromptSubmit": [hook_entry("global-hook")]}}), encoding="utf-8")
         custom = root / "custom.json"
-        custom.write_text(json.dumps({"permissions": {"deny": ["Bash"]},
+        custom.write_text(json.dumps({"model": MODEL, "permissions": {"deny": ["Bash"]},
             "hooks": {"UserPromptSubmit": [hook_entry("custom-hook")]},
             "modelSettings": {MODEL: {"autoCompactWindow": 300000, "effortLevel": "high"}},
             "env": {"FIXTURE_THEME": "blue"}}), encoding="utf-8")
@@ -152,7 +152,7 @@ def run(claude, *, bare=False):
             with patch.dict(os.environ, env, clear=True), patch.object(launcher, "ROOT", root), \
                     patch.object(launcher, "ensure_service", return_value=(runtime, state, False)), \
                     patch.object(launcher, "service_environment", return_value={}), \
-                    patch.object(launcher, "helper_output", return_value=prepared), redirect_stderr(StringIO()):
+                    patch.object(launcher, "helper_output", return_value=prepared) as helper, redirect_stderr(StringIO()):
                 if os.name == "nt":
                     real_popen = subprocess.Popen
                     def windows_popen(*args, **kwargs):
@@ -160,18 +160,21 @@ def run(claude, *, bare=False):
                             return FakeProcess(*args, **kwargs)
                         return real_popen(*args, **kwargs)
                     with patch.object(launcher.subprocess, "Popen", windows_popen):
-                        launcher.run_session("claude", MODEL, arguments, claude, route="api", experimental_settings=True)
+                        launcher.run_session("claude", "fixture-invalid-default", arguments, claude, route="api",
+                                             explicit_model=False)
                 else:
                     with patch.object(launcher.os, "execvpe", capture_exec):
                         try:
-                            launcher.run_session("claude", MODEL, arguments, claude, route="api", experimental_settings=True)
+                            launcher.run_session("claude", "fixture-invalid-default", arguments, claude, route="api",
+                                                 explicit_model=False)
                         except Captured:
                             pass
             command, client_env = captured["command"], captured["env"]
             if command.count("--settings") != 1:
                 raise RuntimeError("Launcher did not pass exactly one settings file")
             settings = json.loads(Path(command[command.index("--settings") + 1]).read_text())
-            structure = (settings["env"]["ANTHROPIC_BASE_URL"] == urls[0]
+            structure = (helper.call_args.args[:2] == ("prepare", MODEL)
+                         and settings["env"]["ANTHROPIC_BASE_URL"] == urls[0]
                          and settings["env"]["ANTHROPIC_AUTH_TOKEN"] == TOKEN
                          and "ANTHROPIC_AUTH_TOKEN" not in client_env
                          and settings["env"]["FIXTURE_THEME"] == "blue"

@@ -621,6 +621,8 @@ Model ID: `gpt-6.1-sol`
                                                                "--effort", "high", "--", "--settings", "literal"])
             self.assertEqual(settings, {"env": {"FIXTURE_COLOR": "blue"}})
             self.assertEqual(rest, ["--verbose", "--effort", "high", "--", "--settings", "literal"])
+            self.assertEqual(launcher.extract_launch_settings(["-p", "--settings", "{}", "hello"]),
+                             ({}, ["-p", "hello"]))
             self.assertEqual(launcher.parse_args(["--settings", "--model", "-p", "hi"])[2],
                              ["--settings", "--model", "-p", "hi"])
             with self.assertRaisesRegex(ValueError, "Ambiguous"):
@@ -638,8 +640,7 @@ Model ID: `gpt-6.1-sol`
         for value in cases:
             with self.subTest(case=value[:35]), patch.object(launcher, "ensure_service", side_effect=AssertionError("must not start")):
                 with self.assertRaises(ValueError) as failure:
-                    launcher.run_session("claude", "sol", ["--settings", value], "fixture-client",
-                                         experimental_settings=True)
+                    launcher.run_session("claude", "sol", ["--settings", value], "fixture-client")
                 self.assertNotIn("fixture-private-value", str(failure.exception))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -651,12 +652,6 @@ Model ID: `gpt-6.1-sol`
                 pipe = root / "pipe"
                 os.mkfifo(pipe)
                 with self.assertRaises(ValueError): launcher.load_launch_settings(str(pipe))
-
-    def test_extra_settings_guard_stays_on_during_composition_validation(self) -> None:
-        with patch.object(launcher, "ensure_service", side_effect=AssertionError("must not start")):
-            with self.assertRaisesRegex(ValueError, "temporarily unavailable"):
-                launcher.run_session("claude", "sol", ["--settings", "{}"], "fixture-client")
-        launcher.reject_extra_settings(["--effort", "high", "--", "--settings", "literal"])
 
     def test_stop_removes_private_composed_settings_but_not_unrelated_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -685,7 +680,7 @@ Model ID: `gpt-6.1-sol`
                     patch.object(launcher, "helper_output", return_value=prepared):
                 with self.assertRaisesRegex(ValueError, "autoCompactWindow"):
                     launcher.run_session("claude", "fixture-model", ["--settings", '{"autoCompactWindow":99999}'],
-                                         "fixture-client", route="api", experimental_settings=True)
+                                         "fixture-client", route="api")
             self.assertEqual(list(runtime.glob("ui-*")), [])
 
     def test_custom_settings_preserve_hooks_permissions_models_and_route(self) -> None:
@@ -710,6 +705,8 @@ Model ID: `gpt-6.1-sol`
         self.assertEqual(combined["modelSettings"]["fixture-b"]["autoCompactWindow"], 300000)
         self.assertEqual(combined["unknownFutureSetting"], {"fixture": True})
         self.assertEqual(base["modelSettings"]["fixture-a"]["autoCompactWindow"], 500000)
+        custom_picker = {"options": [{"model": "fixture-b", "label": "My choice"}], "replaceBuiltInOptions": True}
+        self.assertEqual(launcher.compose_launch_settings(base, {"modelPicker": custom_picker})["modelPicker"], custom_picker)
         global_window = launcher.compose_launch_settings(base, {"autoCompactWindow": 200000})
         self.assertEqual(global_window["modelSettings"]["fixture-a"]["autoCompactWindow"], 200000)
         self.assertEqual(global_window["modelSettings"]["fixture-b"]["autoCompactWindow"], 200000)
@@ -720,6 +717,18 @@ Model ID: `gpt-6.1-sol`
                          {"hooks": {"PostToolUse": None}}):
             with self.subTest(override=override), self.assertRaises(ValueError):
                 launcher.compose_launch_settings(base, override)
+
+    def test_explicit_model_flag_outranks_custom_settings_model(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(launcher, "ROOT", root), \
+                    patch.object(launcher, "ensure_service", return_value=(root, {"port": 12345}, False)), \
+                    patch.object(launcher, "service_environment", return_value={}), \
+                    patch.object(launcher, "helper_output", side_effect=RuntimeError("synthetic stop")) as helper:
+                with self.assertRaisesRegex(RuntimeError, "synthetic stop"):
+                    launcher.run_session("claude", "explicit-model", ["--settings", '{"model":"settings-model"}'],
+                                         "fixture-client", route="api", explicit_model=True)
+            self.assertEqual(helper.call_args.args, ("prepare", "explicit-model"))
 
     def test_custom_statusline_has_launch_precedence_and_keeps_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
