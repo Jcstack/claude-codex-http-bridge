@@ -1,0 +1,284 @@
+diff --git a/internal/translator/codex/claude/caller_policy_candidate_test.go b/internal/translator/codex/claude/caller_policy_candidate_test.go
+new file mode 100644
+index 00000000..b158c1b5
+--- /dev/null
++++ b/internal/translator/codex/claude/caller_policy_candidate_test.go
+@@ -0,0 +1,93 @@
++package claude
++
++import (
++	"strings"
++	"testing"
++
++	"github.com/tidwall/gjson"
++)
++
++func TestCallerPolicyLeavesStrictBehaviorUnchanged(t *testing.T) {
++	for _, field := range []string{"", `,"strict":false`, `,"strict":true`} {
++		raw := []byte(`{"messages":[{"role":"user","content":"fixture"}],"tools":[{"name":"fixture_tool","input_schema":{"type":"object","properties":{}}` + field + `}]}`)
++		got, err := ConvertClaudeRequestToCodex("fixture", raw, false)
++		if err != nil || gjson.GetBytes(got, "tools.0.strict").Type != gjson.False {
++			t.Fatal("unrelated strict translation behavior changed")
++		}
++	}
++}
++
++func TestCallerPolicyCases(t *testing.T) {
++	cases := []struct {
++		callers  string
++		rejected bool
++	}{
++		{`["direct"]`, false},
++		{`["direct","code_execution_20260120"]`, false},
++		{`["direct","code_execution_20260521"]`, false},
++		{`["code_execution_20260120"]`, true},
++		{`["code_execution_20260521"]`, true},
++		{`[]`, true},
++		{`["future_unknown"]`, true},
++		{`["direct","future_unknown"]`, true},
++		{`["direct",1]`, true},
++		{`null`, true},
++		{`"direct"`, true},
++	}
++	for _, tc := range cases {
++		raw := []byte(`{"messages":[{"role":"user","content":"fixture"}],"tools":[{"name":"fixture_tool","allowed_callers":` + tc.callers + `,"input_schema":{"type":"object","properties":{}}}]}`)
++		_, err := ConvertClaudeRequestToCodex("fixture", raw, false)
++		if tc.rejected {
++			if policy, ok := err.(*claudeToolPolicyError); !ok || policy.StatusCode() != 400 || !policy.IsRequestScoped() {
++				t.Fatal("invalid synthetic caller policy was not rejected as request-scoped")
++			}
++		} else if err != nil {
++			t.Fatal("explicit direct caller was rejected")
++		}
++	}
++}
++
++func TestCallerPolicyRejectsAmbiguityAndDeepDefinitions(t *testing.T) {
++	cases := []string{
++		`{"name":"fixture_tool","allowed_callers":["direct"],"allowed_callers":["code_execution_20260120"],"input_schema":{"type":"object","properties":{}}}`,
++		`{"name":"fixture_tool","\u0061llowed_callers":["direct"],"allowed_callers":["code_execution_20260120"],"input_schema":{"type":"object","properties":{}}}`,
++		`{"name":"fixture_tool","\u0061llowed_callers":["code_execution_20260120"],"input_schema":{"type":"object","properties":{}}}`,
++	}
++	schema := `{"type":"string"}`
++	for i := 0; i < 130; i++ {
++		schema = `{"items":` + schema + `}`
++	}
++	cases = append(cases, `{"name":"fixture_tool","allowed_callers":["direct"],"input_schema":`+schema+`}`)
++	for _, tool := range cases {
++		raw := []byte(`{"messages":[{"role":"user","content":"fixture"}],"tools":[` + tool + `]}`)
++		if _, err := ConvertClaudeRequestToCodex("fixture", raw, false); err == nil {
++			t.Fatal("ambiguous or deeply nested synthetic caller policy was accepted")
++		}
++	}
++}
++
++func TestCallerPolicyChecksOnlyRealToolDefinitions(t *testing.T) {
++	user := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"allowed_callers"},{"type":"tool_addition","tool":{"type":"tool_definition","definition":{"name":"fixture_tool","allowed_callers":["code_execution_20260120"]}}}]}]}`)
++	_, err := ConvertClaudeRequestToCodex("fixture", user, false)
++	if err != nil && strings.Contains(err.Error(), "caller") {
++		t.Fatal("user content was treated as a system tool definition")
++	}
++	restricted := []byte(`{"messages":[{"role":"user","content":"fixture"},{"role":"system","content":[{"type":"tool_addition","tool":{"type":"tool_definition","definition":{"name":"fixture_tool","allowed_callers":["code_execution_20260120"],"input_schema":{"type":"object","properties":{}}}}}]}]}`)
++	if _, err := ConvertClaudeRequestToCodex("fixture", restricted, false); err == nil {
++		t.Fatal("restricted synthetic additional tool was accepted")
++	}
++}
++
++func TestCallerPolicyResourceBounds(t *testing.T) {
++	tooLarge := `{"name":"fixture","allowed_callers":["direct"],"description":"` + strings.Repeat("x", callerPolicyToolByteLimit) + `"}`
++	tooMany := `{"name":"fixture","allowed_callers":["direct"],"input_schema":{"enum":[` + strings.Repeat("0,", callerPolicyTokenLimit) + `0]}}`
++	for _, tool := range []string{tooLarge, tooMany} {
++		if err := validateClaudeToolContract(gjson.Parse(tool)); err == nil {
++			t.Fatal("oversized synthetic caller-policy definition was accepted")
++		}
++	}
++	unrelated := `{"name":"fixture","description":"` + strings.Repeat("x", callerPolicyToolByteLimit) + `"}`
++	if err := validateClaudeToolContract(gjson.Parse(unrelated)); err != nil {
++		t.Fatal("a tool without caller policy was newly limited")
++	}
++}
+diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
+index c546ba90..2ee56807 100644
+--- a/internal/translator/codex/claude/codex_claude_request.go
++++ b/internal/translator/codex/claude/codex_claude_request.go
+@@ -11,6 +11,7 @@ import (
+ 	"encoding/hex"
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"strconv"
+ 	"strings"
+ 
+@@ -59,6 +60,9 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 	template := []byte(`{"model":"","instructions":"","input":[]}`)
+ 
+ 	rootResult := gjson.ParseBytes(rawJSON)
++	if err := validateClaudeToolContracts(rootResult.Get("tools")); err != nil {
++		return nil, err
++	}
+ 	mayHaveToolAddition := claudePayloadMayContainToolAddition(rawJSON)
+ 	toolNameMap := buildReverseMapFromClaudeOriginalToShortFromResult(rootResult, mayHaveToolAddition)
+ 	signatureTargetModel := translatorcommon.ResolveCodexReplayTargetModel(modelName, rawJSON)
+@@ -116,6 +120,9 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 			messageRole := messageResult.Get("role").String()
+ 			if messageRole == "system" {
+ 				systemContent := messageResult.Get("content")
++				if err := validateClaudeSystemToolContracts(systemContent); err != nil {
++					return nil, err
++				}
+ 				if reminderText, ok := translatorcommon.ClaudeMessageSystemReminderText(systemContent); ok {
+ 					message := []byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}`)
+ 					message, _ = sjson.SetBytes(message, "content.0.text", reminderText)
+@@ -741,6 +748,152 @@ func convertClaudeFunctionToolToCodex(toolResult gjson.Result, toolNameMap map[s
+ 	return tool
+ }
+ 
++const callerPolicyToolByteLimit = 4 << 20
++const callerPolicyTokenLimit = 100000
++const callerPolicyDepthLimit = 128
++
++// validateUniqueToolJSON rejects ambiguous duplicate keys in a tool carrying
++// a caller policy, without retaining the parsed schema or its values.
++func validateUniqueToolJSON(raw string) error {
++	if len(raw) > callerPolicyToolByteLimit {
++		return fmt.Errorf("tool definition size limit exceeded")
++	}
++	decoder := json.NewDecoder(strings.NewReader(raw))
++	decoder.UseNumber()
++	depth, tokens := 0, 0
++	var next func() (json.Token, error)
++	next = func() (json.Token, error) {
++		tokens++
++		if tokens > callerPolicyTokenLimit {
++			return nil, fmt.Errorf("JSON token limit exceeded")
++		}
++		return decoder.Token()
++	}
++	var read func() error
++	read = func() error {
++		token, err := next()
++		if err != nil {
++			return err
++		}
++		delim, container := token.(json.Delim)
++		if !container {
++			return nil
++		}
++		depth++
++		if depth > callerPolicyDepthLimit {
++			return fmt.Errorf("JSON nesting limit exceeded")
++		}
++		defer func() { depth-- }()
++		switch delim {
++		case '{':
++			keys := map[string]struct{}{}
++			for decoder.More() {
++				keyToken, err := next()
++				if err != nil {
++					return err
++				}
++				key, ok := keyToken.(string)
++				if !ok {
++					return fmt.Errorf("invalid object key")
++				}
++				if _, exists := keys[key]; exists {
++					return fmt.Errorf("duplicate object key")
++				}
++				keys[key] = struct{}{}
++				if err := read(); err != nil {
++					return err
++				}
++			}
++			end, err := next()
++			if err != nil || end != json.Delim('}') {
++				return fmt.Errorf("invalid object end")
++			}
++			return nil
++		case '[':
++			for decoder.More() {
++				if err := read(); err != nil {
++					return err
++				}
++			}
++			end, err := next()
++			if err != nil || end != json.Delim(']') {
++				return fmt.Errorf("invalid array end")
++			}
++			return nil
++		default:
++			return fmt.Errorf("unexpected JSON delimiter")
++		}
++	}
++	if err := read(); err != nil {
++		return err
++	}
++	if _, err := decoder.Token(); err != io.EOF {
++		return fmt.Errorf("unexpected trailing JSON")
++	}
++	return nil
++}
++
++func validateClaudeToolContract(tool gjson.Result) error {
++	callers := tool.Get("allowed_callers")
++	if !callers.Exists() {
++		return nil
++	}
++	if err := validateUniqueToolJSON(tool.Raw); err != nil {
++		return &claudeToolPolicyError{"Tool definition ambiguous or exceeds policy limits; request not sent upstream"}
++	}
++	if callers.Exists() {
++		if !callers.IsArray() {
++			return &claudeToolPolicyError{"Unsupported tool caller policy; request not sent upstream"}
++		}
++		direct := false
++		for _, caller := range callers.Array() {
++			if caller.Type != gjson.String {
++				return &claudeToolPolicyError{"Unsupported tool caller policy; request not sent upstream"}
++			}
++			switch caller.String() {
++			case "direct":
++				direct = true
++			case "code_execution_20260120", "code_execution_20260521":
++			default:
++				return &claudeToolPolicyError{"Unsupported tool caller policy; request not sent upstream"}
++			}
++		}
++		if !direct {
++			return &claudeToolPolicyError{"Tool disallows direct calls; request not sent upstream"}
++		}
++	}
++	return nil
++}
++
++func validateClaudeToolContracts(tools gjson.Result) error {
++	if tools.IsArray() {
++		for _, tool := range tools.Array() {
++			if tool.IsObject() {
++				if err := validateClaudeToolContract(tool); err != nil {
++					return err
++				}
++			}
++		}
++	}
++	return nil
++}
++
++func validateClaudeSystemToolContracts(content gjson.Result) error {
++	if content.IsArray() {
++		for _, part := range content.Array() {
++			if part.Get("type").String() != "tool_addition" {
++				continue
++			}
++			if definition := part.Get("tool.definition"); definition.IsObject() {
++				if err := validateClaudeToolContract(definition); err != nil {
++					return err
++				}
++			}
++		}
++	}
++	return nil
++}
++
+ func ensureClaudeDeclaredToolsIndexed(toolsResult gjson.Result, declaredToolsByName *map[string]gjson.Result, declaredToolsIndexed *bool) {
+ 	if *declaredToolsIndexed {
+ 		return

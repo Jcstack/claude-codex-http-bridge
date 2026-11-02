@@ -71,6 +71,7 @@
 !tests/native_identity_probe.go
 !tests/native_cache_fixture.go
 !tests/native_tool_contract_fixture.go
+!tests/native_caller_policy_fixture.go
 !tests/tool_contract_benchmark.go
 !tests/native_gateway_names_fixture.go
 !tests/native_incomplete_fixture.go
@@ -107,6 +108,7 @@
 !upstream/patches/midconversation-effort.patch
 !upstream/patches/midconversation-system-fidelity.patch
 !upstream/patches/tool-contract-guard-candidate.patch
+!upstream/patches/caller-policy-guard-candidate.patch
 !upstream/patches/claude-hud-v0.15-git-safety.patch
 !upstream/patches/claude-hud-v0.15-bun-node-fallback.patch
 !upstream/patches/claude-hud-v0.15-windows-fixture.patch

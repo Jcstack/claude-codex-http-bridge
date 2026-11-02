@@ -207,7 +207,11 @@ def main():
     parser.add_argument("--translator", required=True, type=Path)
     parser.add_argument("--require-preflight-guard", action="store_true",
                         help="Require the experimental request guard, not complete strict output validation")
+    parser.add_argument("--require-caller-only-guard", action="store_true",
+                        help="Require only caller-policy rejection and unchanged unsupported strict behavior")
     options = parser.parse_args()
+    if options.require_preflight_guard and options.require_caller_only_guard:
+        raise RuntimeError("Choose one synthetic guard candidate")
     result = observe(options.translator.resolve())
     print(json.dumps(result, sort_keys=True))
     if options.require_preflight_guard and not (
@@ -216,6 +220,13 @@ def main():
             result["programmatic_only_stream_status"] == 400 and not result["programmatic_only_stream_contacted_fake_upstream"] and
             result["weakened_strict_schema_status"] == 400 and not result["weakened_strict_schema_contacted_fake_upstream"]):
         raise RuntimeError("Synthetic request guard did not meet its limited acceptance criteria")
+    if options.require_caller_only_guard and not (
+            not result["explicit_strict_true_preserved"] and
+            result["programmatic_only_status"] == 400 and not result["programmatic_only_contacted_fake_upstream"] and
+            result["programmatic_only_stream_status"] == 400 and not result["programmatic_only_stream_contacted_fake_upstream"] and
+            result["weakened_strict_schema_status"] == 200 and result["weakened_strict_schema_contacted_fake_upstream"] and
+            result["invalid_strict_arguments_returned_as_tool_use"]):
+        raise RuntimeError("Synthetic caller-only guard or its strict-mode negative control did not match")
 
 
 if __name__ == "__main__":

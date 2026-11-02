@@ -65,6 +65,41 @@ The existing ordinary best-effort path and its schema normalization remain
 unchanged by the installed runtime. Avoid treating `strict: false`, an omitted
 example, or a fake-successful tool call as proof of strict tool compliance.
 
+## Separate caller-only candidate
+
+The independently scoped [caller-policy patch](upstream/patches/caller-policy-guard-candidate.patch)
+is also **not activated** or included in the runtime source lock. It rejects
+programmatic-only, malformed and unknown caller policies before an upstream
+request, while accepting an explicitly direct caller in the tested cases. It
+does not implement programmatic execution: rejecting such a tool is a visible
+compatibility limitation. Policy-bearing definitions are bounded to 4 MiB,
+100,000 JSON tokens and 128 levels in this experiment; larger definitions and
+unknown future caller names fail closed. Definitions without a caller-policy
+field are not subject to those new fixture limits.
+
+In isolated macOS controls, the native Codex executor returned request-scoped
+400 errors without contacting its fake upstream for invalid policies in both
+streaming and nonstreaming modes; a later direct request succeeded. The
+preceding public-source baseline failed the six corresponding negative-control
+checks. The locked real client also received a 400 before the fake upstream or
+fake MCP tool in the injected programmatic-only case. A separate API fake and
+dynamic-tool probe passed; three synthetic dynamic-tool stages preserved the
+same prompt fields and session cache key versus the locally selected binary.
+That comparison does not establish real provider cache hits.
+
+This narrower candidate deliberately leaves the existing `strict: false`
+translation and dropped `input_examples` unchanged. A fake invalid strict
+argument still becomes a tool call, so it must not be marketed as strict-tool
+support or complete caller-policy support. It requires cross-platform, actual
+client/plugin, provider and safe-handoff acceptance before any rollout.
+
+On this Mac, two short sequential 300 ms samples using a synthetic
+1,000-message, 100-tool request measured 1.313–1.366 ms per conversion for
+the baseline and 1.369–1.386 ms for the caller-only candidate when no policy
+was supplied. With an explicit direct policy on every tool, the samples were
+1.326–1.413 ms and 1.527–1.534 ms respectively. These non-randomized samples
+are local translation measurements, not end-to-end or model latency.
+
 ## Isolated request guard
 
 The candidate preserves an explicit `strict: true` only when the normalized
