@@ -72,8 +72,11 @@ With the locked real Claude client, a **test-only** stdio adapter, and synthetic
 local servers, both formerly colliding tools were called exactly once each;
 the same held after resuming the synthetic session. A deny for the encoded
 alias blocked that tool while allowing the other. A separate synthetic test
-also observed `tools/list_changed`, fetched a changed list, and called the new
-original tool in the real client. A separate synthetic gateway test exercised
+observed `tools/list_changed`, fetched a changed list, and called the new
+original tool in the real client. The earlier version of that dynamic test
+allowed the fake model to request the new name before it appeared in that
+model request, so earlier passes alone do not prove realistic discovery. A
+separate synthetic gateway test exercised
 the reviewed translator, deferred discovery through ToolSearch,
 both tool calls, and preservation of the cache key, initial tool definitions,
 instructions, and previous-input prefix. It did not test a provider cache hit.
@@ -88,9 +91,25 @@ earlier passing run. A separate local run passed. Neither observation identifies
 the cause. Three further consecutive local macOS runs passed the resume, deny,
 and dynamic-list controls; the later [source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41455750069)
 also passed. These samples do not explain or rule out the original intermittent
-failure. The fixture now reports synthetic per-case boolean controls and
-exception types on failure, while continuing to withhold raw client output,
-request bodies, paths and tool arguments. The candidate remains experimental.
+failure. A later [macOS client failure](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41473378959)
+recorded a changed server list without the new alias in the observed requests.
+Its precise cause is unproven. In the old test the fake gateway captured the
+next request before waiting for the changed-list marker, so that wait could
+not update the request's tool list. Also, the fake model emitted the new tool
+name even when it was absent from that particular request, and the assertion
+only checked whether the name appeared in *any* request.
+
+An isolated, deliberately delayed list response reproduced a stale immediate
+follow-up request with the locked client. The updated test keeps the same
+client process, lets a synthetic model call the new alias only when that
+request actually offers it, and uses bounded later user turns to check eventual
+discovery and the original tool call. It records the immediate observation
+separately; a later successful turn does not establish instantaneous refresh,
+successful execution of stale removed tools, or a fix for the original CI
+failure. The adapter's forwarded marker means the list was written to Claude,
+not that Claude acknowledged applying it. Only synthetic booleans are emitted;
+client output, request bodies, paths and tool arguments remain private. The
+candidate remains experimental and is not installed in user sessions.
 
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,

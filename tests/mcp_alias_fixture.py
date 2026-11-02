@@ -11,6 +11,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mcp_alias_policy import AliasPolicy, ProtocolError  # noqa: E402
@@ -19,7 +20,7 @@ from mcp_alias_policy import AliasPolicy, ProtocolError  # noqa: E402
 NAMES = ["lookup.fixture", "lookup_fixture"]
 
 
-def fake_server(marker, dynamic=False):
+def fake_server(marker, dynamic=False, hold_refresh=False):
     changed = False
     for line in sys.stdin:
         message = json.loads(line)
@@ -33,6 +34,12 @@ def fake_server(marker, dynamic=False):
         elif method == "tools/list":
             names = ["lookup_fixture", "lookup.extra"] if changed else NAMES
             if changed:
+                if hold_refresh:
+                    deadline = time.monotonic() + 8
+                    while not Path(marker + ".second-request").exists() and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    if not Path(marker + ".second-request").exists():
+                        Path(marker + ".hold-timeout").touch()
                 Path(marker + ".refreshed").write_text("yes", encoding="utf-8")
             result = {"tools": [{"name": name, "description": "Synthetic fixture",
                                  "inputSchema": {"type": "object", "properties": {}}} for name in names]}
@@ -51,11 +58,11 @@ def fake_server(marker, dynamic=False):
             print(json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}), flush=True)
 
 
-def fake_adapter(marker, dynamic=False):
+def fake_adapter(marker, dynamic=False, hold_refresh=False):
     policy, events = AliasPolicy("gateway"), queue.Queue()
     command = [sys.executable, __file__, "--fake-server", marker]
     if dynamic:
-        command.append("dynamic")
+        command.append("dynamic-barrier" if hold_refresh else "dynamic")
     child = subprocess.Popen(command,
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              text=True, encoding="utf-8", bufsize=1)
@@ -82,6 +89,13 @@ def fake_adapter(marker, dynamic=False):
             stream = child.stdin if destination == "server" else sys.stdout
             stream.write(json.dumps(outgoing, ensure_ascii=True) + "\n")
             stream.flush()
+            if (dynamic and source == "server" and destination == "client"
+                    and isinstance(outgoing.get("result"), dict)
+                    and isinstance(outgoing["result"].get("tools"), list)
+                    and "lookup.extra" in policy.advertised.values()):
+                # This proves only that the adapter wrote the changed list,
+                # not that Claude has applied it to a subsequent request.
+                Path(marker + ".forwarded").touch()
     except (BrokenPipeError, OSError, ProtocolError, ValueError):
         return 1
     finally:
@@ -98,9 +112,12 @@ def fake_adapter(marker, dynamic=False):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) in (3, 4) and (len(sys.argv) == 3 or sys.argv[3] == "dynamic") and sys.argv[1] == "--fake-server":
-        fake_server(sys.argv[2], len(sys.argv) == 4)
-    elif len(sys.argv) in (3, 4) and (len(sys.argv) == 3 or sys.argv[3] == "dynamic") and sys.argv[1] == "--fake-adapter":
-        raise SystemExit(fake_adapter(sys.argv[2], len(sys.argv) == 4))
+    valid = len(sys.argv) in (3, 4) and (len(sys.argv) == 3 or sys.argv[3] in ("dynamic", "dynamic-barrier"))
+    dynamic = len(sys.argv) == 4
+    hold_refresh = dynamic and sys.argv[3] == "dynamic-barrier"
+    if valid and sys.argv[1] == "--fake-server":
+        fake_server(sys.argv[2], dynamic, hold_refresh)
+    elif valid and sys.argv[1] == "--fake-adapter":
+        raise SystemExit(fake_adapter(sys.argv[2], dynamic, hold_refresh))
     else:
         raise SystemExit("This fixture only runs its own synthetic server")
