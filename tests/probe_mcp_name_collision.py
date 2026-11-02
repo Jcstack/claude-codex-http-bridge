@@ -135,9 +135,11 @@ def run_case(claude, names, deny):
             except (ValueError, AttributeError, TypeError):
                 completed = False
             calls = [json.loads(line) for line in marker.read_text(encoding="utf-8").splitlines()] if marker.exists() else []
-            offered = any(ALIAS == tool.get("name") for body in server.bodies for tool in body.get("tools", [])
-                          if isinstance(tool, dict))
+            alias_counts = [sum(ALIAS == tool.get("name") for tool in body.get("tools", [])
+                                if isinstance(tool, dict)) for body in server.bodies]
+            offered = any(alias_counts)
             return {"client_completed": completed, "request_count": len(server.bodies), "alias_offered": offered,
+                    "exactly_one_alias_per_model_request": bool(alias_counts) and all(count == 1 for count in alias_counts),
                     "called_dotted": calls == [DOTTED], "called_underscored": calls == [UNDERSCORED],
                     "no_tool_call": not calls, "single_tool_call": len(calls) == 1}
         finally:
@@ -167,6 +169,8 @@ def main():
                  and dotted_first["called_dotted"] and under_first["called_underscored"])
     print(json.dumps({"synthetic_only": True, "direct_messages_without_bridge": True,
         "order_sensitive_collision_observed": collision,
+        "single_shared_definition_in_each_collision_case":
+            dotted_first["exactly_one_alias_per_model_request"] and under_first["exactly_one_alias_per_model_request"],
         "raw_dotted_deny_did_not_block_dotted_call": dotted_first["called_dotted"],
         "normalized_alias_deny_blocked_both": deny_alias["no_tool_call"],
         "unique_tool_control_passed": unique["called_underscored"]}, sort_keys=True))

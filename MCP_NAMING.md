@@ -20,6 +20,12 @@ describes character replacement in plugin tool names. The public
 also uses a narrower name character set than MCP. The bridge cannot infer the
 original identity once Claude has merged it into one alias.
 
+In the observed collision cases, each synthetic model request contained only
+one definition for the shared alias. The HTTP translator therefore could not
+detect this particular conflict by looking for duplicate definitions in that
+request; the two original identities were already absent at that boundary.
+This observation is specific to the tested client and fixture.
+
 In the same synthetic client, allowing the normalized alias while adding a
 literal dotted-name deny still allowed the dotted original to be called; the
 documented normalized alias, when denied, blocked the call. This demonstrates
@@ -71,6 +77,10 @@ original tool in the real client. A separate synthetic gateway test exercised
 the reviewed translator, deferred discovery through ToolSearch,
 both tool calls, and preservation of the cache key, initial tool definitions,
 instructions, and previous-input prefix. It did not test a provider cache hit.
+The [three-platform source/client gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41407283365)
+and [three-platform candidate translator gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41407306970)
+passed for these synthetic cases. They do not test real plugins, a real
+Windows account, or production transport behavior.
 
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,

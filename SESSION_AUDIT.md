@@ -153,6 +153,10 @@ It reports only a unique match, marks reused tags as ambiguous, and emits no
 tag, raw error, URL, or body. The wider window helps observe a later completion
 but increases the chance of an unrelated tag reuse. Treat it as correlation,
 not proof of retry behavior or complete response delivery.
+After the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41409393314)
+passed, the updated diagnostic module was installed atomically and its
+read-only command passed a local smoke check. The original and managed service
+states were unchanged; no running process was restarted.
 
 A later one-hour sample contained an automatic compaction recorded as 574.868
 seconds, with client metadata reporting 753,797 tokens before and 51,271 after.
