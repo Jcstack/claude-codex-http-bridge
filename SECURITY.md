@@ -16,7 +16,8 @@ requires a nonempty person identifier from local credential metadata before
 using a cached quota or attempting quota reconciliation. Native app-server
 quota also requires matching person metadata, and is discarded if either
 selected identity changes during the read. The metadata is not independently
-verified as a cryptographic proof of identity.
+verified as a cryptographic proof of identity. These are before-and-after
+checks, so a change away and back between observations is not excluded.
 When the bridge person is known but the native person is unavailable, the
 fixed selected-bridge endpoint remains the fallback. If the bridge person is
 unknown, quota display and automatic stale-cooldown reset remain unavailable

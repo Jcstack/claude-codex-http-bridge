@@ -54,6 +54,14 @@ class UsageAccountIdentityTest(unittest.TestCase):
         open_network.assert_not_called()
         selected.assert_not_called()
 
+    def test_malformed_bridge_identity_does_not_fetch_usage(self):
+        record = {"account_id": "workspace", "email": "\ud800@example.invalid", "access_token": "fixture"}
+        with patch.object(codex_usage, "active_bridge_auth", return_value=record), \
+             patch.object(codex_usage.urllib.request, "build_opener") as open_network:
+            self.assertIsNone(codex_usage.selected_fingerprint(Path("fixture")))
+            self.assertIsNone(codex_usage._bridge_rate_limits(Path("fixture")))
+        open_network.assert_not_called()
+
     def test_selection_change_during_native_read_discards_result(self):
         sentinel = {"accountId": "workspace"}
         with patch.object(codex_usage, "selected_fingerprint", side_effect=["person-a", "person-b"]), \

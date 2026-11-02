@@ -127,7 +127,10 @@ def _bridge_rate_limits(root: Path = ROOT) -> dict | None:
     if bridge is None or not accounts.account_subject(bridge):
         return None
     token, account = bridge.get("access_token"), bridge.get("account_id")
-    identity = accounts.identity_fingerprint(bridge)
+    try:
+        identity = accounts.identity_fingerprint(bridge)
+    except (RuntimeError, UnicodeError):
+        return None
     if (not isinstance(token, str) or not token or not isinstance(account, str) or not account
             or any(char in token + account for char in ("\r", "\n"))):
         return None
