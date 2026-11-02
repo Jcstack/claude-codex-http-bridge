@@ -64,6 +64,8 @@ def recover_once(root: Path, *, attempts: dict | None = None, now: float | None 
         if len(active) != 1:
             return {"status": "no_single_selected_account"}
         selected = active[0]; identity = selected["fingerprint"]
+        if not accounts.account_subject(selected["record"]):
+            return {"status": "account_identity_unknown"}
         owner = accounts.Management(root)
         base = f'http://127.0.0.1:{owner.state["port"]}/v8/management/'
         headers = {"Authorization": "Bearer " + owner.key, "Content-Type": "application/json"}

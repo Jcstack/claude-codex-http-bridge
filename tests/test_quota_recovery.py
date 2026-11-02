@@ -22,8 +22,10 @@ def usage(percent=0):
 
 
 class QuotaRecoveryTests(unittest.TestCase):
-    def scenario(self, *, available=None, views=None, changed=False, attempts=None, now=0):
+    def scenario(self, *, available=None, views=None, changed=False, attempts=None, now=0, unknown_person=False):
         record = {"account_id": "fixture-account", "access_token": "PRIVATE_ACCESS", "refresh_token": "PRIVATE_REFRESH"}
+        if not unknown_person:
+            record["email"] = "fixture@example.invalid"
         row = {"name": "fixture.json", "record": record, "fingerprint": accounts.fingerprint(record)}
         entry = {"name": "fixture.json", "provider": "codex", "disabled": False, "auth_index": "PRIVATE_INDEX",
                  "cooldowns": views if views is not None else [{"scope": "credential", "reason": "credential_quota"}]}
@@ -81,6 +83,11 @@ class QuotaRecoveryTests(unittest.TestCase):
         result, requests = self.scenario(changed=True)
         self.assertEqual(result["status"], "account_changed")
         self.assertFalse(any(options.get("method") == "POST" for _, options in requests))
+
+    def test_unknown_person_never_queries_or_resets_cooldown(self):
+        result, requests = self.scenario(unknown_person=True)
+        self.assertEqual(result["status"], "account_identity_unknown")
+        self.assertEqual(requests, [])
 
     def test_blocked_probe_frequency_is_bounded_without_sleep(self):
         attempts = {}

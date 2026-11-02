@@ -32,6 +32,7 @@ class UsageEnvironmentTest(unittest.TestCase):
                         "NO_PROXY": "localhost,example.invalid"}
             with patch.dict(os.environ, supplied), patch.object(codex_usage, "read_cache", return_value=None), \
                  patch.object(codex_usage, "selected_account_id", return_value="synthetic"), \
+                 patch.object(codex_usage, "selected_fingerprint", return_value="synthetic-person"), \
                  patch.object(codex_usage.platform, "system", return_value="Linux"), \
                  patch.object(codex_usage.subprocess, "Popen") as spawn:
                 codex_usage.start_refresh(cache)
@@ -45,6 +46,17 @@ class UsageEnvironmentTest(unittest.TestCase):
                         "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES"):
                 self.assertNotIn(key, env)
             self.assertNotIn("SYNTHETIC_PRIVATE_KEY", json.dumps(command))
+
+    def test_unknown_person_does_not_start_background_refresh(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(codex_usage, "read_cache", return_value=None), \
+             patch.object(codex_usage, "selected_account_id", return_value="workspace"), \
+             patch.object(codex_usage, "selected_fingerprint", return_value=None), \
+             patch.object(codex_usage.subprocess, "Popen") as spawn:
+            cache = Path(temporary) / "usage.json"
+            codex_usage.start_refresh(cache)
+            self.assertFalse(cache.with_suffix(".lock").exists())
+        spawn.assert_not_called()
 
     def test_fake_codex_rpc_receives_only_allowlisted_environment(self):
         with tempfile.TemporaryDirectory() as temporary:

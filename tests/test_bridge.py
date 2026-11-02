@@ -954,6 +954,9 @@ Model ID: `gpt-6.1-sol`
             with patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
                 self.assertIsNone(codex_usage.matching_account_id(root))
                 bridge_file.write_text(json.dumps({"account_id": "account-b"}))
+                self.assertIsNone(codex_usage.matching_account_id(root))
+                bridge_file.write_text(json.dumps({"account_id": "account-b", "email": "fixture@example.invalid"}))
+                native_file.write_text(json.dumps({"tokens": {"account_id": "account-b", "email": "fixture@example.invalid"}}))
                 self.assertEqual(codex_usage.matching_account_id(root), "account-b")
 
     def test_session_settings_wraps_statusline_without_changing_user_file(self) -> None:

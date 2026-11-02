@@ -25,6 +25,13 @@ below 100%, and any additional model limits also available. Missing,
 inconsistent or exhausted data is rejected. Model-only rate throttles and
 authentication failures are not cleared by this mechanism.
 
+This source also refuses automatic recovery if the selected bridge
+record does not contain a person identifier in its local metadata. A shared
+workspace ID alone is not enough to bind a quota result to one person. This is a
+fail-closed compatibility limitation: the local gate remains in place until
+the identity is available. A monitor already running older code retains that
+code until safely restarted; changing its source file alone does not reload it.
+
 After reading usage, the monitor revalidates the selected identity, the
 PID-owned origin listener and the current quota-only restriction. Under the
 account-operation lock, it calls the existing localhost V8

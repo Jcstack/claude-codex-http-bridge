@@ -91,8 +91,8 @@ def selected_account_id(root: Path = ROOT) -> str | None:
 def selected_fingerprint(root: Path = ROOT) -> str | None:
     bridge = active_bridge_auth(root)
     try:
-        return accounts.identity_fingerprint(bridge) if bridge else None
-    except RuntimeError:
+        return accounts.identity_fingerprint(bridge) if bridge and accounts.account_subject(bridge) else None
+    except (RuntimeError, UnicodeError):
         return None
 
 
@@ -106,10 +106,17 @@ def matching_account_id(root: Path = ROOT) -> str | None:
     bridge_id = bridge.get("account_id")
     tokens = native.get("tokens")
     native_id = tokens.get("account_id") if isinstance(tokens, dict) else None
-    if (not isinstance(bridge_id, str) or not isinstance(native_id, str)
-            or not bridge_id or not hmac.compare_digest(bridge_id, native_id)):
+    if not isinstance(bridge_id, str) or not isinstance(native_id, str) or not bridge_id:
         return None
-    if accounts.account_subject(bridge) != accounts.account_subject(tokens):
+    bridge_subject = accounts.account_subject(bridge)
+    native_subject = accounts.account_subject(tokens)
+    if not bridge_subject or not native_subject:
+        return None
+    try:
+        if (not hmac.compare_digest(bridge_id.encode("utf-8"), native_id.encode("utf-8"))
+                or not hmac.compare_digest(bridge_subject.encode("utf-8"), native_subject.encode("utf-8"))):
+            return None
+    except UnicodeError:
         return None
     return bridge_id
 
@@ -117,7 +124,7 @@ def matching_account_id(root: Path = ROOT) -> str | None:
 def _bridge_rate_limits(root: Path = ROOT) -> dict | None:
     """Read the selected account's fixed ChatGPT usage endpoint, without proxies."""
     bridge = active_bridge_auth(root)
-    if bridge is None:
+    if bridge is None or not accounts.account_subject(bridge):
         return None
     token, account = bridge.get("access_token"), bridge.get("account_id")
     identity = accounts.identity_fingerprint(bridge)
@@ -160,8 +167,15 @@ def _bridge_rate_limits(root: Path = ROOT) -> dict | None:
 def selected_rate_limits(root: Path = ROOT) -> dict | None:
     # The native CLI keeps its own account. Do not log it out or replace its auth
     # merely to read the independently selected HTTP bridge account's usage.
-    if matching_account_id(root):
-        return _rpc_rate_limits()
+    identity = selected_fingerprint(root)
+    if not identity:
+        return None
+    native_id = matching_account_id(root)
+    if native_id:
+        result = _rpc_rate_limits()
+        if selected_fingerprint(root) != identity or matching_account_id(root) != native_id:
+            return None
+        return result
     return _bridge_rate_limits(root)
 
 
@@ -277,7 +291,7 @@ def read_cache(path: Path, root: Path = ROOT) -> dict | None:
 def refresh_cache(path: Path, root: Path = ROOT) -> bool:
     account_id = selected_account_id(root)
     identity = selected_fingerprint(root)
-    if account_id is None or path.is_symlink() or path.parent.is_symlink():
+    if account_id is None or identity is None or path.is_symlink() or path.parent.is_symlink():
         return False
     result = selected_rate_limits(root)
     if (result is None or result.get("accountId") != account_id
@@ -307,7 +321,7 @@ def refresh_cache(path: Path, root: Path = ROOT) -> bool:
 
 def start_refresh(path: Path) -> None:
     """Refresh after a HUD render without delaying Claude Code's status line."""
-    if read_cache(path) is not None or selected_account_id() is None:
+    if read_cache(path) is not None or selected_account_id() is None or selected_fingerprint() is None:
         return
     lock = path.with_suffix(".lock")
     created = False
@@ -349,11 +363,13 @@ def main() -> int:
             path.with_suffix(".lock").unlink(missing_ok=True)
     if len(sys.argv) == 2 and sys.argv[1] in ("show", "usage"):
         account_id = selected_account_id()
-        if account_id is None:
+        identity = selected_fingerprint()
+        if account_id is None or identity is None:
             print("Codex quota unavailable: the bridge must have one selected ChatGPT account.")
             return 1
         result = selected_rate_limits()
-        if result is None or result.get("accountId") != account_id:
+        if (result is None or result.get("accountId") != account_id
+                or selected_fingerprint() != identity):
             print("Codex quota unavailable for the selected account.")
             return 1
         print("Codex subscription quota (selected bridge account):")

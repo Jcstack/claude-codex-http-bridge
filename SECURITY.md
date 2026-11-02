@@ -10,6 +10,19 @@ The proxy writes OAuth credentials only after the user completes `claude-codex c
 
 Optional HUD quota telemetry follows exactly one enabled bridge account and excludes disabled backups. It uses the official Codex app-server only when native Codex has the same account ID. Otherwise it reads the selected bridge credential locally and sends its access token only to the fixed `https://chatgpt.com/backend-api/wham/usage` endpoint, with verified TLS and no redirects or ambient proxies. Native Codex auth is never replaced to make these accounts match. The private runtime cache stores only reported quota percentages, reset times, a fetch timestamp, and a SHA-256 account fingerprint. It rejects old-account caches and never invents a missing window. Raw usage responses and credentials are not logged.
 
+An additional source change strengthens that account binding. A workspace ID
+alone does not distinguish people within a shared workspace: the source now
+requires a nonempty person identifier from local credential metadata before
+using a cached quota or attempting quota reconciliation. Native app-server
+quota also requires matching person metadata, and is discarded if either
+selected identity changes during the read. The metadata is not independently
+verified as a cryptographic proof of identity.
+When the bridge person is known but the native person is unavailable, the
+fixed selected-bridge endpoint remains the fallback. If the bridge person is
+unknown, quota display and automatic stale-cooldown reset remain unavailable
+instead of assuming two accounts are the same. These identity checks are under
+test and are not yet installed in the current local helper or monitor.
+
 The earlier quota refresh helper and its native app-server inherited the full
 parent environment. A source change restricts both to operating-system,
 native `CODEX_HOME`, TLS and explicitly configured proxy settings, and starts
