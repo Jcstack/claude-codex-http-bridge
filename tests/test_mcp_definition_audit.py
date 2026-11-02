@@ -122,7 +122,20 @@ class DefinitionAuditTests(unittest.TestCase):
         with handle:
             self.inventory.write_text('{"tools": []}', encoding="utf-8")
             with self.assertRaises(ValueError):
-                audit.unchanged(handle, before)
+                audit.unchanged(handle, before, self.inventory)
+
+    def test_replaced_path_is_detected(self):
+        self.write([record([tool()])], [tool()])
+        handle, before = audit.open_regular(self.inventory, audit.MAX_INVENTORY_BYTES)
+        with handle:
+            replacement = self.root / "replacement.json"
+            replacement.write_text('{"tools": []}', encoding="utf-8")
+            try:
+                replacement.replace(self.inventory)
+            except PermissionError:
+                self.skipTest("The platform prevents replacing an open file")
+            with self.assertRaises(ValueError):
+                audit.unchanged(handle, before, self.inventory)
 
     def test_real_launcher_dispatch_reads_only_synthetic_inputs(self):
         self.write([record([tool()])], [tool("SYNTHETIC_CHANGED")])

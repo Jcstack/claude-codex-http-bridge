@@ -383,9 +383,11 @@ key order but preserves array order and can flag semantically equivalent
 schemas as different. Other definition fields, eager
 tools, hidden client state, plugin precedence and actual model behavior are not
 checked. Missing, ambiguous, incomplete and unsupported entries are counted;
-zero differences with zero compared names is not a match. A changed input file,
-truncated record, symlinked file, unsupported recognized record, or size limit
-fails the check instead of silently accepting a partial result. An unrecognized
+zero differences with zero compared names is not a match. A detected input
+change or replacement during reading, truncated record, symlinked file,
+unsupported recognized record, or size limit fails the check. File metadata
+checks are not an atomic snapshot or a defense against a malicious same-user
+process. An unrecognized
 future record format can be omitted, so no comparable records do not prove
 that the session has no retained definitions. Session input is limited
 to 256 MiB and each JSONL record to 8 MiB; the snapshot limit is 16 MiB. This

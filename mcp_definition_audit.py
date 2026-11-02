@@ -52,10 +52,12 @@ def open_regular(path, limit):
         raise
 
 
-def unchanged(handle, before):
+def unchanged(handle, before, path):
     after = os.fstat(handle.fileno())
-    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
-            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+    named = os.stat(path, follow_symlinks=False)
+    def identity(value):
+        return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
+    if not stat.S_ISREG(named.st_mode) or identity(before) != identity(after) or identity(before) != identity(named):
         raise ValueError("Input changed during the read")
 
 
@@ -80,7 +82,7 @@ def inventory(path):
         if len(raw) > MAX_INVENTORY_BYTES:
             raise ValueError("Inventory is too large")
         value = strict_json(raw)
-        unchanged(handle, before)
+        unchanged(handle, before, path)
     if not isinstance(value, dict) or not isinstance(value.get("tools"), list) or len(value["tools"]) > MAX_TOOLS:
         raise ValueError("Invalid inventory")
     rows, duplicate = {}, set()
@@ -125,7 +127,7 @@ def retained(path):
                 rows[name] = fields
                 if len(rows) > MAX_TOOLS:
                     raise ValueError("Too many retained tools")
-        unchanged(handle, before)
+        unchanged(handle, before, path)
     return rows, ambiguous, records, skipped
 
 
