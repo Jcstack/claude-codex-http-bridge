@@ -247,6 +247,14 @@ and is installed locally. Set `CLAUDE_CODEX_STATUSLINE_CACHE_METRICS=1` before
 starting a new session to enable it for that session; existing session profiles
 are unchanged. Plugins need explicit support for the extension to display it.
 
+An experimental [HUD adapter patch](upstream/patches/claude-hud-v0.15-reported-cache.patch)
+teaches the reviewed HUD version to display the extension as “Reported
+cache-read input (main)” when its existing prompt-cache display is enabled.
+The [synthetic display fixture](tests/probe_hud_cache_display.py) checks the
+token fraction, disabled and missing cases, malformed values and unchanged
+native cache display. It never invents a lifetime or warmth. The patch has not
+been installed; the main-session counter may include model or account changes.
+
 Passing a partial object as the standard `prompt_cache` is unsafe for some
 plugins. For example, [this status-line implementation](https://github.com/tsalkin/claude-code-statusline/blob/17396d0bb11a47b184c7eb3709088dac36d7c91d/statusline.sh)
 defaults a missing `warm` value to false and displays cold when a `hit_ratio`

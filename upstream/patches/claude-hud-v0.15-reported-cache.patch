@@ -1,0 +1,74 @@
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -46,6 +46,9 @@
+     five_hour?: RateLimitWindow | null;
+     seven_day?: RateLimitWindow | null;
+     spend_limit?: RateLimitWindow | null;
++  } | null;
++  claude_codex_bridge?: {
++    reported_main_cache?: { requests?: number; caching_observed?: boolean; hit_ratio?: number | null } | null;
+   } | null;
+   prompt_cache?: {
+     warm?: boolean;
+--- a/src/i18n/types.ts
++++ b/src/i18n/types.ts
+@@ -5,6 +5,7 @@
+   | "label.weekly"
+   | "label.approxRam"
+   | "label.promptCache"
++  | "label.reportedCacheRead"
+   | "label.cacheHitRate"
+   | "label.rules"
+   | "label.hooks"
+--- a/src/i18n/en.ts
++++ b/src/i18n/en.ts
+@@ -7,6 +7,7 @@
+   "label.weekly": "Weekly",
+   "label.approxRam": "Approx RAM",
+   "label.promptCache": "Cache",
++  "label.reportedCacheRead": "Reported cache-read input (main)",
+   "label.cacheHitRate": "Cache hit",
+   "label.rules": "rules",
+   "label.hooks": "hooks",
+--- a/src/i18n/zh-Hans.ts
++++ b/src/i18n/zh-Hans.ts
+@@ -7,6 +7,7 @@
+   "label.weekly": "本周",
+   "label.approxRam": "内存",
+   "label.promptCache": "缓存",
++  "label.reportedCacheRead": "主会话已报告的缓存读取输入",
+   "label.cacheHitRate": "缓存命中",
+   "label.rules": "规则",
+   "label.hooks": "钩子",
+--- a/src/i18n/zh-Hant.ts
++++ b/src/i18n/zh-Hant.ts
+@@ -7,6 +7,7 @@
+   "label.weekly": "本週",
+   "label.approxRam": "記憶體",
+   "label.promptCache": "快取",
++  "label.reportedCacheRead": "主會話已回報的快取讀取輸入",
+   "label.cacheHitRate": "快取命中",
+   "label.rules": "規則",
+   "label.hooks": "Hook",
+--- a/src/render/lines.ts
++++ b/src/render/lines.ts
+@@ -39,7 +39,18 @@
+ export function promptCacheLine(f: Frame): string | null {
+   const display = f.config?.display;
+   const cache = f.stdin.prompt_cache;
+-  if (!display?.showPromptCache || !cache?.caching_observed) return null;
++  if (!display?.showPromptCache) return null;
++  // The bridge's fraction covers reported input tokens in the main session.
++  // It does not imply a request hit rate, provider warmth, or cache expiry.
++  if (!cache) {
++    const reported = f.stdin.claude_codex_bridge?.reported_main_cache;
++    const ratio = reported?.hit_ratio, requests = reported?.requests;
++    if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0 || ratio > 1 ||
++        typeof requests !== 'number' || !Number.isSafeInteger(requests) || requests < 1 ||
++        typeof reported?.caching_observed !== 'boolean') return null;
++    return `${label(t('label.reportedCacheRead'), f.config?.colors)} ${(ratio * 100).toFixed(1)}%`;
++  }
++  if (!cache.caching_observed) return null;
+ 
+   const colors = f.config?.colors;
+   const expiresAtMs = typeof cache.expires_at === 'number' ? cache.expires_at * 1000 : 0;

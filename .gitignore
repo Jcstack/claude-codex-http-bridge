@@ -94,6 +94,7 @@
 !upstream/patches/claude-hud-v0.15-bun-node-fallback.patch
 !upstream/patches/claude-hud-v0.15-windows-fixture.patch
 !upstream/patches/claude-hud-v0.15-guarded-git-optin.patch
+!upstream/patches/claude-hud-v0.15-reported-cache.patch
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml
