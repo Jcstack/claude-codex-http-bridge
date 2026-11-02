@@ -91,6 +91,7 @@ def run_case(claude, scope, wrap, *, legacy=False):
         flags = (["--restricted"] if scope in ("restricted", "restricted_explicit") else
                  ["--setting-sources", scope] if scope in ("project", "user") else [])
         if scope == "restricted_env": env["CLAUDE_CODE_RESTRICTED"] = "1"
+        if scope == "restricted_env_true": env["CLAUDE_CODE_RESTRICTED"] = "true"
         with patch.dict(os.environ, env, clear=True), patch.object(launcher, "ROOT", adapter):
             allowed = (True if legacy else launcher.user_status_line_allowed(flags)
                        and not launcher.project_status_line_may_override(flags, work))
@@ -148,6 +149,7 @@ def main():
     expectations.add_argument("--observe-parent-scope", action="store_true", help="Observe parent project-settings discovery")
     expectations.add_argument("--observe-worktree-scope", action="store_true", help="Observe linked-worktree local settings")
     expectations.add_argument("--expect-worktree-respected", action="store_true", help="Require linked-worktree local precedence")
+    expectations.add_argument("--observe-true-restricted", action="store_true", help="Observe the true spelling for restricted mode")
     args = parser.parse_args()
     if os.name == "nt":
         print(json.dumps({"synthetic_only": True, "skipped": "Windows interactive console not covered"})); return
@@ -157,19 +159,20 @@ def main():
               ("project_override", "local_override") if args.expect_project_promotion or args.expect_project_respected else
               ("parent_override",) if args.observe_parent_scope else
               ("worktree_override",) if args.observe_worktree_scope or args.expect_worktree_respected else
-              ("restricted", "project", "user", "restricted_explicit", "restricted_env", "normal"))
+              ("restricted_env_true",) if args.observe_true_restricted else
+              ("restricted", "project", "user", "restricted_explicit", "restricted_env", "restricted_env_true", "normal"))
     results = [run_case(claude, scope, wrap, legacy=args.expect_promotion or args.expect_project_promotion)
                for scope in scopes for wrap in (False, True)]
     print(json.dumps({"synthetic_only": True, "cases": results}, sort_keys=True))
     values = {(row["scope"], row["bridge_wrapped"]): row["global_statusline_ran"] for row in results}
     if not (args.expect_project_promotion or args.expect_project_respected or args.observe_parent_scope
-            or args.observe_worktree_scope or args.expect_worktree_respected) and not (not values[("restricted", False)] and not values[("project", False)]
+            or args.observe_worktree_scope or args.expect_worktree_respected or args.observe_true_restricted) and not (not values[("restricted", False)] and not values[("project", False)]
             and values[("normal", False)] and values[("normal", True)]):
         raise RuntimeError("Synthetic status-line source controls did not hold")
     if args.expect_promotion and not (values[("restricted", True)] and values[("project", True)]):
         raise RuntimeError("Synthetic status-line promotion was not reproduced")
     if args.expect_isolated:
-        if any(values[(scope, wrapped)] for scope in ("restricted", "project", "restricted_env") for wrapped in (False, True)):
+        if any(values[(scope, wrapped)] for scope in ("restricted", "project", "restricted_env", "restricted_env_true") for wrapped in (False, True)):
             raise RuntimeError("Disabled synthetic user status line was promoted")
         if not all(values[(scope, wrapped)] for scope in ("normal", "user") for wrapped in (False, True)):
             raise RuntimeError("Enabled synthetic user status line was lost")

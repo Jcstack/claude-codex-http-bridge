@@ -763,8 +763,9 @@ Model ID: `gpt-6.1-sol`
                 with self.subTest(arguments=arguments):
                     self.assertIs(launcher.user_status_line_allowed(arguments), expected)
         for name in ("CLAUDE_CODE_RESTRICTED", "CLAUDE_CODE_SAFE_MODE", "CLAUDE_CODE_SIMPLE"):
-            with self.subTest(variable=name), patch.dict(os.environ, {name: "1"}, clear=True):
-                self.assertFalse(launcher.user_status_line_allowed([]))
+            for value in ("1", "true", "YES", "On"):
+                with self.subTest(variable=name, value=value), patch.dict(os.environ, {name: value}, clear=True):
+                    self.assertFalse(launcher.user_status_line_allowed([]))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); user = root / "user"; user.mkdir()
             (user / "settings.json").write_text('{"statusLine":{"type":"command","command":"echo global"}}')

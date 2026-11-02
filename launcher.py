@@ -263,7 +263,7 @@ def configured_status_line() -> dict | None:
 
 def status_line_setting_sources(arguments: list[str]) -> set[str]:
     """Determine the explicitly requested local setting scopes."""
-    if any(os.environ.get(name) == "1" for name in
+    if any(os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on") for name in
            ("CLAUDE_CODE_RESTRICTED", "CLAUDE_CODE_SAFE_MODE", "CLAUDE_CODE_SIMPLE")):
         return set()
     selected_sources = None
