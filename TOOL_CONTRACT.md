@@ -85,10 +85,12 @@ preceding public-source baseline failed the six corresponding negative-control
 checks. The locked real client also received a 400 before the fake upstream or
 fake MCP tool in the injected programmatic-only case. A separate API fake and
 dynamic-tool probe passed; three synthetic dynamic-tool stages preserved the
-same prompt fields and session cache key versus the locally selected binary.
+same prompt fields and session cache key versus the locally selected binary,
+both without caller policies and with an explicit direct policy on every tool.
 That comparison does not establish real provider cache hits.
 The corresponding protocol, native-executor, real-client and synthetic
-cache-structure controls passed on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41526176567).
+cache-structure controls without caller policies passed on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41526176567);
+the explicit-direct cache comparison has so far run locally on macOS.
 
 An additional [handoff fixture](tests/probe_caller_handoff.py) used separate
 baseline and candidate executables, a temporary TLS ingress and a fake origin.
@@ -99,6 +101,7 @@ succeeded. The same temporary ingress and CA survived rollback, and a locked
 Claude client continued its synthetic conversation across a subsequent
 baseline-to-candidate handoff. The two fixture bundles use a mocked source
 lock; this is not provenance verification or a live-session rollout test.
+The same handoff and locked-client fixture also passed on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41526902170).
 
 This narrower candidate deliberately leaves the existing `strict: false`
 translation and dropped `input_examples` unchanged. A fake invalid strict

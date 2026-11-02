@@ -12,6 +12,15 @@ results such as `browser_state`. Browser batches have an ordered execution
 and failure contract. These API toolsets are distinct from `/chrome` and from
 the Playwright MCP option below.
 
+For the dated `browser_toolset_20260801` contract, Anthropic documents 27
+default members and four optional members that default to disabled; the dated
+computer toolset has 17 members. The browser documentation states that input
+bounds must be enforced by the executor, and describes a classifier on
+Anthropic's own browser-tool service path. Neither that classifier nor
+equivalent protection has been established for this Codex bridge. These counts
+and defaults describe the cited toolset versions, not a dynamic catalog or a
+promise about later versions.
+
 The current translator does not yet implement that toolset contract. A local
 [synthetic translator fixture](tests/native_toolset_contract_fixture.go)
 observed empty-name function declarations rather than expanded browser and
@@ -21,12 +30,33 @@ dropped a `browser_state` block when a text result was also present. A separate
 same request and streaming/nonstreaming response boundaries through both the
 locally selected Mac binary and the uninstalled caller-only candidate. When
 the synthetic result contained only `browser_state`, its JSON arrived as a
-string rather than the original typed block. This does not
+string rather than the original typed block. The mixed-result and tool-identity
+observations also passed on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41527544543);
+the state-only observation was added afterward. This does not
 establish that the current Claude Code client sends those API toolsets, nor
 that a real OpenAI backend would accept the synthetic request. Existing browser
 MCP behavior is a separate path. Do not treat these client toolsets as supported
 until member schemas, collision-safe identity, configuration, result types,
 ordering, permissions and real-client/provider behavior are validated.
+
+An uninstalled [browser-state candidate](upstream/patches/browser-state-candidate.patch)
+preserves a `browser` tool result's `browser_state` JSON as an ordered Responses
+`input_text` item, both beside text/images and when it is the only result.
+On macOS, synthetic HTTP and native-executor tests passed for streaming and
+nonstreaming requests; the preceding source failed the corresponding native
+controls. A synthetic comparison without browser-state content kept the same
+prompt fields and session cache key. The candidate also passed local controls
+when combined with the separate caller-only experiment, including a temporary
+managed TLS handoff and locked-client continuation. The handoff fixture did
+not send a browser-state result during the transition.
+
+This is not a typed Responses `browser_state` block or complete toolset support:
+member expansion and `toolset_name` identity remain unresolved, and no browser,
+real provider or real tool was used. Unlike the current mixed-result behavior,
+the candidate would send the complete state JSON to the model, including any
+tab titles, URLs and download fields present. That intentionally changes the
+prompt for such results and can affect cache reuse; it needs explicit privacy,
+size, real-client and provider validation before rollout.
 
 ## Isolated browser (recommended first)
 

@@ -20,8 +20,18 @@ class Handler(ResponsesHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         tools = body.get("tools", [])
+        mixed = next((item.get("output") for item in body.get("input", []) if isinstance(item, dict)
+                      and item.get("type") == "function_call_output" and item.get("call_id") == "call_fixture"), None)
         state_only = next((item.get("output") for item in body.get("input", []) if isinstance(item, dict)
                            and item.get("type") == "function_call_output" and item.get("call_id") == "call_fixture_tabs"), None)
+        def state_item(item, marker):
+            if not isinstance(item, dict) or item.get("type") != "input_text" or not isinstance(item.get("text"), str):
+                return False
+            try:
+                value = json.loads(item["text"])
+            except ValueError:
+                return False
+            return isinstance(value, dict) and value.get("type") == "browser_state" and marker in item["text"]
         self.server.observations.append({
             "function_count": sum(isinstance(tool, dict) and tool.get("type") == "function" for tool in tools),
             "empty_function_names": sum(isinstance(tool, dict) and tool.get("type") == "function" and
@@ -29,13 +39,17 @@ class Handler(ResponsesHandler):
             "custom_navigate_present": any(isinstance(tool, dict) and tool.get("name") == "navigate" for tool in tools),
             "browser_state_marker_present": "SYNTHETIC_TAB_STATE" in json.dumps(body.get("input", [])),
             "state_only_returned_as_string": isinstance(state_only, str) and "SYNTHETIC_ONLY_TAB" in state_only,
+            "mixed_state_preserved_in_order": isinstance(mixed, list) and len(mixed) == 2 and
+                isinstance(mixed[0], dict) and mixed[0].get("text") == "SYNTHETIC_NAV_DONE" and state_item(mixed[1], "SYNTHETIC_TAB_STATE"),
+            "state_only_preserved_as_text_item": isinstance(state_only, list) and len(state_only) == 1 and
+                state_item(state_only[0], "SYNTHETIC_ONLY_TAB"),
             "text_result_marker_present": "SYNTHETIC_NAV_DONE" in json.dumps(body.get("input", [])),
         })
         self.send_response_stream(len(self.server.observations), "call_fixture_new", "navigate",
                                   {"url": "https://example.invalid"}, "")
 
 
-def observe(binary):
+def observe(binary, expect_preserved=False):
     if not binary.is_file():
         raise RuntimeError("Disposable translator is missing")
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -74,14 +88,19 @@ def observe(binary):
         same = all(item == server.observations[0] for item in server.observations)
         result = {"synthetic_only": True, "fake_upstream_only": True, "real_claude_client": False,
                   "real_provider": False, "browser_opened": False, "both_modes_same_request_observation": same,
+                  "expected_state_preservation": expect_preserved,
                   **server.observations[0],
                   "nonstream_tool_name_navigate": blocks[0].get("name") == "navigate",
                   "nonstream_toolset_name_present": "toolset_name" in blocks[0],
                   "stream_tool_name_navigate": starts[0].get("name") == "navigate",
                   "stream_toolset_name_present": "toolset_name" in starts[0]}
+        state_matches = (result["browser_state_marker_present"] and result["mixed_state_preserved_in_order"]
+                         and result["state_only_preserved_as_text_item"] and not result["state_only_returned_as_string"]
+                         if expect_preserved else not result["browser_state_marker_present"]
+                         and not result["mixed_state_preserved_in_order"] and not result["state_only_preserved_as_text_item"]
+                         and result["state_only_returned_as_string"])
         if not (same and result["function_count"] == 3 and result["empty_function_names"] == 2
-                and result["custom_navigate_present"] and not result["browser_state_marker_present"]
-                and result["state_only_returned_as_string"] and result["text_result_marker_present"] and result["nonstream_tool_name_navigate"]
+                and result["custom_navigate_present"] and state_matches and result["text_result_marker_present"] and result["nonstream_tool_name_navigate"]
                 and result["stream_tool_name_navigate"] and not result["nonstream_toolset_name_present"]
                 and not result["stream_toolset_name_present"]):
             raise RuntimeError("Synthetic toolset observation changed; reassess the compatibility finding")
@@ -95,8 +114,9 @@ def observe(binary):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--translator", type=Path, required=True)
+    parser.add_argument("--expect-state-preserved", action="store_true", help="Require the separate browser-state candidate")
     options = parser.parse_args()
-    print(json.dumps(observe(options.translator.resolve()), sort_keys=True))
+    print(json.dumps(observe(options.translator.resolve(), options.expect_state_preserved), sort_keys=True))
 
 
 if __name__ == "__main__":

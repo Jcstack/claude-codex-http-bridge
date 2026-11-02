@@ -1,0 +1,64 @@
+diff --git a/internal/translator/codex/claude/browser_state_candidate_test.go b/internal/translator/codex/claude/browser_state_candidate_test.go
+new file mode 100644
+index 00000000..f062e71f
+--- /dev/null
++++ b/internal/translator/codex/claude/browser_state_candidate_test.go
+@@ -0,0 +1,39 @@
++package claude
++
++import (
++	"strings"
++	"testing"
++
++	"github.com/tidwall/gjson"
++)
++
++func TestBrowserStateCandidatePreservesSyntheticResultOrder(t *testing.T) {
++	request := []byte(`{"model":"fixture","messages":[{"role":"user","content":"fixture"},{"role":"assistant","content":[{"type":"tool_use","id":"mixed","name":"navigate","toolset_name":"browser","input":{}},{"type":"tool_use","id":"only","name":"list_tabs","toolset_name":"browser","input":{}},{"type":"tool_use","id":"other","name":"fixture","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"mixed","toolset_name":"browser","content":[{"type":"text","text":"BEFORE"},{"type":"browser_state","tabs":[{"tab_id":"SYNTHETIC_MIXED","title":"Fixture","url":"https://example.invalid","active":true}]},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aQ=="}},{"type":"text","text":"AFTER"}]},{"type":"tool_result","tool_use_id":"only","toolset_name":"browser","content":[{"type":"browser_state","tabs":[{"tab_id":"SYNTHETIC_ONLY","title":"Fixture","url":"https://example.invalid","active":true}]}]},{"type":"tool_result","tool_use_id":"other","content":[{"type":"text","text":"OTHER"},{"type":"browser_state","tabs":[{"tab_id":"SYNTHETIC_UNSCOPED"}]}]}]}],"tools":[]}`)
++	converted, err := ConvertClaudeRequestToCodex("fixture", request, false)
++	if err != nil {
++		t.Fatal("synthetic browser-state request failed")
++	}
++	outputs := map[string]gjson.Result{}
++	for _, item := range gjson.GetBytes(converted, "input").Array() {
++		if item.Get("type").String() == "function_call_output" {
++			outputs[item.Get("call_id").String()] = item.Get("output")
++		}
++	}
++	mixed := outputs["mixed"].Array()
++	if len(mixed) != 4 || mixed[0].Get("type").String() != "input_text" || mixed[0].Get("text").String() != "BEFORE" ||
++		mixed[1].Get("type").String() != "input_text" ||
++		gjson.Get(mixed[1].Get("text").String(), "tabs.0.tab_id").String() != "SYNTHETIC_MIXED" ||
++		mixed[2].Get("type").String() != "input_image" || mixed[2].Get("image_url").String() != "data:image/png;base64,aQ==" ||
++		mixed[3].Get("text").String() != "AFTER" {
++		t.Fatal("mixed synthetic browser-state result was not preserved in order")
++	}
++	only := outputs["only"].Array()
++	if len(only) != 1 || only[0].Get("type").String() != "input_text" ||
++		gjson.Get(only[0].Get("text").String(), "tabs.0.tab_id").String() != "SYNTHETIC_ONLY" {
++		t.Fatal("state-only synthetic browser result was not preserved")
++	}
++	if strings.Contains(outputs["other"].Raw, "SYNTHETIC_UNSCOPED") ||
++		!strings.Contains(outputs["other"].Raw, "OTHER") {
++		t.Fatal("unscoped synthetic tool-result behavior changed")
++	}
++}
+diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
+index c546ba90..4ccaee0d 100644
+--- a/internal/translator/codex/claude/codex_claude_request.go
++++ b/internal/translator/codex/claude/codex_claude_request.go
+@@ -349,6 +349,14 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 									toolResultContent := []byte(`{"type":"input_text","text":""}`)
+ 									toolResultContent, _ = sjson.SetBytes(toolResultContent, "text", contentResults[k].Get("text").String())
+ 									toolResultContentItems = append(toolResultContentItems, toolResultContent)
++								} else if toolResultContentType == "browser_state" &&
++									messageContentResult.Get("toolset_name").String() == "browser" && contentResults[k].IsObject() {
++									// Responses does not have this Anthropic content type. Preserve
++									// the complete untrusted state JSON as text in its original
++									// position rather than silently dropping it beside text/images.
++									toolResultContent := []byte(`{"type":"input_text","text":""}`)
++									toolResultContent, _ = sjson.SetBytes(toolResultContent, "text", contentResults[k].Raw)
++									toolResultContentItems = append(toolResultContentItems, toolResultContent)
+ 								} else if toolResultContentType == "tool_reference" {
+ 									if !isToolSearchResult {
+ 										continue

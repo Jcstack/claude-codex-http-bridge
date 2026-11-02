@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Full observation, caller-only candidate, or standalone validator fixture
+        description: Full observation, isolated candidate, or standalone validator fixture
         type: choice
         required: true
         default: full
         options:
           - full
           - caller
+          - browser_state
           - validator
 
 permissions:
@@ -143,8 +144,54 @@ jobs:
           python tests/smoke_api_contract.py "caller-${{ matrix.binary }}"
           python tests/probe_proxy_features.py "caller-${{ matrix.binary }}"
           python tests/probe_incomplete_cache_handoff.py "baseline-${{ matrix.binary }}" "caller-${{ matrix.binary }}"
+          python tests/probe_incomplete_cache_handoff.py "baseline-${{ matrix.binary }}" "caller-${{ matrix.binary }}" --direct-policy
           python tests/probe_toolset_http.py --translator "baseline-${{ matrix.binary }}"
           python tests/probe_toolset_http.py --translator "caller-${{ matrix.binary }}"
+      - name: Build and compare the browser-state candidate
+        if: ${{ inputs.scope == 'browser_state' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          for patch in 12d97cf-inline-tools-backport 12d97cf-deferred-tools web-search-replay loopback-tls url-citations native-compaction-v2 incomplete-tool-guard effort-downgrade-guard midconversation-effort; do
+            git -C upstream-source apply "../upstream/patches/$patch.patch"
+          done
+          cp tests/native_browser_state_fixture.go upstream-source/internal/runtime/executor/bridge_native_browser_state_local_test.go
+          cp tests/native_caller_policy_fixture.go upstream-source/internal/runtime/executor/bridge_native_caller_policy_local_test.go
+          cd upstream-source
+          go mod verify
+          go build -o "../baseline-${{ matrix.binary }}" ./cmd/server
+          if go test -run '^TestCodexBridgeNativeBrowserStateCandidate$' -timeout 60s ./internal/runtime/executor > "$RUNNER_TEMP/browser-negative.txt" 2>&1; then
+            echo 'The baseline unexpectedly preserved synthetic browser state.'
+            exit 1
+          fi
+          python -c 'import pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(); sys.exit(0 if s.count("synthetic browser state was not preserved for native executor") == 2 and "[build failed]" not in s else 1)' "$RUNNER_TEMP/browser-negative.txt"
+          git apply ../upstream/patches/browser-state-candidate.patch
+          go test ./internal/translator/codex/claude
+          go test -run '^TestCodexBridgeNativeBrowserStateCandidate$' -timeout 60s ./internal/runtime/executor
+          go build -o "../browser-${{ matrix.binary }}" ./cmd/server
+          git apply ../upstream/patches/caller-policy-guard-candidate.patch
+          go test ./internal/translator/codex/claude
+          go test -run '^TestCodexBridgeNative(BrowserStateCandidate|CallerPolicy)$' -timeout 60s ./internal/runtime/executor
+          go build -o "../combined-${{ matrix.binary }}" ./cmd/server
+          cd ../gateway
+          go mod verify
+          go build -o "../fixture-ingress-${{ matrix.binary }}" .
+      - name: Observe browser-state and unchanged cache controls
+        if: ${{ inputs.scope == 'browser_state' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_toolset_http.py --translator "baseline-${{ matrix.binary }}"
+          python tests/probe_toolset_http.py --translator "browser-${{ matrix.binary }}" --expect-state-preserved
+          python tests/probe_toolset_http.py --translator "combined-${{ matrix.binary }}" --expect-state-preserved
+          python tests/probe_tool_contract.py --translator "combined-${{ matrix.binary }}" --require-caller-only-guard
+          python tests/smoke_api_contract.py "combined-${{ matrix.binary }}"
+          python tests/probe_proxy_features.py "combined-${{ matrix.binary }}"
+          python tests/probe_incomplete_cache_handoff.py "baseline-${{ matrix.binary }}" "browser-${{ matrix.binary }}"
+          python tests/probe_incomplete_cache_handoff.py "baseline-${{ matrix.binary }}" "combined-${{ matrix.binary }}" --direct-policy
       - name: Install the integrity-locked synthetic Claude client
         if: ${{ inputs.scope != 'validator' }}
         run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
@@ -170,3 +217,11 @@ jobs:
           python tests/probe_tool_output_client.py --translator "caller-${{ matrix.binary }}" --inject-programmatic-only --expect-programmatic-rejection
           python tests/probe_tool_output_client.py --translator "caller-${{ matrix.binary }}"
           python tests/probe_caller_handoff.py "baseline-${{ matrix.binary }}" "caller-${{ matrix.binary }}" "fixture-ingress-${{ matrix.binary }}" --claude-client
+      - name: Observe combined candidate with a real client and fake model
+        if: ${{ inputs.scope == 'browser_state' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_tool_output_client.py --translator "combined-${{ matrix.binary }}" --inject-programmatic-only --expect-programmatic-rejection
+          python tests/probe_tool_output_client.py --translator "combined-${{ matrix.binary }}"
+          python tests/probe_caller_handoff.py "baseline-${{ matrix.binary }}" "combined-${{ matrix.binary }}" "fixture-ingress-${{ matrix.binary }}" --claude-client

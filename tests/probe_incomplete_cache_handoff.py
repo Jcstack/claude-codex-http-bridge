@@ -27,9 +27,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        raise RuntimeError("Usage: probe_incomplete_cache_handoff.py /path/to/previous /path/to/candidate")
-    binaries = [Path(value).resolve() for value in sys.argv[1:]]
+    if len(sys.argv) not in (3, 4) or (len(sys.argv) == 4 and sys.argv[3] != "--direct-policy"):
+        raise RuntimeError("Usage: probe_incomplete_cache_handoff.py /path/to/previous /path/to/candidate [--direct-policy]")
+    direct_policy = len(sys.argv) == 4
+    binaries = [Path(value).resolve() for value in sys.argv[1:3]]
     if any(not value.is_file() for value in binaries):
         raise RuntimeError("Both candidate binaries are required")
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -38,7 +39,8 @@ def main() -> int:
     spec = {"context_window": 500000, "input_modalities": ["text"], "supports_search_tool": True,
             "supported_reasoning_levels": [{"effort": level} for level in ("low", "medium", "high", "xhigh", "max")]}
     upstream = {"state": {"port": server.server_port}, "key": "synthetic-local-upstream", "models": {MODEL: spec}}
-    tool = lambda name: {"name": name, "input_schema": {"type": "object", "properties": {}}}
+    tool = lambda name: {"name": name, "input_schema": {"type": "object", "properties": {}},
+                         **({"allowed_callers": ["direct"]} if direct_policy else {})}
     tools = [tool("ToolSearch"), tool("Read"), {**tool(LONG), "defer_loading": True}]
     initial = [{"role": "user", "content": "Synthetic fixture"}]
     revealed = initial + [
@@ -69,7 +71,8 @@ def main() -> int:
                 raise RuntimeError("Fixture lacked a required prompt/cache field")
         print(json.dumps({"mock_only": True, "three_dynamic_tool_stages": True,
                           "long_gateway_name_unchanged": True, "prompt_bytes_unchanged": True,
-                          "session_cache_key_unchanged": True, "provider_cache_not_tested": True}, sort_keys=True))
+                          "session_cache_key_unchanged": True, "provider_cache_not_tested": True,
+                          "explicit_direct_policy": direct_policy}, sort_keys=True))
         return 0
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=2)
