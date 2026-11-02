@@ -131,8 +131,9 @@ case was refused by the fixture's exponent limit before validation. This is a
 deliberate fixture-policy comparison, not a claim that the library or the
 suite is wrong. The selected cases omit many files, optional and remote-reference
 scenarios; the separate regexp counterexample below demonstrates why the zero
-false-acceptance count does not establish complete safety. Three-platform
-results for this newly added subset are pending.
+false-acceptance count does not establish complete safety. The validator step
+including this subset succeeded on all three platforms in [this observation run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41523384353);
+other steps in that run may still be in progress.
 
 The default Go regexp engine adds another concrete incompatibility. In the
 local fixture, the schema pattern `^.$` accepted a carriage return and the
@@ -162,10 +163,13 @@ concurrency gate, bounded request/response framing, fixed result categories,
 and refusal of external schema references. A deliberately hanging child was
 canceled after an explicit readiness signal, a waiting second call timed out,
 and a later call reused the released slot; oversized synthetic output was
-discarded. The process receives a minimal environment and test-only data.
+discarded. The process receives a minimal environment and test-only data; a
+synthetic unrelated secret variable was not inherited in the local control.
 This fixture has no hard memory or CPU quota, process-tree sandbox, production
 protocol, streamed tool handling, or deployed integration; it does not solve
-the known regex and format differences. Cross-platform tests are pending.
+the known regex and format differences. Its validator step succeeded on macOS,
+Linux and Windows in the same observation run before the later local synthetic
+environment-variable control was added.
 
 The fixture initially resolved `golang.org/x/text` v0.14.0, for which OSV
 reported [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) and

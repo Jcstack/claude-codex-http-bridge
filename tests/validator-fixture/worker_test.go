@@ -37,6 +37,14 @@ func TestSyntheticWorkerChild(t *testing.T) {
 		fmt.Fprintln(os.Stdout, strings.Repeat("SYNTHETIC_PRIVATE_SENTINEL", 1000))
 		return
 	}
+	if mode == "envcheck" {
+		if os.Getenv("BRIDGE_SYNTHETIC_SECRET") == "" {
+			fmt.Fprintln(os.Stdout, "valid")
+		} else {
+			fmt.Fprintln(os.Stdout, "refused")
+		}
+		return
+	}
 	if mode != "validate" {
 		fmt.Fprintln(os.Stdout, "refused")
 		return
@@ -139,6 +147,13 @@ func (pool *syntheticWorkerPool) run(ctx context.Context, mode string, request s
 
 func TestSyntheticWorkerIsolation(t *testing.T) {
 	pool := syntheticWorkerPool{active: make(chan struct{}, 1), home: t.TempDir()}
+	t.Setenv("BRIDGE_SYNTHETIC_SECRET", "SYNTHETIC_PRIVATE_SENTINEL")
+	secretCtx, stopSecret := context.WithTimeout(context.Background(), 8*time.Second)
+	secretResult, secretErr := pool.run(secretCtx, "envcheck", syntheticWorkerRequest{}, nil)
+	stopSecret()
+	if secretErr != nil || secretResult != "valid" {
+		t.Fatal("synthetic worker inherited the unrelated fixture variable")
+	}
 	const schema = `{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}`
 	for _, row := range []struct{ input, want string }{
 		{`{"value":"synthetic"}`, "valid"},

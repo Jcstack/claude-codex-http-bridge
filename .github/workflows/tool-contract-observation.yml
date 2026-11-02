@@ -2,6 +2,15 @@ name: isolated-tool-contract-observation
 
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Full observation or only the standalone validator fixture
+        type: choice
+        required: true
+        default: full
+        options:
+          - full
+          - validator
 
 permissions:
   contents: read
@@ -61,6 +70,7 @@ jobs:
           python audit.py
           go test -v -count=1 -timeout 20s ./...
       - name: Build and test the isolated request-guard candidate
+        if: ${{ inputs.scope == 'full' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -77,18 +87,23 @@ jobs:
           go test -timeout 60s -run '^TestCodexBridgeNativeToolContract$' ./internal/runtime/executor
           go build -o "../${{ matrix.binary }}" ./cmd/server
       - name: Observe synthetic streaming and nonstreaming tool contracts
+        if: ${{ inputs.scope == 'full' }}
         run: python tests/probe_tool_contract.py --require-preflight-guard --translator ${{ matrix.binary }}
       - name: Verify existing dynamic tool and API contracts
+        if: ${{ inputs.scope == 'full' }}
         shell: bash
         run: |
           set -euo pipefail
           python tests/smoke_api_contract.py "${{ matrix.binary }}"
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
       - name: Install the integrity-locked synthetic Claude client
+        if: ${{ inputs.scope == 'full' }}
         run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
       - name: Locate the locked client
+        if: ${{ inputs.scope == 'full' }}
         run: python tests/claude_fixture.py
       - name: Observe MCP argument delivery and denial with a real client and fake model
+        if: ${{ inputs.scope == 'full' }}
         shell: bash
         run: |
           set -euo pipefail
