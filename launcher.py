@@ -783,6 +783,10 @@ def compose_launch_settings(base: dict, custom: dict) -> dict:
 
     def checked_window(name, value):
         ceiling = base.get("modelSettings", {}).get(name, {}).get("autoCompactWindow")
+        if value == "auto" and type(ceiling) is int and ceiling >= 100_000:
+            # The Claude alias's own default can be larger than this Codex
+            # model. Resolve auto from the current eligible catalog instead.
+            return ceiling
         # Claude's current settings schema accepts 100k–1M. The upper bound
         # here is the dynamically prepared model-specific bridge window.
         if type(value) is not int or type(ceiling) is not int or not 100_000 <= value <= ceiling:
@@ -790,11 +794,14 @@ def compose_launch_settings(base: dict, custom: dict) -> dict:
         return value
 
     if "autoCompactWindow" in custom:
+        if type(custom["autoCompactWindow"]) is not int:
+            raise ValueError("A top-level autoCompactWindow must be numeric")
         for name, row in model_settings.items():
             row["autoCompactWindow"] = checked_window(name, custom["autoCompactWindow"])
     for name, row in custom_models.items():
+        row = dict(row)
         if "autoCompactWindow" in row:
-            checked_window(name, row["autoCompactWindow"])
+            row["autoCompactWindow"] = checked_window(name, row["autoCompactWindow"])
         model_settings[name] = {**model_settings.get(name, {}), **row}
     if model_settings or "modelSettings" in base or "modelSettings" in custom:
         result["modelSettings"] = model_settings

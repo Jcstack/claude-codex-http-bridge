@@ -135,7 +135,7 @@ def run(claude, *, bare=False):
         custom = root / "custom.json"
         custom.write_text(json.dumps({"model": MODEL, "permissions": {"deny": ["Bash"]},
             "hooks": {"UserPromptSubmit": [hook_entry("custom-hook")]},
-            "modelSettings": {MODEL: {"autoCompactWindow": 300000, "effortLevel": "high"}},
+            "modelSettings": {MODEL: {"autoCompactWindow": "auto" if bare else 300000, "effortLevel": "high"}},
             "env": {"FIXTURE_THEME": "blue"}}), encoding="utf-8")
         env = isolated_environment(root)
         env.update(CLAUDE_CONFIG_DIR=str(config), ANTHROPIC_BASE_URL=urls[1], ANTHROPIC_AUTH_TOKEN=TOKEN,
@@ -178,7 +178,8 @@ def run(claude, *, bare=False):
                          and settings["env"]["ANTHROPIC_AUTH_TOKEN"] == TOKEN
                          and "ANTHROPIC_AUTH_TOKEN" not in client_env
                          and settings["env"]["FIXTURE_THEME"] == "blue"
-                         and settings["modelSettings"][MODEL] == {"autoCompactWindow": 300000, "effortLevel": "high"}
+                         and settings["modelSettings"][MODEL] == {"autoCompactWindow": 400000 if bare else 300000,
+                                                                  "effortLevel": "high"}
                          and len(settings["hooks"]["UserPromptSubmit"]) == 2)
             process = subprocess.run(command, env=client_env, cwd=work, capture_output=True, text=True, timeout=60)
             try:

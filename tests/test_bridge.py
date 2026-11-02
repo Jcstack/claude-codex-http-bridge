@@ -710,10 +710,13 @@ Model ID: `gpt-6.1-sol`
         global_window = launcher.compose_launch_settings(base, {"autoCompactWindow": 200000})
         self.assertEqual(global_window["modelSettings"]["fixture-a"]["autoCompactWindow"], 200000)
         self.assertEqual(global_window["modelSettings"]["fixture-b"]["autoCompactWindow"], 200000)
+        auto = launcher.compose_launch_settings(base, {"modelSettings": {"fixture-a": {"autoCompactWindow": "auto"}}})
+        self.assertEqual(auto["modelSettings"]["fixture-a"]["autoCompactWindow"], 500000)
         for override in ({"autoCompactWindow": 400000}, {"autoCompactWindow": "auto"},
                          {"autoCompactWindow": 99999},
                          {"modelSettings": {"fixture-a": {"autoCompactWindow": 500001}}},
                          {"modelSettings": {"future-model": {"autoCompactWindow": 100000}}},
+                         {"modelSettings": {"future-model": {"autoCompactWindow": "auto"}}},
                          {"hooks": {"PostToolUse": None}}):
             with self.subTest(override=override), self.assertRaises(ValueError):
                 launcher.compose_launch_settings(base, override)
