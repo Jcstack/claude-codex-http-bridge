@@ -31,6 +31,8 @@ workspace ID alone is not enough to bind a quota result to one person. This is a
 fail-closed compatibility limitation: the local gate remains in place until
 the identity is available. A monitor already running older code retains that
 code until safely restarted; changing its source file alone does not reload it.
+The local monitor source has been updated, but the existing monitor process
+was deliberately left running on its previous code.
 
 After reading usage, the monitor revalidates the selected identity, the
 PID-owned origin listener and the current quota-only restriction. Under the

@@ -21,8 +21,13 @@ checks, so a change away and back between observations is not excluded.
 When the bridge person is known but the native person is unavailable, the
 fixed selected-bridge endpoint remains the fallback. If the bridge person is
 unknown, quota display and automatic stale-cooldown reset remain unavailable
-instead of assuming two accounts are the same. These identity checks are under
-test and are not yet installed in the current local helper or monitor.
+instead of assuming two accounts are the same. The [three-platform identity
+gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41534034405)
+passed synthetic account, race and detached-helper controls. The local helper
+and monitor source were installed with private rollback copies; isolated
+imports and a same-account read-only quota check passed. New helper processes
+and on-demand reconciliation use the checks, but the existing long-running
+monitor was not restarted and continues using the code it already loaded.
 
 The earlier quota refresh helper and its native app-server inherited the full
 parent environment. A source change restricts both to operating-system,
