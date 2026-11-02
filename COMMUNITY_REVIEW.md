@@ -194,3 +194,32 @@ and [OpenAI](https://developers.openai.com/api/reference/go/resources/responses)
 specifications motivate the independent candidate and its negative controls;
 the private Codex backend, client/plugin behavior and provider cache effects
 still need verification before activation. See [the compatibility record](COMPATIBILITY.md).
+
+## Process birth checks and cost, 2026-11-02
+
+The managed ingress currently checks the listener's PID and port before
+forwarding a private key. A reused PID and port can still represent a different
+process; Python controller checks already include a creation identity. An
+isolated [benchmark](tests/bench_process_identity.py) measured one disposable
+listener on this macOS host: across 12 samples, the median listener-owner
+lookup was 42.447 ms, an in-process Python/libproc identity check was 0.155 ms,
+and starting a separate isolated Python identity verifier was 38.827 ms. A
+different synthetic identity was rejected. These are three separate checks,
+not a network latency or throughput benchmark, and the timings do not predict
+other machines. The fixture passed no user credentials and contacted no model.
+
+Apple's [libproc source](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)
+uses `proc_pidinfo` and `proc_pidpath`; Windows documents [process creation
+times](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)
+and [executable paths](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew).
+Linux exposes process start information through [procfs](https://www.kernel.org/doc/html/latest/filesystems/proc.html).
+These APIs motivate a native per-request candidate rather than assuming that a
+separate interpreter is free. A macOS C binding introduces a compiler and
+cross-compilation requirement; a pure-Go dynamic binding would introduce a
+new dependency. The actively maintained [purego project](https://github.com/ebitengine/purego)
+had an open [ARM64 by-value struct ABI report](https://github.com/ebitengine/purego/issues/544)
+and an [overhead discussion](https://github.com/ebitengine/purego/issues/399)
+when checked. Those reports do not establish a defect in calls that pass only
+pointers. Neither option is approved for production without platform-specific
+negative tests, an audit of the precise calls, and a way to migrate the
+already-running ingress without interrupting its streams.

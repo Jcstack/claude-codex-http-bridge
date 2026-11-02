@@ -29,6 +29,8 @@ jobs:
           python -m pip --isolated install --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r requirements-capabilities.lock
       - name: Check native protocols, privacy and window policy without accounts
         run: python -m unittest discover -s tests -v
+      - name: Measure isolated listener and process identity checks
+        run: python tests/bench_process_identity.py --samples 12
       - name: Observe locked MCP SDK transparency with synthetic inputs
         run: python tests/probe_mcp_sdk_transparency.py
       - name: Audit public capability pins against OSV
