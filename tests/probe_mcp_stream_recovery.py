@@ -85,7 +85,8 @@ class McpHandler(BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.get_count += 1
             number = self.server.get_count
-            reject = self.server.disconnect_mode and number in (2, 3)
+            reject = (self.server.disconnect_mode and number >= 2
+                      and (number in (2, 3) or self.server.request_notification))
             if reject:
                 self.server.failed_retries += 1
                 if self.server.failed_retries == 2:
@@ -126,6 +127,8 @@ class McpHandler(BaseHTTPRequestHandler):
             with self.server.lock:
                 if events in self.server.streams:
                     self.server.streams.remove(events)
+            if number == 1:
+                self.server.first_stream_closed.set()
 
 
 class ModelHandler(BaseHTTPRequestHandler):
@@ -148,13 +151,13 @@ class ModelHandler(BaseHTTPRequestHandler):
             server.initial_old_offered = OLD in names
             server.initial_stream_seen = server.mcp.stream_open.wait(12)
             name, text = OLD, ""
-        elif not server.new_called and NEW in names:
-            server.new_called = True
-            name, text = NEW, ""
         elif (server.request_notification and server.mcp.changed.is_set()
               and not server.synthetic_refresh_called and REFRESH in names):
             server.synthetic_refresh_called = True
             name, text = REFRESH, ""
+        elif not server.new_called and NEW in names:
+            server.new_called = True
+            name, text = NEW, ""
         else:
             name, text = None, "DONE" if server.new_called else "REFRESH_PENDING"
         calling = name is not None
@@ -195,6 +198,7 @@ def run_case(claude, disconnect_mode, request_notification=False):
         mcp.request_notification, mcp.request_notification_sent = request_notification, False
         mcp.calls, mcp.streams, mcp.lock = [], [], threading.Lock()
         mcp.changed, mcp.stream_open, mcp.retries_seen = threading.Event(), threading.Event(), threading.Event()
+        mcp.first_stream_closed = threading.Event()
         mcp.transition_started, mcp.stopping = threading.Event(), threading.Event()
         mcp.notification_queued = False
 
@@ -203,6 +207,7 @@ def run_case(claude, disconnect_mode, request_notification=False):
                 with mcp.lock:
                     for stream in list(mcp.streams):
                         stream.put(None)
+                mcp.first_stream_closed.wait(5)
                 mcp.retries_seen.wait(20)
             mcp.changed.set()
             notice = {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
@@ -236,11 +241,12 @@ def run_case(claude, disconnect_mode, request_notification=False):
                    "--permission-mode", "dontAsk", "--model", MODEL, "--tools", "", "--allowedTools", ",".join([OLD, NEW, REFRESH]),
                    "--output-format", "json", "--max-turns", "8"]
         try:
-            completed = run_dynamic_client(command, work, env, marker, delay=0.5, forwarded_timeout=24)
+            completed = run_dynamic_client(command, work, env, marker, delay=0.5, forwarded_timeout=30)
             expected_calls = ["lookup", "refresh", "lookup_extra"] if request_notification else ["lookup", "lookup_extra"]
             result = {"synthetic_only": True, "http_mcp": True, "disconnect_mode": disconnect_mode,
                       "request_related_notification": request_notification,
                       "initial_tool_offered": model.initial_old_offered, "initial_event_stream_seen": model.initial_stream_seen,
+                      "initial_event_stream_closed": mcp.first_stream_closed.is_set(),
                       "old_tool_called": bool(mcp.calls and mcp.calls[0] == "lookup"), "event_stream_gets": mcp.get_count,
                       "failed_retries": mcp.failed_retries, "list_requests": mcp.list_count,
                       "notification_queued_on_stream": mcp.notification_queued,
@@ -249,14 +255,15 @@ def run_case(claude, disconnect_mode, request_notification=False):
                       "new_tool_offered": model.new_offered, "new_tool_called": mcp.calls == expected_calls,
                       "completed": completed}
             if not (model.initial_old_offered and model.initial_stream_seen and result["old_tool_called"]
-                    and marker.exists() and (not disconnect_mode or mcp.failed_retries == 2)):
+                    and marker.exists() and (not disconnect_mode or
+                        (mcp.first_stream_closed.is_set() and mcp.failed_retries >= 2))):
                 print(json.dumps(result, sort_keys=True), flush=True)
                 raise RuntimeError("Synthetic HTTP MCP control was not fully exercised")
             if not disconnect_mode and not (mcp.notification_queued and model.new_offered
                                             and result["new_tool_called"] and completed):
                 print(json.dumps(result, sort_keys=True), flush=True)
                 raise RuntimeError("Healthy synthetic HTTP MCP notification control failed")
-            if request_notification and not (mcp.request_notification_sent and model.new_offered
+            if request_notification and not (not mcp.notification_queued and mcp.request_notification_sent and model.new_offered
                                              and result["new_tool_called"] and completed):
                 print(json.dumps(result, sort_keys=True), flush=True)
                 raise RuntimeError("Synthetic request-related notification did not refresh the client")
