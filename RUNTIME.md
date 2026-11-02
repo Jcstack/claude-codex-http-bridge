@@ -244,6 +244,19 @@ checks the legacy listener PID after connecting, before sending the legacy key.
 Frontend credentials cannot use the guard route, and neither route exposes the
 upstream management API.
 
+The repository also contains a source candidate that checks the original
+process's creation time and executable identity before each new origin
+connection receives any HTTP bytes. The controller writes a private,
+generation-scoped identity record before publishing the unchanged origin
+manifest, so an old ingress can continue to use that manifest. A macOS build
+without cgo refuses the identity-capable configuration instead of silently
+skipping the check. Existing ingresses keep their original behavior until the
+ingress process itself is replaced; updating the controller or translator
+alone does not enable this protection. The candidate is covered by isolated
+synthetic recovery and stream tests, not an actual machine reboot or PID reuse.
+Process and listener checks narrow risk but are not a proof against every
+same-user race or socket inheritance scenario.
+
 Runtime keys, certificates, configs and logs stay under the private installation
 root, with POSIX private modes or current-user NTFS ACLs. Per-launch settings
 carry the gateway and CA configuration so detached sessions can load them;

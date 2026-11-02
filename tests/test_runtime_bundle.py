@@ -8,9 +8,11 @@ import tempfile
 import unittest
 from contextlib import nullcontext, redirect_stdout
 import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import accounts
+import api_profile
 import launcher
 import quota_recovery
 import rolling_runtime
@@ -38,6 +40,64 @@ class BundleTests(unittest.TestCase):
                      patch.object(rolling_runtime, "get_json", side_effect=[origin, frontend]):
                     with self.assertRaisesRegex(RuntimeError, "catalog"):
                         rolling_runtime.preflight_routes(root, value, {"gpt-fixture": {}})
+
+    def test_origin_identity_sidecars_are_immutable_and_generation_scoped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base_runtime = root / "runtime"; runtime_bundle.private_dir(base_runtime)
+            session = base_runtime / "session-fixture"; runtime_bundle.private_dir(session)
+            runtime = root / "runtime-managed"; runtime_bundle.private_dir(runtime)
+            for name, value in (("key", "a" * 64), ("config.yaml", "synthetic"), ("proxy.log", "")):
+                api_profile.write_private(session / name, value)
+            state = {"pid": 123, "port": 12345, "session": session.name, "process_identity": "b" * 64}
+            with patch.object(launcher, "state_is_live", return_value=True):
+                rolling_runtime.origin_manifest(root, runtime, base_runtime, state)
+                old_manifest = rolling_runtime.read(runtime / "origin.json")
+                old_owner_path = runtime / ("owner-" + old_manifest["generation"] + ".json")
+                old_owner = rolling_runtime.read(old_owner_path)
+                self.assertEqual(old_owner, {"generation": old_manifest["generation"], "pid": 123,
+                                             "port": 12345, "identity": "b" * 64})
+                self.assertNotIn("a" * 64, json.dumps(old_owner))
+                rolling_runtime.origin_manifest(root, runtime, base_runtime, state)
+                self.assertEqual(rolling_runtime.read(runtime / "origin.json"), old_manifest)
+                rolling_runtime.origin_manifest(root, runtime, base_runtime, {**state, "process_identity": "c" * 64})
+                newer = rolling_runtime.read(runtime / "origin.json")
+                self.assertNotEqual(newer["generation"], old_manifest["generation"])
+                self.assertEqual(rolling_runtime.read(old_owner_path), old_owner)
+                newer_owner = runtime / ("owner-" + newer["generation"] + ".json")
+                rolling_runtime.write(newer_owner, {"tampered": True})
+                with self.assertRaisesRegex(RuntimeError, "identity changed"):
+                    rolling_runtime.origin_manifest(root, runtime, base_runtime, {**state, "process_identity": "c" * 64})
+                self.assertEqual(rolling_runtime.read(runtime / "origin.json"), newer)
+
+    def test_origin_identity_is_required_before_key_publication(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base_runtime = root / "runtime"; runtime_bundle.private_dir(base_runtime)
+            session = base_runtime / "session-fixture"; runtime_bundle.private_dir(session)
+            runtime = root / "runtime-managed"; runtime_bundle.private_dir(runtime)
+            for name, value in (("key", "a" * 64), ("config.yaml", "synthetic"), ("proxy.log", "")):
+                api_profile.write_private(session / name, value)
+            state = {"pid": 123, "port": 12345, "session": session.name}
+            with patch.object(launcher, "state_is_live", return_value=True):
+                with self.assertRaisesRegex(RuntimeError, "identity is required"):
+                    rolling_runtime.origin_manifest(root, runtime, base_runtime, state)
+            self.assertFalse((runtime / "origin.json").exists())
+            self.assertFalse(list(runtime.glob("origin-*-key")))
+
+    def test_identity_source_requires_a_supporting_ingress_binary(self):
+        root = Path("synthetic-root")
+        manifest = {"source": {"files": {"gateway/process_identity.go": "synthetic"}}}
+        with patch.object(runtime_bundle, "safe_file"), \
+             patch.object(rolling_runtime.subprocess, "run", return_value=SimpleNamespace(returncode=1)) as run:
+            with self.assertRaisesRegex(RuntimeError, "cannot verify"):
+                rolling_runtime.require_ingress_identity(root / "fixture", manifest, root)
+            run.assert_called_once()
+        with patch.object(runtime_bundle, "safe_file"), \
+             patch.object(rolling_runtime.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+            rolling_runtime.require_ingress_identity(root / "fixture", manifest, root)
+        with patch.object(rolling_runtime.subprocess, "run", side_effect=AssertionError("legacy binary was executed")):
+            rolling_runtime.require_ingress_identity(root / "old-fixture", {"source": {"files": {}}}, root)
 
     def test_managed_process_environment_excludes_unrelated_shell_secrets(self):
         sentinel = "PRIVATE_FIXTURE_SENTINEL"

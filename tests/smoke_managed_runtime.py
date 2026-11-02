@@ -322,6 +322,20 @@ def main():
                     assert len(Upstream.requests) == count
                     rolling_runtime.write(runtime / "origin.json", origin)
                     stream(value["port"], key, request, ca_file=ca)
+                    # A reused PID/port with a different birth/executable stamp
+                    # must be refused even when listener ownership still matches.
+                    owner_path = runtime / ("owner-" + origin["generation"] + ".json")
+                    owner = rolling_runtime.read(owner_path)
+                    count = len(Upstream.requests)
+                    try:
+                        rolling_runtime.write(owner_path, {**owner, "identity": "0" * 64})
+                        try: stream(value["port"], key, request, ca_file=ca)
+                        except RuntimeError: pass
+                        else: raise AssertionError("Changed origin process identity was accepted")
+                        assert len(Upstream.requests) == count
+                    finally:
+                        rolling_runtime.write(owner_path, owner)
+                    stream(value["port"], key, request, ca_file=ca)
                     # A relay must not retain a second weekly gate after its
                     # authenticated origin has already recovered or changed account.
                     Upstream.quota_mode = True
@@ -341,6 +355,7 @@ def main():
                         "old_stream_drained": "pass", "active_stop_refused": "pass", "legacy_service_preserved": "pass",
                         "same_session_key_stable_different_sessions_distinct": "pass",
                         "legacy_key_not_given_to_translator": "pass", "origin_pid_checked_before_credentials": "pass",
+                        "origin_birth_and_executable_checked_before_credentials": "pass",
                         "origin_quota_preserved_and_early_reset_retried": "pass",
                         "same_claude_process_after_backend_reload": "pass" if args.claude_client else "not-run",
                         "background_tls_with_warm_wrong_supervisor": "pass" if args.background_client else "not-run"}))

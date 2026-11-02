@@ -34,8 +34,11 @@ birth verification to each origin request in the already-running Go ingress;
 that hop still checks PID and port before sending the localhost key.
 Linux controller parsing reads process-stat data as bytes before extracting the
 ASCII start tick, so a kernel-truncated multibyte process name cannot by itself
-make an otherwise valid identity unavailable. Cross-platform native gateway
-checks remain experimental and are not enabled by this parser fix.
+make an otherwise valid identity unavailable. A cross-platform native gateway
+candidate adds a private birth/executable identity check before origin bytes
+are sent, with fail-closed handling when the native implementation is missing.
+It is not enabled in the already-running ingress by a controller or translator
+update; see the candidate and migration limitations in [RUNTIME.md](RUNTIME.md).
 
 New origin processes receive an allowlist of operating-system settings and
 explicitly configured HTTP/SOCKS proxy variables, rather than the full shell

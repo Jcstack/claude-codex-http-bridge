@@ -45,14 +45,15 @@ type backend struct {
 }
 
 type gateway struct {
-	mu           sync.Mutex
-	root         string
-	manifest     string
-	key          string
-	current      string
-	backends     map[string]*backend
-	nativeActive int
-	checkOwner   func(context.Context, int, int) error
+	mu              sync.Mutex
+	root            string
+	manifest        string
+	key             string
+	current         string
+	backends        map[string]*backend
+	nativeActive    int
+	checkOwner      func(context.Context, int, int) error
+	requireIdentity bool
 }
 
 func privateFile(root, path string, limit int64) ([]byte, error) {
@@ -212,6 +213,12 @@ func (g *gateway) acquire() (*backend, error) {
 					conn.Close()
 					return nil, err
 				}
+				if g.requireIdentity {
+					if err = g.checkOriginIdentity(cfg); err != nil {
+						conn.Close()
+						return nil, err
+					}
+				}
 				return conn, nil
 			}}
 		backendKey := strings.TrimSpace(string(key))
@@ -348,8 +355,15 @@ func main() {
 	originManifest := flag.String("origin-backend-file", "", "Optional private legacy origin manifest")
 	originKey := flag.String("origin-key-file", "", "Separate private origin route key")
 	initTLS := flag.Bool("init-tls", false, "Create/renew private local TLS identity, then exit")
+	checkIdentity := flag.Bool("check-origin-identity", false, "Check native origin identity support, then exit")
 	useTLS := flag.Bool("tls", false, "Serve TLS using the private local identity")
 	flag.Parse()
+	if *checkIdentity {
+		if !identityAvailable() {
+			log.Fatal("native origin identity verification is unavailable")
+		}
+		return
+	}
 	if *initTLS {
 		if err := initializeTLS(*root); err != nil {
 			log.Fatal(err)
@@ -370,10 +384,15 @@ func main() {
 		if *originManifest == "" || *originKey == "" {
 			log.Fatal("both private origin options are required")
 		}
-		origin, err = newGateway(*root, *originManifest, *originKey)
+		if !identityAvailable() {
+			log.Fatal("native origin identity verification is unavailable")
+		}
+		originGateway, err := newGateway(*root, *originManifest, *originKey)
 		if err != nil {
 			log.Fatal(err)
 		}
+		originGateway.requireIdentity = true
+		origin = originGateway
 	}
 	server := &http.Server{Addr: *listen, Handler: withOrigin(g, origin), ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20, ErrorLog: log.New(io.Discard, "", 0)}

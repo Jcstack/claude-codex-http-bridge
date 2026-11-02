@@ -87,8 +87,16 @@ jobs:
           cd ../gateway
           go test -timeout 60s ./...
           go build -o ../bridge-ingress .
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            CGO_ENABLED=0 go build -o ../bridge-ingress-nocgo .
+            if ../bridge-ingress-nocgo --check-origin-identity >/dev/null 2>&1; then
+              echo "A macOS ingress without native process identity must not be accepted" >&2
+              exit 1
+            fi
+          fi
           cd ..
           python runtime_bundle.py --proxy "${{ matrix.binary }}" --ingress bridge-ingress --output runtime-bundle
+          python -c 'import os, pathlib, subprocess; binary = pathlib.Path("runtime-bundle") / ("bridge-ingress.exe" if os.name == "nt" else "bridge-ingress"); subprocess.run([str(binary.resolve()), "--check-origin-identity"], check=True, timeout=10)'
       - name: Check Anthropic-to-Responses contracts without credentials
         shell: bash
         run: |

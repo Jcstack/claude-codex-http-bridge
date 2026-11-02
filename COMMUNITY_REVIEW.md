@@ -219,12 +219,14 @@ matched the Python controller's identity for an owned process whose executable
 path contains Unicode on macOS. It rejected a different process, changed birth time,
 changed executable and an exited process. Across 100 local batches of 32 checks,
 the median batch-average was 0.002523 ms per check and p95 was 0.004921 ms.
-The check is not integrated into the
-gateway, the negative controls do not reproduce an actual reused PID, and the
+The separate experiment does not reproduce an actual reused PID, and the
 measurement is not an end-to-end request or portability guarantee.
-Linux procfs and Windows API variants cross-compiled locally; their native
-runtime behavior and additional path-encoding cases still require their own
-platform tests. Windows uses the same invariant-locale case mapping as
+The Linux, Windows and macOS gateway jobs in [this source run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41442611268)
+also passed the isolated native identity probe. It covered a non-UTF-8 Linux
+executable path, Windows Unicode case mapping, process exit and synthetic
+birth/executable mismatches. The runners covered Linux x86-64, Windows x86-64
+and macOS ARM64; they did not reproduce actual PID reuse or validate every OS
+architecture. Windows uses the same invariant-locale case mapping as
 [Python's `normcase`](https://raw.githubusercontent.com/python/cpython/3.11/Lib/ntpath.py)
 instead of assuming that Go's Unicode case conversion is identical.
 
@@ -240,6 +242,16 @@ new dependency. The actively maintained [purego project](https://github.com/ebit
 had an open [ARM64 by-value struct ABI report](https://github.com/ebitengine/purego/issues/544)
 and an [overhead discussion](https://github.com/ebitengine/purego/issues/399)
 when checked. Those reports do not establish a defect in calls that pass only
-pointers. Neither option is approved for production without platform-specific
-negative tests, an audit of the precise calls, and a way to migrate the
-already-running ingress without interrupting its streams.
+pointers. The source candidate uses the platform-native APIs without the extra
+dependency. The already-running ingress does not gain the check from a source
+or translator update; platform-specific candidate gates and a way to migrate
+that ingress without interrupting its streams remain necessary.
+
+The candidate rejects a missing or altered private identity before sending any
+HTTP bytes to an owned synthetic origin. Local isolation also covered recovery,
+a real Claude client across translator rollback, and in-flight stream drain.
+Five paired local runs with fake origins and highly repetitive 100 KB, 1 MB and
+4 MB payloads had median times of 0.113/0.111, 0.192/0.189 and 0.488/0.484
+seconds for the previous/candidate gateways respectively. These small
+synthetic samples do not measure provider latency, prove an improvement, or
+cover actual PID reuse, all architectures, or live-session ingress migration.

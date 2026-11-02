@@ -8,6 +8,7 @@ No OAuth file or OpenAI project key is copied or changed.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -159,12 +160,26 @@ def origin_manifest(root: Path, runtime: Path, base_runtime: Path, base: dict) -
         raise RuntimeError("Existing Codex service is unavailable; no key was copied")
     key_path = launcher.state_paths(base_runtime, base)[2]
     key = private_key(key_path)
+    stamp = base.get("process_identity")
+    if not isinstance(stamp, str) or not re.fullmatch(r"[a-f0-9]{64}", stamp):
+        raise RuntimeError("Origin process identity is required; no key was published")
     # A fresh immutable identity also avoids reusing a gateway generation when
     # the original listener or its local key changes.
-    identity = hashlib.sha256(f'{base["pid"]}:{base["port"]}:{key}'.encode()).hexdigest()[:24]
+    identity = hashlib.sha256(f'{base["pid"]}:{base["port"]}:{key}:{stamp}'.encode()).hexdigest()[:24]
+    generation = "origin-" + identity
     key_copy = runtime / ("origin-" + identity + "-key")
-    if not key_copy.exists(): api_profile.write_private(key_copy, key + "\n")
-    write(runtime / "origin.json", {"generation": "origin-" + identity, "pid": base["pid"],
+    if key_copy.exists():
+        if not hmac.compare_digest(private_key(key_copy), key):
+            raise RuntimeError("Private origin key changed; no key was published")
+    else:
+        api_profile.write_private(key_copy, key + "\n")
+    owner_path = runtime / ("owner-" + generation + ".json")
+    owner = {"generation": generation, "pid": base["pid"], "port": base["port"], "identity": stamp}
+    if owner_path.exists():
+        if read(owner_path) != owner: raise RuntimeError("Private origin identity changed; no key was published")
+    else:
+        write(owner_path, owner)
+    write(runtime / "origin.json", {"generation": generation, "pid": base["pid"],
                                    "port": base["port"], "key_file": str(key_copy)})
 
 
@@ -298,6 +313,22 @@ def initialize_tls(binary: Path, runtime: Path) -> None:
         raise RuntimeError("Could not initialize private loopback TLS identity")
 
 
+def require_ingress_identity(binary: Path, manifest: dict, runtime: Path) -> None:
+    """Reject an identity-capable source bundle built without native support."""
+    source = manifest.get("source")
+    files = source.get("files") if isinstance(source, dict) else None
+    if not isinstance(files, dict): raise RuntimeError("Invalid runtime source metadata")
+    if "gateway/process_identity.go" not in files: return
+    runtime_bundle.safe_file(binary)
+    try:
+        result = subprocess.run([str(binary), "--check-origin-identity"], capture_output=True, timeout=10,
+                                cwd=runtime, env=process_environment())
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Selected ingress cannot verify origin identity") from None
+    if result.returncode:
+        raise RuntimeError("Selected ingress cannot verify origin identity")
+
+
 def restore_ingress(root: Path, runtime: Path, value: dict, models: dict,
                     bundle: Path, manifest: dict, identity: str, before_publish=None) -> dict:
     """Restore a dead ingress at its original address without trusting stale PIDs.
@@ -384,6 +415,7 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
         bundle, manifest, identity = chosen
         runtime = directory(root)
         runtime_bundle.private_dir(runtime / "empty-auth")
+        require_ingress_identity(bundle / manifest["binaries"]["ingress"]["file"], manifest, runtime)
         value = state(root)
         owners = launcher.listener_pids(value["port"]) if value is not None else set()
         if value is not None and owners and owners != {value["pid"]}:

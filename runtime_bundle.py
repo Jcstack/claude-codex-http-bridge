@@ -55,7 +55,9 @@ def source_lock() -> dict:
     if saved.exists():
         return json.loads(saved.read_text())
     files = [SOURCE / "upstream" / "patches" / name for name in PATCHES]
-    files += [SOURCE / "gateway" / name for name in ("go.mod", "main.go", "tls.go")]
+    files += [SOURCE / "gateway" / name for name in ("go.mod", "main.go", "tls.go", "process_identity.go",
+              "process_identity_darwin.go", "process_identity_darwin_nocgo.go", "process_identity_linux.go",
+              "process_identity_windows.go", "process_identity_other.go")]
     return {"upstream": UPSTREAM, "files": {str(path.relative_to(SOURCE)).replace(os.sep, "/"): file_hash(path) for path in files}}
 
 
