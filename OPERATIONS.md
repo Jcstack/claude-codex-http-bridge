@@ -236,6 +236,14 @@ origin, ingress, selected runtime and rollback record. These targeted file
 updates are not an atomic general-purpose controller installer. See
 [CACHE_AUDIT.md](CACHE_AUDIT.md) for interpretation and limits.
 
+The offline MCP definition comparison passed its [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41485153990).
+The local module was published before its launcher entry, with a private backup
+and account/service locks; the origin and ingress state stayed unchanged. A
+synthetic installed-command check verified the comparison without starting a
+service or modifying the input files. The command needs a separately supplied
+snapshot, checks only retained descriptions and input schemas, and does not
+prevent a stale call. See [MCP_NAMING.md](MCP_NAMING.md#offline-definition-comparison).
+
 The installed diagnostics now retain a managed backend when its only recognized
 in-window event is an incomplete-stream sentinel. They also expose its coverage
 when oversized lines prevent classification, even without a recognized event.

@@ -390,3 +390,9 @@ future record format can be omitted, so no comparable records do not prove
 that the session has no retained definitions. Session input is limited
 to 256 MiB and each JSONL record to 8 MiB; the snapshot limit is 16 MiB. This
 is not a guard and does not prevent a stale tool call.
+
+The [dedicated three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41485153990)
+passed with the locked client and synthetic inputs. The new module and launcher
+were then installed locally, in that order. A private launcher backup was retained,
+and an installed-command synthetic check passed without restarting the origin,
+ingress or any session. This targeted update is not a general atomic installer.
