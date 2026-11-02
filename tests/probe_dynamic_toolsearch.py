@@ -249,9 +249,17 @@ def main():
                 first_instructions = raw_json_field(first_raw, "instructions")
                 first_input = raw_json_array_items(raw_json_field(first_raw, "input"))
                 last_input = raw_json_array_items(raw_json_field(last_raw, "input"))
+                input_arrays = [raw_json_array_items(raw_json_field(raw, "input")) for raw, _ in server.captured]
                 result.update(provider_cache_not_tested=True,
                     cache_key_stable=isinstance(cache_key, str) and bool(cache_key)
                         and all(body.get("prompt_cache_key") == cache_key for _, body in server.captured),
+                    all_tools_identical=first_tools is not None
+                        and all(raw_json_field(raw, "tools") == first_tools for raw, _ in server.captured),
+                    all_instructions_identical=first_instructions is not None
+                        and all(raw_json_field(raw, "instructions") == first_instructions for raw, _ in server.captured),
+                    all_input_transitions_append_only=all(
+                        older is not None and newer is not None and newer[:len(older)] == older
+                        for older, newer in zip(input_arrays, input_arrays[1:])),
                     first_and_last_tools_identical=first_tools is not None
                         and first_tools == raw_json_field(last_raw, "tools"),
                     first_and_last_instructions_identical=first_instructions is not None
@@ -267,7 +275,8 @@ def main():
             if args.require_discovery and not (completed and server.new_reference and result["new_original_called"]):
                 raise RuntimeError("Dynamic synthetic tool was not found and called")
             if args.require_prefix and not all(result.get(field) is True for field in (
-                    "provider_cache_not_tested", "cache_key_stable", "first_and_last_tools_identical",
+                    "provider_cache_not_tested", "cache_key_stable", "all_tools_identical",
+                    "all_instructions_identical", "all_input_transitions_append_only", "first_and_last_tools_identical",
                     "first_and_last_instructions_identical", "first_input_prefix_in_last")):
                 raise RuntimeError("Synthetic translator cache structure changed or was not captured")
         finally:

@@ -140,10 +140,10 @@ The fake model called the new tool only after the matching reference or its
 translated `additional_tools` entry appeared. The same exact and keyword
 controls also passed locally through a disposable instance of the selected
 translator configured for an API-compatible fake Responses upstream. This is
-not the Codex subscription executor. Within
-those samples, the request cache key stayed constant, the first and last tool
-and instruction fields were byte-identical, and the first input was a prefix
-of the last. This is structural evidence, not a provider cache hit.
+not the Codex subscription executor. Within those samples, the request cache
+key stayed constant, the tool and instruction fields were byte-identical across
+every request, and each input retained the previous input as a prefix. This is
+structural evidence, not a provider cache hit.
 
 These checks cover eventual discovery for one synthetic stdio server; they do
 not test interactive mode, arbitrary natural-language ranking, real plugins,
