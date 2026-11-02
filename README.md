@@ -36,7 +36,7 @@ claude-codex usage
 claude-codex --model gpt-6.1-sol
 ```
 
-Use `/model` in a session to select a dynamically discovered model and `/effort` to adjust reasoning effort. The local proxy continues running for `/background`; run `claude-codex bridge stop` after background tasks finish. The existing `claude` command retains its original account and settings. If a `claude-codex` command already exists, the installer stops; use `./install.sh --replace-command` if you intend to replace it with this repository's command. OAuth files and runtime logs stay in the private local installation and are excluded from Git.
+Use `/model` in a session to select a dynamically discovered model and `/effort` to adjust reasoning effort. The local proxy continues running for `/background`; run `claude-codex bridge stop` after background tasks finish. The existing `claude` command retains its original account and settings. If a different `claude-codex` command already exists, the installer refuses before writing the installation; use `./install.sh --replace-command` only if you intend to replace it. An identical managed wrapper can be reused. OAuth files and runtime logs stay in the private local installation and are excluded from Git.
 
 Subagents follow Claude Code's model selection rules by default. Unless configured separately, the `opus`, `sonnet`, `haiku`, and `fable` compatibility aliases all refer to the GPT model selected at startup. A newly launched session can use a different subagent default or alias mapping, for example:
 
@@ -92,7 +92,9 @@ claude-codex usage
 
 The installer downloads the pinned [CLIProxyAPI v8.0.46 release](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.46), verifies its published SHA-256 digest, and saves it under `~/.local/share/claude-codex-http-bridge/` on macOS/Linux or `%LOCALAPPDATA%\claude-codex-http-bridge\` on Windows. It generates a random local key and a private config on your own machine. `codex-login` opens the OAuth flow and stores the resulting credential only in the installation's private `auth/` directory. The Windows installer adds its private `bin` directory to the current user's PATH; open a new terminal to use the command.
 
-If the `claude-codex` command already exists at the install location, the installer stops without changing it. Use `--replace-command` only when you want the new wrapper to replace that command. It does not copy or remove any existing OAuth credential.
+If a different `claude-codex` command already exists at the install location, a preflight rejects the conflict before writing installation files. Use `--replace-command` only when you want the new wrapper to replace that command. It does not copy or remove any existing OAuth credential. A matching managed wrapper can be reused.
+
+Reinstalling controller source is not yet a multi-file atomic update and has not been proven safe while other launches or sessions depend on the installation. Wait until those sessions and background tasks finish before reinstalling source. The separately reviewed `claude-codex bridge upgrade BUNDLE` can roll the managed backend while admitted streams drain, but it does not update the controller scripts or replace a running ingress.
 
 For an isolated installation, pass `--root /private/path --bin-dir /private/path` to `install.sh` on POSIX, or `--root C:\private\path` to `install.py` on Windows.
 

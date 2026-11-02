@@ -374,6 +374,38 @@ Model ID: `gpt-6.1-sol`
                 self.assertEqual(root.stat().st_mode & 0o777, 0o755)
             self.assertEqual((root / "user-file").read_text(), "keep")
 
+    def test_installer_checks_command_conflict_before_installation_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "existing"
+            bin_dir = root / "bin"
+            bin_dir.mkdir(parents=True)
+            api_profile.write_private(root / install.INSTALL_MARKER, "claude-codex-http-bridge\n")
+            api_profile.write_private(root / "launcher.py", "existing controller")
+            command, _ = install.command_spec(root, bin_dir)
+            api_profile.write_private(command, "unrelated command")
+            with patch.object(sys, "argv", ["install.py", "--root", str(root), "--bin-dir", str(bin_dir)]), \
+                    patch.object(install, "install_proxy") as install_proxy:
+                with self.assertRaisesRegex(RuntimeError, "Existing"):
+                    install.main()
+            self.assertEqual((root / "launcher.py").read_text(), "existing controller")
+            self.assertEqual(command.read_text(), "unrelated command")
+            self.assertFalse((root / "auth").exists())
+            self.assertFalse((root / "runtime-source-lock.json").exists())
+            install_proxy.assert_not_called()
+
+    def test_installer_preflight_accepts_matching_or_explicit_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "install"
+            bin_dir = root / "bin"
+            bin_dir.mkdir(parents=True)
+            command, wrapper = install.command_spec(root, bin_dir)
+            command.write_bytes(wrapper)
+            self.assertTrue(install.preflight_command(root, bin_dir, False)[2])
+            command.write_bytes(b"other command")
+            self.assertFalse(install.preflight_command(root, bin_dir, True)[2])
+            with self.assertRaisesRegex(RuntimeError, "Existing"):
+                install.preflight_command(root, bin_dir, False)
+
     def test_installer_rejects_bad_release_hash(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "bad.tar.gz"

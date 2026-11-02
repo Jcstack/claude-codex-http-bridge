@@ -166,10 +166,12 @@ def install_config(root: Path) -> None:
     write_file(config, text.encode(), 0o600)
 
 
-def install_command(root: Path, bin_dir: Path, replace: bool) -> None:
+def command_spec(root: Path, bin_dir: Path) -> tuple[Path, bytes]:
+    """Build the command bytes without changing either installation path."""
     if bin_dir.is_symlink():
         raise RuntimeError(f"Refusing symlinked command directory: {bin_dir}")
-    bin_dir.mkdir(parents=True, exist_ok=True)
+    if bin_dir.exists() and not bin_dir.is_dir():
+        raise RuntimeError(f"Command directory is not a directory: {bin_dir}")
     if platform.system() == "Windows":
         command = bin_dir / "claude-codex.cmd"
         for path in (root, Path(sys.executable)):
@@ -193,12 +195,27 @@ def install_command(root: Path, bin_dir: Path, replace: bool) -> None:
             f"export CLAUDE_CODEX_BRIDGE_HOME={shlex.quote(str(root))}\n"
             f"exec {shlex.quote(str(root / 'run-claude-codex.sh'))} \"$@\"\n"
         ).encode()
-    if command.exists() or command.is_symlink():
-        if command.is_file() and not command.is_symlink() and command.read_bytes() == wrapper:
-            command.chmod(0o755)
-            return
-        if not replace:
-            raise RuntimeError(f"Existing {command} was not changed; rerun with --replace-command to replace it")
+    return command, wrapper
+
+
+def preflight_command(root: Path, bin_dir: Path, replace: bool) -> tuple[Path, bytes, bool]:
+    """Reject an unrelated command before writing installation files."""
+    command, wrapper = command_spec(root, bin_dir)
+    same = command.is_file() and not command.is_symlink() and command.read_bytes() == wrapper
+    if (command.exists() or command.is_symlink()) and not same and not replace:
+        raise RuntimeError(f"Existing {command} was not changed; rerun with --replace-command to replace it")
+    return command, wrapper, same
+
+
+def install_command(root: Path, bin_dir: Path, replace: bool) -> None:
+    command, wrapper, same = preflight_command(root, bin_dir, replace)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    # Recheck after creating the directory to catch a command installed since
+    # the earlier preflight. This is not a multi-file transaction.
+    command, wrapper, same = preflight_command(root, bin_dir, replace)
+    if same:
+        command.chmod(0o755)
+        return
     write_file(command, wrapper, 0o755)
 
 
@@ -238,6 +255,7 @@ def main() -> None:
                root / "bin" if windows else Path.home() / ".local" / "bin")
     if windows and bin_dir != root / "bin":
         raise RuntimeError("On Windows, the command directory must be ROOT/bin so it stays under the private ACL")
+    preflight_command(root, bin_dir, args.replace_command)
     install_root(root)
     if windows:
         import windows_acl
