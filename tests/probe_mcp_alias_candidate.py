@@ -109,7 +109,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
-def run_dynamic_client(command, work, env, forwarded):
+def run_dynamic_client(command, work, env, forwarded, *, prompt="Use the synthetic fixture tools.", delay=0.1):
     """Use one client and issue another user turn if refresh is still pending."""
     command = list(command)
     command[command.index("--output-format") + 1] = "stream-json"
@@ -133,7 +133,7 @@ def run_dynamic_client(command, work, env, forwarded):
 
     def turn():
         process.stdin.write(json.dumps({"type": "user", "message": {
-            "role": "user", "content": "Use the synthetic fixture tools."}}) + "\n")
+            "role": "user", "content": prompt}}) + "\n")
         process.stdin.flush()
         deadline = time.monotonic() + 20
         while True:
@@ -161,7 +161,7 @@ def run_dynamic_client(command, work, env, forwarded):
             # Forwarding is not an acknowledgement. Bounded later user turns
             # observe when the client actually offers the refreshed tool.
             if attempt:
-                time.sleep(0.1)
+                time.sleep(delay)
         return False
     finally:
         if process.poll() is None:

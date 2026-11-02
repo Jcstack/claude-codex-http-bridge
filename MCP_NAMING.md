@@ -123,6 +123,33 @@ exercise the rejection path and the control fails for review. This is not
 evidence about actual plugins, arbitrary concurrent requests, or an
 already-running user's client.
 
+The MCP [tools specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#list-changed-notification)
+describes list-change notifications for servers that declare that capability;
+notification delivery is not an acknowledgement that an in-flight model
+request was rebuilt. An open [Claude Code issue](https://github.com/anthropics/claude-code/issues/66084)
+reports stale dynamic ToolSearch discovery in an interactive session on an
+older client. It does not establish the result for this installation or for
+noninteractive mode.
+
+On the locked 2.1.316 macOS client, an isolated `stream-json` test enabled
+Claude Code's client-side `ToolSearch` and used a fake Messages endpoint. With
+an intentionally delayed synthetic MCP list, the first new-tool search returned
+no matching reference; a later user turn found the tool and called its original
+name. Both an exact selector and a keyword query were exercised independently.
+The fake model called the new tool only after the matching reference or its
+translated `additional_tools` entry appeared. The same exact and keyword
+controls also passed locally through a disposable instance of the selected
+translator configured for an API-compatible fake Responses upstream. This is
+not the Codex subscription executor. Within
+those samples, the request cache key stayed constant, the first and last tool
+and instruction fields were byte-identical, and the first input was a prefix
+of the last. This is structural evidence, not a provider cache hit.
+
+These checks cover eventual discovery for one synthetic stdio server; they do
+not test interactive mode, arbitrary natural-language ranking, real plugins,
+a real model, or an upstream cache hit. The earlier community report and
+these local observations can coexist.
+
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,
 real plugins, MCP protocol changes, and Windows. The test adapter does not

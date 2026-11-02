@@ -103,6 +103,10 @@ jobs:
         run: python tests/probe_mcp_alias_candidate.py --diagnose-dynamic-race
       - name: Check a removed alias against a stale model request
         run: python tests/probe_mcp_alias_candidate.py --diagnose-removed-tool
+      - name: Discover a changed MCP tool through an exact ToolSearch selector
+        run: python tests/probe_dynamic_toolsearch.py --hold-refresh --require-discovery
+      - name: Discover a changed MCP tool through a keyword ToolSearch query
+        run: python tests/probe_dynamic_toolsearch.py --hold-refresh --natural-query --require-discovery
       - name: Check tool effects across interrupted Messages streams
         run: python tests/probe_claude_stream_safety.py
   gateway:

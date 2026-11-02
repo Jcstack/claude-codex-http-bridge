@@ -108,6 +108,8 @@ jobs:
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
           python tests/probe_toolsearch_cache_batch.py "${{ matrix.binary }}"
           python tests/probe_mcp_alias_gateway.py "${{ matrix.binary }}"
+          python tests/probe_dynamic_toolsearch.py --hold-refresh --require-discovery --require-prefix --translator "${{ matrix.binary }}"
+          python tests/probe_dynamic_toolsearch.py --hold-refresh --natural-query --require-discovery --require-prefix --translator "${{ matrix.binary }}"
           python tests/probe_effort_roundtrip.py "${{ matrix.binary }}"
           python tests/probe_effort_capability_tui.py "${{ matrix.binary }}"
           python tests/probe_effort_rejection_gateway.py "unguarded-${{ matrix.binary }}" --expect-fallback
