@@ -27,6 +27,26 @@ the call. The original pinned translator also returned the synthetic direct
 call and changed strict mode; it forwarded the example field to the fake API,
 which does not prove that a real API would accept the field.
 
+An isolated [real Claude Code client fixture](tests/probe_tool_output_client.py)
+adds an effect-level control on macOS. Its deliberately permissive synthetic
+MCP server declares a string input but records a call even when the fake model
+sends a number. The locked Claude Code 2.1.316 client passed that invalid number
+to the synthetic server with a direct fake Messages endpoint, through the
+locally selected translator, and through the isolated request-guard candidate.
+For the candidate, a separate test-only loopback shim injected `strict: true`
+into the outgoing synthetic tool definition; the fake Responses origin saw the
+flag, but the invalid number still reached the synthetic MCP server. The
+client itself had not sent that flag in the tested MCP request. In corresponding
+controls, a valid string reached the fake server once, while an explicit
+`PreToolUse` denial ran and prevented the invalid call from reaching it.
+
+This is evidence about a permissive fixture and the tested client/translator
+combination, not evidence that a real provider violates strict mode, that a
+real MCP server accepts invalid arguments, or that any user's tool was called.
+Hook denial and schema validation are distinct controls. These local tests do
+not establish behavior for other Claude Code versions, plugin permissions, or
+programmatic caller policies.
+
 The current schema normalizer can also drop an unsupported Unicode regex. With
 `strict: true`, that changes the constraints that the original tool requested.
 The existing ordinary best-effort path and its schema normalization remain
@@ -104,8 +124,12 @@ The [manually dispatched workflow](.github/workflows/tool-contract-observation.y
 builds the isolated candidate from pinned public source on macOS, Linux and
 Windows. The [first three-platform observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41519344980)
 passed the preflight, native-executor and existing tool-contract checks; it did
-not include the subsequently added standalone validator fixture. Passing the
-preflight gate does **not** remove the release blocker.
+not include the subsequently added standalone validator fixture. The [later
+three-platform observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41520836559)
+also passed the separate validator fixture and its dependency checks. On all
+three platforms, the fixture still observed an unknown format being accepted;
+it did not include the subsequently added real-client MCP effect controls.
+Passing the preflight gate does **not** remove the release blocker.
 [A synthetic benchmark fixture](tests/tool_contract_benchmark.go) provides a
 bounded starting point for measuring translation overhead; it is not an
 end-to-end latency or model-quality benchmark.
