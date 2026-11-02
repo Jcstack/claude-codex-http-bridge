@@ -134,3 +134,4 @@
 !.github/workflows/autostart-gate.yml
 !.github/workflows/tool-contract-observation.yml
 !.github/workflows/toolset-sdk-inventory.yml
+!.github/workflows/usage-environment-gate.yml

@@ -20,6 +20,10 @@ import time
 import urllib.error
 import urllib.request
 
+if __name__ == "__main__":
+    # Isolated Python does not put the script directory on sys.path.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import accounts
 
 
@@ -27,6 +31,17 @@ ROOT = Path(__file__).resolve().parent
 CACHE_SECONDS = 300
 RPC_TIMEOUT_SECONDS = 12
 WINDOW_NAMES = {300: "five_hour", 10080: "seven_day"}
+USAGE_ENVIRONMENT = (
+    "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
+    "APPDATA", "LOCALAPPDATA", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+    "CODEX_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+)
+
+
+def usage_environment() -> dict[str, str]:
+    """Preserve native-account and network settings without unrelated secrets."""
+    return {name: os.environ[name] for name in USAGE_ENVIRONMENT if name in os.environ}
 
 
 def _private_json(path: Path) -> dict | None:
@@ -154,7 +169,7 @@ def _rpc_rate_limits() -> dict | None:
     try:
         proc = subprocess.Popen(
             [codex, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1, env=usage_environment(),
         )
     except OSError:
         return None
@@ -314,9 +329,9 @@ def start_refresh(path: Path) -> None:
         options = ({"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows"
                    else {"start_new_session": True})
         subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "refresh", str(path)],
+            [sys.executable, "-I", str(Path(__file__).resolve()), "refresh", str(path)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            **options,
+            env=usage_environment(), **options,
         )
     except OSError:
         lock.unlink(missing_ok=True)

@@ -52,8 +52,9 @@ A separate [request-local naming fixture](tests/toolset_identity_fixture.py)
 experiments with distinct, deterministic aliases for browser and computer
 members. It rejects collisions with custom names, unknown or removed returned
 tools and unsupported names, while retaining known historical names for replay.
-Local controls cover the SDK snapshot's 48 members, a same-name custom tool,
-dynamic additions and separate requests. This is an isolated mapping experiment:
+Controls on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41530875394)
+cover the SDK snapshot's 48 members, a same-name custom tool, dynamic additions
+and separate requests. This is an isolated mapping experiment:
 it does not provide schemas, authenticate a session, process real streams,
 validate permissions or expand toolsets. Its collision and length rejections
 are compatibility limitations, so it is not included in the runtime. Its

@@ -1,0 +1,24 @@
+name: isolated-usage-environment-gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quota-helper:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check synthetic quota RPC, private helpers and account controls
+        run: python -m unittest tests.test_usage_environment tests.test_accounts tests.test_quota_recovery -v
