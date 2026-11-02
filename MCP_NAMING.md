@@ -182,6 +182,11 @@ and never opens or modifies a user's transcript. Rewriting real conversation
 history could affect integrity, permissions, context and cache identity, and
 is not offered or recommended as a mitigation.
 
+The manually dispatched [dynamic observation workflow](.github/workflows/mcp-dynamic-observation.yml)
+repeats these local synthetic client and alias controls on macOS, Linux and
+Windows without an account. Translator and native-executor checks remain in
+the separate candidate-proxy workflow.
+
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,
 real plugins, MCP protocol changes, and Windows. The test adapter does not

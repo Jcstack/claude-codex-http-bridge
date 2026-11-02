@@ -1,0 +1,46 @@
+name: isolated-mcp-dynamic-observation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the integrity-locked client without scripts
+        run: npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+      - name: Select the pinned native client
+        run: python tests/claude_fixture.py
+      - name: Check alias policy and removed-tool controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest tests.test_mcp_alias_policy -q
+          python tests/probe_mcp_alias_candidate.py
+          python tests/probe_mcp_alias_candidate.py --diagnose-dynamic-race
+          python tests/probe_mcp_alias_candidate.py --diagnose-removed-tool
+      - name: Check synthetic dynamic ToolSearch and description controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_dynamic_toolsearch.py --hold-refresh --require-discovery
+          python tests/probe_dynamic_toolsearch.py --hold-refresh --natural-query --require-discovery
+          python tests/probe_dynamic_toolsearch.py --description-change --fresh-description
+          python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation
+          python tests/probe_dynamic_toolsearch.py --description-change --hold-refresh --resume-observation --repair-synthetic-record
