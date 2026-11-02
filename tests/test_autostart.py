@@ -1,6 +1,7 @@
 """Login recovery uses local metadata, respects manual stop, and hides errors."""
 
 import json
+import errno
 import io
 import os
 from pathlib import Path
@@ -77,6 +78,17 @@ class AutostartTests(unittest.TestCase):
         with autostart.operation_lock(self.root):
             with self.assertRaisesRegex(RuntimeError, "in progress"):
                 with autostart.operation_lock(self.root, wait_seconds=0): pass
+
+    def test_lock_io_error_is_not_classified_as_ordinary_contention(self):
+        module = "msvcrt.locking" if os.name == "nt" else "fcntl.flock"
+        with patch(module, side_effect=OSError(errno.EIO, "synthetic I/O error")):
+            with self.assertRaises(OSError) as raised:
+                with autostart.operation_lock(self.root, wait_seconds=0): pass
+        self.assertEqual(raised.exception.errno, errno.EIO)
+        with patch(module, side_effect=OSError(errno.EIO, "PRIVATE_FIXTURE_SENTINEL")):
+            self.assertEqual(autostart.run_once(self.root), 1)
+        self.assertEqual(self.result()["result"], "failed")
+        self.assertNotIn("PRIVATE_FIXTURE_SENTINEL", (self.root / "runtime" / "autostart-status.json").read_text())
 
     def test_macos_enable_publishes_policy_before_loading_agent(self):
         desired = {"format": 1, "source": "system", "schemes": ["https"], "bypass": "fixture.local"}

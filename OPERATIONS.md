@@ -199,6 +199,10 @@ waited for the lock all passed. The fixture used no real account or service and
 cleaned up its own job. It does not establish behavior after logout, sleep,
 reboot, Windows login, or a successful real model call.
 
+Only operating-system errors corresponding to lock contention are treated as
+busy. A synthetic I/O failure remains a failed recovery and its exception text
+is withheld from the status file; it is not silently classified as contention.
+
 The longer lock wait also exposed a Windows watcher race in a synthetic
 concurrency test: a watcher that had already checked its startup registry entry
 could otherwise continue after `autostart disable` removed it. The watcher now

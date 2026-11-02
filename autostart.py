@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
+import errno
 import hashlib
 import io
 import ipaddress
@@ -225,7 +226,9 @@ def operation_lock(root: Path, *, wait_seconds: float = 60, watcher: bool = Fals
                 else:
                     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except OSError:
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise
                 if time.monotonic() >= deadline:
                     raise OperationBusy("Another bridge start or stop is in progress") from None
                 time.sleep(.1)
