@@ -115,7 +115,7 @@ all been migrated to this helper and still require a separate privacy review.
 
 ### Upstream WebSocket keepalive test timing
 
-The macOS build job in [candidate run 41487752563](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487752563)
+The macOS build job in [candidate run 41487752563, attempt 1](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487752563/attempts/1)
 failed the pinned upstream `TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless`:
 the synthetic client attempted a write after its local test connection had
 closed. This occurred before the new schema contract tests ran. The same
