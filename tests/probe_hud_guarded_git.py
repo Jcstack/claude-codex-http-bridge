@@ -21,6 +21,7 @@ from claude_fixture import isolated_environment
 
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
 GUARD_EXPORT = "export const BRIDGE_GIT_GUARD_VERSION = 'bridge-v1';\n"
+GUARD_RELAY = "        ...(collector.BRIDGE_GIT_GUARD_VERSION === 'bridge-v1' ? { CLAUDE_CODEX_HUD_GIT_GUARD: 'bridge-v1' } : {}),\n"
 
 
 def main() -> None:
@@ -79,6 +80,13 @@ def main() -> None:
             raise RuntimeError('The reviewed collector marker is not present exactly once')
         collector.write_text(text.replace(GUARD_EXPORT, '', 1), encoding='utf-8')
         missing_guard_output = render(no_marker, True, injected=True)
+        no_relay = root / 'hud-no-relay'
+        shutil.copytree(hud, no_relay, ignore=shutil.ignore_patterns('.git', 'node_modules'))
+        launcher = no_relay / 'hud.mjs'; text = launcher.read_text(encoding='utf-8')
+        if text.count(GUARD_RELAY) != 1:
+            raise RuntimeError('The reviewed launcher guard relay is not present exactly once')
+        launcher.write_text(text.replace(GUARD_RELAY, '', 1), encoding='utf-8')
+        missing_relay_output = render(no_relay, True, injected=True)
         def preview(*values: str) -> str:
             result = subprocess.run([node, str(hud / 'hud.mjs'), 'preview', '--last', *values], cwd=work, env=env,
                                     capture_output=True, text=True, encoding='utf-8', timeout=30, check=True)
@@ -102,6 +110,7 @@ def main() -> None:
         checks = {'disabled_without_opt_in': 'fixture-branch' not in default_output,
                   'enabled_with_reviewed_guard_and_opt_in': 'fixture-branch' in guarded_output,
                   'missing_guard_ignores_injected_environment': 'fixture-branch' not in missing_guard_output,
+                  'missing_relay_ignores_injected_environment': 'fixture-branch' not in missing_relay_output,
                   'native_preview_respects_guarded_git_toggle':
                       'fixture-branch' in preview_default and 'fixture-branch' not in preview_off
                       and 'fixture-branch' in preview_on,

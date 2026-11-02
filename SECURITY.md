@@ -100,7 +100,7 @@ A separate [version-gated Git opt-in experiment](upstream/patches/claude-hud-v0.
 keeps the ordinary HUD Git setting disabled for old and future plugin versions.
 It enables Git only when a private opt-in and the reviewed collector's
 per-process guard are both present. Its [synthetic controls](tests/probe_hud_guarded_git.py)
-check the opt-out, a missing guard even with an injected environment variable,
+check the opt-out, a missing collector guard or launcher relay even with an injected environment variable,
 the native `hud preview`/`set`/undo paths, and a fake repository command with an
 ordinary-Git positive control. This is a
 candidate, not proof against all repository configuration or update races, and
