@@ -161,8 +161,9 @@ The [three-platform isolated gate](https://github.com/Jcstack/claude-codex-http-
 used the locked Claude client and fake endpoints to cover normal and `--bare`
 startup, hooks, a denied tool, malformed settings and routing. This is
 not proof for arbitrary plugins, all settings, future clients, or protection from
-other processes running as the same user. Local installation of the newer
-launcher is tracked separately. Editing the original per-launch file after startup is not
+other processes running as the same user. The locally installed launcher was
+updated from commit `ce66452` after the gate and retested with fake endpoints;
+the prior launcher was retained in a private backup. Editing the original per-launch file after startup is not
 propagated by this snapshot; existing user/project settings remain Claude's own.
 An explicit custom `modelPicker` replaces the generated picker, as in Claude's
 settings precedence, so its author is responsible for keeping that list current.
@@ -178,8 +179,9 @@ Claude controls did not run it. No actual user command was used. The updated
 source avoids copying the user status line when restricted, bare or safe mode
 is selected by a CLI flag or inherited environment variable, or when user
 settings are excluded; an explicitly supplied
-launch status line remains eligible. The local installed launcher is tracked
-separately. Because the adapter otherwise promotes its user-level fallback to
+launch status line remains eligible. The [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41469556864)
+and an installed-code isolated test passed, and the controller-only local update
+did not restart the origin, ingress or running clients. Because the adapter otherwise promotes its user-level fallback to
 command-line priority, project/local status-line precedence and changes during
 `/cd` still require investigation. These tests do not cover every plugin or
 managed policy.

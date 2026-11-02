@@ -254,10 +254,10 @@ or that it belongs to the calling agent. See [NESTED_AGENTS.md](NESTED_AGENTS.md
 An isolated real-client fixture found that an extra `--settings` could replace
 the bridge-generated launch settings and direct a synthetic inherited local
 key to a second fake endpoint. An installed temporary guard refused that extra
-option before starting a new session. The current source composes custom and
-bridge settings into one private launch file and has passed an isolated
-three-platform gate; the local installation is tracked separately. Existing
-user settings files still load normally. See [SECURITY.md](SECURITY.md).
+option before starting a new session. The updated launcher composes custom and
+bridge settings into one private launch file, passed an isolated three-platform
+gate, and was installed locally without restarting the running services or
+clients. Existing user settings files still load normally. See [SECURITY.md](SECURITY.md).
 
 The actual installation uses the Codex backend (`use_siwc=false`, transport errors name `chatgpt.com`), not the public SIWC `api.openai.com/v1` flow. The [SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) explicitly apply to that public flow. Earlier documents overgeneralized them to every subscription backend. Native hosted tool availability on the current backend needs its own execution tests; it must not be inferred solely from that page. Nor does a Codex desktop feature automatically become a Claude Code tool.
 
