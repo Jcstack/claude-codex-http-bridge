@@ -189,6 +189,12 @@ synthetic client sent the new description. This does not establish behavior
 for real plugins or all client modes, and disabling ToolSearch is not a
 validated general workaround.
 
+A separate [Claude Code report](https://github.com/anthropics/claude-code/issues/102476)
+describes lost change notifications after the standalone Streamable HTTP MCP
+event stream disconnects and retries fail on version 2.1.296 on Linux. This is
+a user report, not a locally reproduced result. The stdio fixtures above do not
+exercise HTTP notification reconnection or establish its behavior on 2.1.316.
+
 The manually dispatched [dynamic observation workflow](.github/workflows/mcp-dynamic-observation.yml)
 repeats these local synthetic client and alias controls on macOS, Linux and
 Windows without an account. Translator and native-executor checks remain in
