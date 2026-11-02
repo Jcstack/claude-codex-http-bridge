@@ -85,11 +85,13 @@ the resumed first input retained the final pre-resume input as a prefix. The
 fixture reports booleans without returning keys or request bodies. This is one
 synthetic resume with a stale tool description, not proof of a provider cache
 hit, correct plugin semantics, real subscription behavior, fork behavior or
-cross-account isolation.
+cross-account isolation. The [same-resume structural gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41492286977)
+passed on macOS, Windows and Linux.
 An additional local synthetic `--fork-session` continuation produced a
 different session ID and cache key while retaining the compared input prefix
 and unchanged sampled tools and instructions. The stale description remained
-visible in this fork. A distinct key does not prove provider-side isolation,
+visible in this fork. The [resume-and-fork structural gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41492617631)
+passed on macOS, Windows and Linux. A distinct key does not prove provider-side isolation,
 cache misses or hits, correct plugin behavior, or real-account separation.
 Correct current tool semantics take priority over preserving a cache prefix.
 

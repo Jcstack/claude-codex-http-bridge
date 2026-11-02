@@ -49,7 +49,9 @@ before sharing. It is not automatically saved or committed.
   billing. Cached input still occupies context; cumulative input is not a
   context window. Child durations can overlap.
   The [three-platform session-metadata gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41488570288)
-  passed before the updated audit module was installed locally. An installed
+  passed before the updated audit module was installed locally. The [full
+  source-and-install run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41488563596)
+  also passed on all three platforms. An installed
   synthetic check confirmed both summaries, privacy and read-only behavior;
   the origin, ingress, and existing session processes were not restarted.
 - Each main or child log also reports bounded `cache_counter_patterns` based
