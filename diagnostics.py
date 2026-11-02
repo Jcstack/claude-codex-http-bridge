@@ -147,6 +147,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     inband, inband_requests, inband_last = Counter(), {}, {}
     shapes, shape_requests, shape_last = Counter(), {}, {}
     recent_inband = deque(maxlen=12)
+    recent_preconnect = deque(maxlen=12)
     latencies, slow, failed = [], [], []
     coverage = {}
     for line in lines(path, coverage):
@@ -191,14 +192,17 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                 if request:
                     preconnect_requests.setdefault(category, set()).add(request[1])
                 preconnect_last[category] = at.isoformat()
+                recent_preconnect.append((request[1] if request else None, at, category))
             for label, fragment in ERRORS.items():
                 if fragment in lower:
                     errors[label] += 1
-    # Match only within this one log, using the short local request tag and a
-    # close timestamp. Never return tags; collisions or multiple matches stay
-    # ambiguous, and this is not a cross-layer or transcript correlation.
+    # Match only within this one log. Stream failures use a five-second window;
+    # handshake failures may precede completion by up to 30 minutes. Never
+    # return tags; collisions or multiple matches stay ambiguous. Neither is
+    # a cross-layer or transcript correlation, and 200 does not prove SSE end.
     matches = [[] for _ in recent_inband]
-    if recent_inband:
+    preconnect_matches = [[] for _ in recent_preconnect]
+    if recent_inband or recent_preconnect:
         try:
             for line in lines(path):
                 tag = re.match(r'^\[([^]]+)\]\s+\[([a-f0-9]{8})\]', line)
@@ -213,8 +217,15 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                             and len(matches[index]) < 2):
                         matches[index].append({"at": at.isoformat(), "http_status": int(row[2]),
                             "seconds": duration(row[3].strip())})
+                for index, (failure_tag, failure_at, _category) in enumerate(recent_preconnect):
+                    delay = (at - failure_at).total_seconds()
+                    if (failure_tag == tag[2] and 0 <= delay <= 1800
+                            and len(preconnect_matches[index]) < 2):
+                        preconnect_matches[index].append({"http_status": int(row[2]),
+                            "seconds": duration(row[3].strip()), "delay": delay})
         except OSError:
             matches = [[] for _ in recent_inband]
+            preconnect_matches = [[] for _ in recent_preconnect]
     observations = []
     for (failure_tag, at, shape), rows in zip(recent_inband, matches):
         unique = len(rows) == 1
@@ -222,12 +233,21 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "same_log_match": "unique" if unique else "ambiguous" if rows else "unmatched" if failure_tag else "untagged",
             "http_status": rows[0]["http_status"] if unique else None,
             "http_seconds": round(rows[0]["seconds"], 3) if unique and rows[0]["seconds"] is not None else None})
+    preconnect_observations = []
+    for (failure_tag, at, category), rows in zip(recent_preconnect, preconnect_matches):
+        unique = len(rows) == 1
+        preconnect_observations.append({"at": at.isoformat(), "category": category,
+            "same_log_match": "unique" if unique else "ambiguous" if rows else "unmatched" if failure_tag else "untagged",
+            "http_status": rows[0]["http_status"] if unique else None,
+            "http_seconds": round(rows[0]["seconds"], 3) if unique and rows[0]["seconds"] is not None else None,
+            "seconds_after_failure": round(rows[0]["delay"], 3) if unique else None})
     ordered = sorted(latencies)
     return {"completed_http_statuses": dict(counts), "transport_error_mentions": dict(errors),
             "upstream_preconnection_failures": {category: {
                 "attempt_mentions": count, "tagged_requests": len(preconnect_requests.get(category, set())),
                 "last_at": preconnect_last[category],
                 "url_host_mentions": dict(preconnect_hosts.get(category, {}))} for category, count in preconnect.items()},
+            "recent_preconnection_http": preconnect_observations,
             "stream_failure_mentions": {category: {
                 "mentions": count, "tagged_requests": len(inband_requests.get(category, set())),
                 "last_at": inband_last[category]} for category, count in inband.items()},

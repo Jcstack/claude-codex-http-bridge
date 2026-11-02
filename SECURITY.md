@@ -43,6 +43,11 @@ error without the synthetic content or exception text. This protects that
 specific logger in newly started processes using an updated capability source
 snapshot; it does not sanitize the child program's own stderr, other loggers,
 or already running processes. See [MCP naming and SDK assessment](MCP_NAMING.md).
+After the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41408466871)
+passed on 2026-11-02, the local installation selected a new immutable snapshot
+containing only this source change. The previous snapshot and enablement choice
+were retained, and the origin, managed runtime, and running processes were not
+restarted. Existing native MCP processes continue using their previous code.
 
 New launches default `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, respecting an
 explicit operator override. This follows [Claude's documented telemetry control](https://code.claude.com/docs/en/data-usage#telemetry-services);

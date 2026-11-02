@@ -47,6 +47,7 @@ The tracked session's anonymous marker is stored locally in the private installa
 - [ ] Explain real incomplete streams and verify safe recovery. Distinguish native errors, missing terminal events, disconnects, and cancellation, and check that partial tool calls are neither replayed nor executed twice. Historical causes unsupported by the logs remain unknown.
 - [ ] Continue investigating TLS/EOF and 500/503 errors, separating preconnection failures, interrupted streams, client cancellation, and application errors. Do not mask the cause with fixed retries or restarts.
 - [x] Add allowlisted URL-host categories for recent handshake EOF mentions, preserving the possibility that errors were forwarded. Real logs mention the official ChatGPT host; later credential-free TLS checks passed, but the root cause remains unknown.
+- [x] Add bounded same-log completion correlations for handshake failures, preserving ambiguous and unmatched cases without exposing local tags. One later EOF had a unique HTTP 200 match 12 seconds afterward; neither this correlation nor HTTP 200 proves retry behavior or a complete SSE stream.
 
 Acceptance: reproduce successful requests and genuine quota-exhaustion negative cases; automatically recover after a reset; avoid duplicate tool effects; preserve the original account, listener, keys, sessions, and already-started streams.
 

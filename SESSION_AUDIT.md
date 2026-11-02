@@ -139,6 +139,21 @@ without exporting the URL, credentials, private hostname, path or local tag.
 A host mentioned in a forwarded error does not establish which process opened
 the connection. The classification is not a cross-layer request identifier.
 
+In a subsequent one-hour sample, the shared origin log recorded one more TLS
+handshake EOF mentioning the ChatGPT host. A unique same-log tag matched a
+Responses HTTP 200 completion 12 seconds later, with a recorded request
+duration of 22.445 seconds. The tracked session and its children had no API
+error records in that sample. A matching short tag is not a cross-layer ID,
+and the HTTP 200 does not prove the SSE stream completed; the root cause
+remains unknown. No account, proxy, or retry settings were changed.
+
+For future observations, `recent_preconnection_http` pairs up to 12 recent
+handshake errors with same-log POST completions occurring within 30 minutes.
+It reports only a unique match, marks reused tags as ambiguous, and emits no
+tag, raw error, URL, or body. The wider window helps observe a later completion
+but increases the chance of an unrelated tag reuse. Treat it as correlation,
+not proof of retry behavior or complete response delivery.
+
 A later one-hour sample contained an automatic compaction recorded as 574.868
 seconds, with client metadata reporting 753,797 tokens before and 51,271 after.
 A shared origin `/v1/responses` request ended within ten seconds and lasted

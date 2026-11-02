@@ -121,6 +121,27 @@ class DiagnosticsTests(unittest.TestCase):
             for private in ("PRIVATE_SECRET", "evil.invalid", "12345", "aabbccdd"):
                 self.assertNotIn(private, json.dumps(result))
 
+    def test_handshake_completion_matches_are_bounded_and_never_expose_tags(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            path.write_text(
+                '[2026-01-02 12:00:00] [aabbccdd] upstream execution failed: TLS handshake: EOF PRIVATE_SECRET\n'
+                '[2026-01-02 12:00:12] [aabbccdd] [info] [gin.go:1] 200 | 22.445s | 127.0.0.1 | POST "/v1/responses"\n'
+                '[2026-01-02 12:01:00] [11223344] upstream execution failed: TLS handshake: EOF PRIVATE_SECRET\n'
+                '[2026-01-02 12:01:05] [11223344] [info] [gin.go:1] 200 | 5s | 127.0.0.1 | POST "/v1/responses"\n'
+                '[2026-01-02 12:01:07] [11223344] [info] [gin.go:1] 503 | 7s | 127.0.0.1 | POST "/v1/responses"\n'
+                '[2026-01-02 12:02:00] [55667788] upstream execution failed: TLS handshake: EOF PRIVATE_SECRET\n'
+                '[2026-01-02 12:02:01] upstream execution failed: TLS handshake: EOF PRIVATE_SECRET\n', encoding="utf-8")
+            report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            rows = report["recent_preconnection_http"]
+            self.assertEqual([row["same_log_match"] for row in rows], ["unique", "ambiguous", "unmatched", "untagged"])
+            self.assertEqual(rows[0]["http_status"], 200)
+            self.assertEqual(rows[0]["http_seconds"], 22.445)
+            self.assertEqual(rows[0]["seconds_after_failure"], 12)
+            self.assertIsNone(rows[1]["http_status"])
+            for private in ("PRIVATE_SECRET", "aabbccdd", "11223344", "55667788", str(path)):
+                self.assertNotIn(private, json.dumps(report))
+
     def test_metadata_allowlist_drops_bodies_paths_and_untrusted_values(self):
         since = datetime(2026, 1, 1, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as temporary:
