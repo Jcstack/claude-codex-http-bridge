@@ -51,6 +51,13 @@ class ProcessIdentityTests(unittest.TestCase):
                     self.assertFalse(launcher.state_is_live(runtime, adopted))
             # A legacy PID/port that belongs to a different executable is not
             # adopted, contacted with a key, killed, or removed from state.
+            listener.settimeout(.01)
+            while True:
+                try:
+                    connection, _ = listener.accept()
+                    connection.close()
+                except TimeoutError:
+                    break
             api_profile.write_private(runtime / "service.json", json.dumps(state))
             with patch.object(launcher, "ROOT", root), patch.object(launcher, "service_proxy", return_value=root / "foreign-executable"), \
                  patch.object(launcher, "helper_output", side_effect=AssertionError("must not start")):
@@ -58,6 +65,8 @@ class ProcessIdentityTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "occupied port"):
                     launcher.ensure_service(require_catalog=False)
                 self.assertEqual(launcher.read_state(runtime), state)
+                listener.settimeout(.1)
+                with self.assertRaises(TimeoutError): listener.accept()
 
     def test_invalid_private_identity_is_not_accepted(self):
         with tempfile.TemporaryDirectory() as temporary:
