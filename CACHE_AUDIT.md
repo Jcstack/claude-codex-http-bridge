@@ -252,10 +252,13 @@ and was installed and enabled locally without restarting the origin, ingress,
 or Claude clients. It applies on the next status-line refresh for existing and
 future subscription sessions. An explicit per-session environment setting
 takes precedence when recorded in the session profile. Older launchers did not
-record an explicit `0`. A candidate adapter checks the inherited session
-environment before the shared preference, but has not yet been installed
-locally. If the client strips that environment value, it cannot be recovered
-from an older profile.
+record an explicit `0`. The installed adapter now checks the inherited session
+environment before the shared preference. If the client strips that environment
+value, it cannot be recovered from an older profile. An isolated real-client
+positive and negative control reproduced the former behavior and verified the
+new behavior with a fake enabled preference. The [HUD gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41459059115)
+passed on three platforms, with the interactive flow on macOS and Linux. The
+installed adapter and HUD also passed that synthetic flow on this Mac.
 `claude-codex cache telemetry status` reports the shared choice; `disable` turns
 it off. Plugins need explicit support for the extension to display it. The
 default remains disabled for a new installation.

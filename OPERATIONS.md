@@ -228,9 +228,12 @@ check. No actual user-session refresh or real inference was forced. Use
 `claude-codex cache telemetry status` or `claude-codex cache telemetry disable`
 to inspect or change the shared preference; an override recorded in a session
 profile wins. Older launchers did not record an explicit `0`, so that value
-cannot be recovered from an existing profile. A candidate adapter checks the
-inherited session environment; it has not yet been installed locally. This was
-a targeted two-file update, not an atomic general-purpose controller installer. See
+cannot be recovered from an existing profile. The installed adapter now checks
+the inherited session environment before the shared preference; the locked
+real-client and HUD fixture passed with a synthetic opt-out on macOS and Linux,
+and the source unit tests passed on three platforms. The update preserved the
+origin, ingress, selected runtime and rollback record. These targeted file
+updates are not an atomic general-purpose controller installer. See
 [CACHE_AUDIT.md](CACHE_AUDIT.md) for interpretation and limits.
 
 The installed diagnostics now retain a managed backend when its only recognized
