@@ -31,6 +31,7 @@
 !launcher.py
 !diagnostics.py
 !session_audit.py
+!taskstop_advisory.py
 !mcp_name_audit.py
 !mcp_alias_policy.py
 !statusline_adapter.py

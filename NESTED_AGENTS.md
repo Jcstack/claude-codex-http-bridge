@@ -37,12 +37,22 @@ This demonstrates an observation path, not an automatic remedy or proof that a
 real model will act on additional context. No hook has been installed into user
 settings, and no task or permission boundary has been bypassed.
 
+An experimental [advisory hook](taskstop_advisory.py) adds a fixed reminder only
+for an ownership-shaped `TaskStop` failure: the target may still be running, and
+its state and authority need review before relying on cancellation. It accepts
+bounded hook input, emits no task IDs, paths or error text, and performs no task
+control, messaging, logging or network access. In the isolated fixture its
+context reached the fake endpoint after the denial and was absent after the
+successful root-stop control. The hook is not installed or enabled. Its text
+depends on a non-contractual error shape, and a real model's response has not
+been tested; it does not stop the task or establish ownership.
+
 To reproduce locally after installing the locked fixture:
 
 ```sh
 CLAUDE_CODEX_TEST_BIN="$(python tests/claude_fixture.py)" \
   python tests/probe_nested_task_stop.py --expect-ownership-denial \
-  --observe-hooks --expect-hook-observation
+  --observe-hooks --expect-hook-observation --observe-advisory --expect-advisory
 ```
 
 The explicit expectations are specific to this pinned client and observation;

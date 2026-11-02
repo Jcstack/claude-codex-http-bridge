@@ -20,6 +20,9 @@ import threading
 
 from claude_fixture import isolated_environment
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import taskstop_advisory  # noqa: E402
+
 
 MODEL = "gpt-6.1-sol"
 ROOT_MARKER = "ROOT_SYNTHETIC_OWNERSHIP_FIXTURE"
@@ -189,9 +192,10 @@ class Handler(BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.failure_hook_context_seen = "FIXTURE_FAILURE_HOOK_CONTEXT" in serialized
             self.server.batch_hook_context_seen = "FIXTURE_BATCH_HOOK_CONTEXT" in serialized
+            self.server.advisory_context_seen = taskstop_advisory.ADVISORY in serialized
 
 
-def run_case(claude: str, mode: str, observe_hooks: bool) -> dict:
+def run_case(claude: str, mode: str, observe_hooks: bool, observe_advisory: bool) -> dict:
     with tempfile.TemporaryDirectory(prefix="bridge-nested-stop-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
         root = Path(temporary).resolve(); work = root / "work"; config = root / "config"
         work.mkdir(); config.mkdir(mode=0o700)
@@ -216,6 +220,10 @@ def run_case(claude: str, mode: str, observe_hooks: bool) -> dict:
             command = {"type": "command", "command": sys.executable, "args": [str(hook), str(hook_marker)], "timeout": 5}
             config_data["hooks"] = {"PostToolUseFailure": [{"matcher": "TaskStop", "hooks": [command]}],
                                     "PostToolBatch": [{"hooks": [command]}]}
+        if observe_advisory:
+            hooks = config_data.setdefault("hooks", {})
+            hooks.setdefault("PostToolUseFailure", []).append({"matcher": "TaskStop", "hooks": [{
+                "type": "command", "command": sys.executable, "args": [str(Path(taskstop_advisory.__file__))], "timeout": 5}]})
         settings.write_text(json.dumps(config_data), encoding="utf-8")
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.lock = threading.Lock(); server.roles = {}; server.mode = mode
@@ -227,6 +235,7 @@ def run_case(claude: str, mode: str, observe_hooks: bool) -> dict:
         server.agent_id_returned = server.leaf_running_before_stop = False
         server.synthetic_task_id = None; server.ownership_mentions_target = False
         server.failure_hook_context_seen = server.batch_hook_context_seen = False
+        server.advisory_context_seen = False
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         env = isolated_environment(root)
         env.update(CLAUDE_CONFIG_DIR=str(config), ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
@@ -261,7 +270,8 @@ def run_case(claude: str, mode: str, observe_hooks: bool) -> dict:
                 "failure_hook_saw_ownership": any(row.get("event") == "PostToolUseFailure" and row.get("taskstop") and row.get("ownership") for row in hook_rows),
                 "batch_hook_saw_ownership": any(row.get("event") == "PostToolBatch" and row.get("taskstop") and row.get("ownership") for row in hook_rows),
                 "failure_hook_context_seen": server.failure_hook_context_seen,
-                "batch_hook_context_seen": server.batch_hook_context_seen}
+                "batch_hook_context_seen": server.batch_hook_context_seen,
+                "advisory_observation_enabled": observe_advisory, "advisory_context_seen": server.advisory_context_seen}
             return report
         finally:
             server.release_leaf.set(); server.shutdown(); server.server_close(); thread.join(timeout=2)
@@ -272,13 +282,17 @@ def main() -> None:
     parser.add_argument("--expect-ownership-denial", action="store_true", help="Require the pinned client's observed nested denial")
     parser.add_argument("--observe-hooks", action="store_true", help="Observe synthetic failure and batch hooks")
     parser.add_argument("--expect-hook-observation", action="store_true", help="Require the pinned client's observed hook contexts")
+    parser.add_argument("--observe-advisory", action="store_true", help="Exercise the experimental local advisory hook")
+    parser.add_argument("--expect-advisory", action="store_true", help="Require the advisory only on the synthetic denial")
     args = parser.parse_args()
     if args.expect_hook_observation and not args.observe_hooks:
         parser.error("--expect-hook-observation requires --observe-hooks")
+    if args.expect_advisory and not args.observe_advisory:
+        parser.error("--expect-advisory requires --observe-advisory")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude: raise RuntimeError("The locked Claude fixture is required")
-    nested = run_case(claude, "nested", args.observe_hooks)
-    control = run_case(claude, "root_control", args.observe_hooks)
+    nested = run_case(claude, "nested", args.observe_hooks, args.observe_advisory)
+    control = run_case(claude, "root_control", args.observe_hooks, args.observe_advisory)
     print(json.dumps({"synthetic_only": True, "nested": nested, "root_control": control}, sort_keys=True))
     common = ("client_completed", "root_request_seen", "leaf_request_seen", "nested_agent_id_returned",
               "leaf_running_before_stop", "stop_result_seen")
@@ -294,6 +308,8 @@ def main() -> None:
             and control["batch_hook_saw_taskstop"] and not control["failure_hook_saw_taskstop"]
             and not control["batch_hook_saw_ownership"]):
         raise RuntimeError("The pinned client's synthetic hook behavior changed")
+    if args.expect_advisory and not (nested["advisory_context_seen"] and not control["advisory_context_seen"]):
+        raise RuntimeError("Synthetic ownership advisory was not scoped to the denial")
 
 
 if __name__ == "__main__":

@@ -138,6 +138,12 @@ new installation defaults to disabled; the current local installation was
 explicitly enabled after synthetic checks. Plugin updates can replace the patch,
 and the feature is not a claim about every plugin's data handling.
 
+The experimental [task-stop advisory](taskstop_advisory.py) is not installed or
+enabled. It accepts bounded hook input and returns only fixed context for a
+specific error shape; it does not echo task IDs, paths, error text or other hook
+fields. It does not send messages, access the network or stop processes. Hook
+input can nevertheless contain session metadata and must be treated as private.
+
 Browser MCP is opt-in. When used, page text and screenshots returned by the tool enter the Claude Code conversation and are sent to the Codex model endpoint. The recommended isolated browser starts without everyday Chrome cookies. Attaching to a signed-in Chrome profile gives the agent access to that profile's tabs and storage, so it requires an explicit per-session choice and normal tool permissions.
 
 The bridge's WebFetch PDF hook processes the tool result locally and replaces only the binary-PDF summary with a warning and the path Claude Code already returned. It does not upload or copy the PDF. Claude Code's own WebFetch may leave downloaded binaries in its session `tool-results` directory; the hook does not remove them. Review that directory according to your local retention policy. [Upstream retention report](https://github.com/anthropics/claude-code/issues/104178).
