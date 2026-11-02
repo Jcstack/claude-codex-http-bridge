@@ -1,0 +1,42 @@
+name: isolated-toolset-sdk-inventory
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch the pinned public SDK source without executing it
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/anthropic-sdk"
+          git -C "$RUNNER_TEMP/anthropic-sdk" remote add origin https://github.com/anthropics/anthropic-sdk-python.git
+          git -C "$RUNNER_TEMP/anthropic-sdk" fetch --depth 1 origin 5752c132041af71055584632caab5ca2325cae5e
+          git -C "$RUNNER_TEMP/anthropic-sdk" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/anthropic-sdk" rev-parse HEAD)" = 5752c132041af71055584632caab5ca2325cae5e
+          test -z "$(git -C "$RUNNER_TEMP/anthropic-sdk" status --porcelain --untracked-files=no)"
+      - name: Inventory public types and run bounded negative controls
+        env:
+          BRIDGE_TOOLSET_SDK_CHECKOUT: ${{ runner.temp }}/anthropic-sdk
+          PYTHONNOUSERSITE: '1'
+        run: |
+          python tests/audit_toolset_sdk.py "$BRIDGE_TOOLSET_SDK_CHECKOUT"
+          python -m unittest tests.test_toolset_sdk_audit -v
+        shell: bash

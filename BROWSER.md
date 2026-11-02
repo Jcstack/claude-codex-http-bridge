@@ -21,6 +21,30 @@ equivalent protection has been established for this Codex bridge. These counts
 and defaults describe the cited toolset versions, not a dynamic catalog or a
 promise about later versions.
 
+The official Python SDK's [version 2.4.0 source](https://github.com/anthropics/anthropic-sdk-python/tree/5752c132041af71055584632caab5ca2325cae5e)
+contains generated member input models and discriminated response unions. The
+[static inventory](tests/audit_toolset_sdk.py) reads that source without
+importing or executing it: it found input classes for all 31 browser and 17
+computer members, with 16 names shared across the families. It also confirms
+that upload, JavaScript, console and network readers default to disabled in
+that snapshot. The audit does not verify the checkout's integrity itself: fetch
+the public commit and verify its SHA and clean state independently, as the
+[isolated workflow](.github/workflows/toolset-sdk-inventory.yml) does. It is
+not a schema exporter, tool executor, or permission system.
+
+Those generated input types are useful references but are not proven identical
+to the model-visible schemas or sufficient for safe execution. For example,
+the pinned browser models annotate `scroll_amount` as `Optional[int]` and
+`wait.duration` as `float`, while their prose describes bounds. The official
+[SDK guide](https://github.com/anthropics/anthropic-sdk-python/blob/5752c132041af71055584632caab5ca2325cae5e/browser-toolset.md)
+says that the driver must check values; it supplies neither a browser driver
+nor a URL policy by default, and exception text can be returned to the model.
+Any eventual executor needs its own scoped permissions, value checks and safe
+errors. Browser member input is documented as arriving in one complete
+`input_json_delta`; ordered actions stop after the first failure or refusal,
+while other tools can still run. Earlier synthetic fixtures do not establish
+those behaviors for this bridge.
+
 The current translator does not yet implement that toolset contract. A local
 [synthetic translator fixture](tests/native_toolset_contract_fixture.go)
 observed empty-name function declarations rather than expanded browser and
