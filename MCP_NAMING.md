@@ -237,6 +237,11 @@ Windows without an account. Translator and native-executor checks remain in
 the separate candidate-proxy workflow. A successful observational step is not
 proof that a stale-definition issue is fixed; the workflow emits a warning
 when this specific synthetic stale condition is observed.
+The [three-platform client observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41484089396)
+completed successfully on macOS, Linux and Windows, including its synthetic
+stdio and Streamable HTTP controls. The [candidate translator gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41480503513)
+also passed on those platforms. These results do not remove the observed
+stale-definition or notification-recovery limitations.
 
 The remaining work includes production-grade framing, bounded backpressure,
 process lifecycle, cancellation races, dynamic server behavior, ToolSearch,

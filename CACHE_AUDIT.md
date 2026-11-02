@@ -71,9 +71,9 @@ check the cache key, prefix bytes, discovery, and removal separately. The
 [executor build and test steps](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41478669731)
 passed on macOS, Linux and Windows. That workflow was canceled as superseded
 after its Linux and Windows contract jobs passed; its macOS contract job did
-not complete. A [later candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41480503513)
-was still running at the time of this update. This fixture does not run a
-Claude client or test provider cache hits.
+not complete. The [later candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41480503513)
+passed on all three platforms. This fixture does not run a Claude client or
+test provider cache hits.
 
 Stable request prefixes alone do not prove tool-definition correctness. A
 separate synthetic changed-description observation retained the old definition
