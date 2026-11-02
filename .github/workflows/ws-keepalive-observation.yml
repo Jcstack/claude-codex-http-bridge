@@ -1,0 +1,53 @@
+name: isolated-websocket-keepalive-observation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Compare pinned upstream test timing without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          git -C upstream-source apply ../upstream/patches/12d97cf-inline-tools-backport.patch
+          git -C upstream-source apply ../upstream/patches/12d97cf-deferred-tools.patch
+          git -C upstream-source apply ../upstream/patches/web-search-replay.patch
+          git -C upstream-source apply ../upstream/patches/loopback-tls.patch
+          git -C upstream-source apply ../upstream/patches/url-citations.patch
+          git -C upstream-source apply ../upstream/patches/native-compaction-v2.patch
+          git -C upstream-source apply ../upstream/patches/incomplete-tool-guard.patch
+          cd upstream-source
+          go mod verify
+          go test -timeout 60s -run '^TestCodexWebsockets_PingHandlerDoesNotBlockOnWriteMu$' ./internal/runtime/executor
+          if go test -timeout 120s -count=30 -run '^TestCodexWebsockets_KeepalivePingDuringUpload_(WithSession|Sessionless|NonstreamSessionless)$' ./internal/runtime/executor > "$RUNNER_TEMP/keepalive-baseline.log" 2>&1; then
+            echo 'Unmodified upstream fixture passed the bounded sample.'
+          else
+            python -c 'import pathlib,re,sys; p=pathlib.Path(sys.argv[1]).read_text(errors="replace"); failures=re.findall(r"--- FAIL: (TestCodexWebsockets_KeepalivePingDuringUpload_[A-Za-z]+)",p); print("Unmodified upstream fixture failures:", len(failures)); sys.exit(0 if failures else 1)' "$RUNNER_TEMP/keepalive-baseline.log"
+            echo '::warning::At least one unmodified synthetic keepalive fixture failed; see the bounded count above.'
+          fi
+          git apply --check ../tests/upstream_keepalive_fixture.patch
+          git apply ../tests/upstream_keepalive_fixture.patch
+          go test -timeout 120s -count=50 -run '^TestCodexWebsockets_KeepalivePingDuringUpload_(WithSession|Sessionless|NonstreamSessionless)$' ./internal/runtime/executor
+          go test -timeout 60s -count=10 -run '^TestCodexWebsockets_SessionlessBufferingImmediateTerminalClosesConnection$' ./internal/runtime/executor

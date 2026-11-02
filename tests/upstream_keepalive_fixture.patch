@@ -1,0 +1,104 @@
+--- a/internal/runtime/executor/codex_websockets_executor_test.go
++++ b/internal/runtime/executor/codex_websockets_executor_test.go
+@@ -2640,6 +2640,7 @@
+ func TestCodexWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
+ 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+ 	serverPongCh := make(chan string, 1)
++	payloadReceived := make(chan struct{}, 1)
+ 	inWriteHook := make(chan struct{})
+ 	pongDeliveredDuringWrite := make(chan struct{})
+ 
+@@ -2675,6 +2676,10 @@
+ 					readErrCh <- errRead
+ 					return
+ 				}
++				select {
++				case payloadReceived <- struct{}{}:
++				default:
++				}
+ 			}
+ 		}()
+ 
+@@ -2702,6 +2707,14 @@
+ 		}
+ 
+ 		// Now send terminal response.
++		// Do not send completion until the client has finished its payload write.
++		select {
++		case <-payloadReceived:
++		case <-time.After(2 * time.Second):
++			t.Error("client payload was not received after pong")
++			return
++		}
++
+ 		respPayload := []byte(`{"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[]}}`)
+ 		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
+ 	}))
+@@ -2740,6 +2753,7 @@
+ func TestCodexWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
+ 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+ 	serverPongCh := make(chan string, 1)
++	payloadReceived := make(chan struct{}, 1)
+ 	inWriteHook := make(chan struct{})
+ 	pongDeliveredDuringWrite := make(chan struct{})
+ 
+@@ -2771,6 +2785,10 @@
+ 				if _, _, errRead := conn.ReadMessage(); errRead != nil {
+ 					return
+ 				}
++				select {
++				case payloadReceived <- struct{}{}:
++				default:
++				}
+ 			}
+ 		}()
+ 
+@@ -2797,6 +2815,14 @@
+ 			return
+ 		}
+ 
++		// Do not send completion until the client has finished its payload write.
++		select {
++		case <-payloadReceived:
++		case <-time.After(2 * time.Second):
++			t.Error("client payload was not received after pong")
++			return
++		}
++
+ 		respPayload := []byte(`{"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[]}}`)
+ 		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
+ 	}))
+@@ -2832,6 +2858,7 @@
+ func TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless(t *testing.T) {
+ 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+ 	serverPongCh := make(chan string, 1)
++	payloadReceived := make(chan struct{}, 1)
+ 	inWriteHook := make(chan struct{})
+ 	pongDeliveredDuringWrite := make(chan struct{})
+ 
+@@ -2863,6 +2890,10 @@
+ 				if _, _, errRead := conn.ReadMessage(); errRead != nil {
+ 					return
+ 				}
++				select {
++				case payloadReceived <- struct{}{}:
++				default:
++				}
+ 			}
+ 		}()
+ 
+@@ -2886,6 +2917,14 @@
+ 			close(pongDeliveredDuringWrite)
+ 		case <-time.After(2 * time.Second):
+ 			t.Errorf("pong was not received while payload write was in progress on nonstream sessionless connection")
++			return
++		}
++
++		// Do not send completion until the client has finished its payload write.
++		select {
++		case <-payloadReceived:
++		case <-time.After(2 * time.Second):
++			t.Error("client payload was not received after pong")
+ 			return
+ 		}
+ 

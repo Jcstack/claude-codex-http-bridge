@@ -113,6 +113,27 @@ the owned process-group signal is denied; its original Ctrl-C timeout remains
 a failure. Other proxy launch paths and the live subscription clients have not
 all been migrated to this helper and still require a separate privacy review.
 
+### Upstream WebSocket keepalive test timing
+
+The macOS build job in [candidate run 41487752563](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487752563)
+failed the pinned upstream `TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless`:
+the synthetic client attempted a write after its local test connection had
+closed. This occurred before the new schema contract tests ran. The same
+candidate had passed an earlier three-platform gate; neither result explains
+the cause of a real user's stream failure.
+
+In the [pinned test source](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/runtime/executor/codex_websockets_executor_test.go),
+the fake server sends completion and returns immediately after receiving a
+pong, while that same pong releases the client's blocked payload write. A
+server close racing the write is a plausible fixture-level explanation, not
+yet a proven root cause. A separate test-only patch makes three fake servers
+wait until their reader observes the payload before sending completion; the
+original requirement that the pong arrive while the write is held remains.
+The separate immediate-terminal test is left intact. The manually dispatched
+observation repeats both the original and modified fixtures on three operating
+systems. It does not patch production code, establish real WebSocket behavior,
+or count a failed or unfinished run as a pass.
+
 A separate community [controlled experiment](https://github.com/puxu-msft/copilot-api-js/blob/master/exp/cc-idle-280s/REPORT.md)
 on Claude Code 2.1.201 reported an additional content-progress timeout that
 comments and ping events did not reset. That result is version- and setup-specific
