@@ -17,8 +17,14 @@ the Python refresh helper in isolated mode. Local synthetic controls confirm
 that unrelated API keys and Python import paths are absent while the account
 directory and configured proxy remain available. This retains configured
 proxy and certificate trust, PATH and native Codex configuration; it is not an
-OS sandbox or proof about processes launched by Codex itself. The change is
-not yet installed in the current local runtime pending cross-platform checks.
+OS sandbox or proof about processes launched by Codex itself. The
+[three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41532735109)
+also covers a detached refresh using an owned fake app-server, with native
+Windows ACL handling. A local macOS install retained a private rollback copy,
+passed an isolated import and a same-account, read-only quota check, and did
+not restart the origin, ingress or clients. Existing helper processes keep
+their former environments until they exit. A real Windows account, login and
+every possible proxy configuration remain unverified.
 
 [Account authorization and switching](ACCOUNTS.md) use a loopback-only OAuth callback and fixed OpenAI endpoints. Switching uses the already-enabled, PID-verified loopback management interface and its retained private credential, restricted in this helper to auth-file listing, model publication, upload and status changes. No LAN binding or management-panel access is enabled. Validated target credentials are enabled before old credentials are disabled; existing credentials are retained, never deleted. An account-only recovery journal stays private until the selection is verified. An isolated validator may copy an account record into a temporary private directory; it never copies it into this source repository or the native Codex directory.
 
