@@ -22,7 +22,8 @@ def usage(percent=0):
 
 
 class QuotaRecoveryTests(unittest.TestCase):
-    def scenario(self, *, available=None, views=None, changed=False, attempts=None, now=0, unknown_person=False):
+    def scenario(self, *, available=None, views=None, changed=False, attempts=None, now=0, unknown_person=False,
+                 usage_error=None, local_error=None):
         record = {"account_id": "fixture-account", "access_token": "PRIVATE_ACCESS", "refresh_token": "PRIVATE_REFRESH"}
         if not unknown_person:
             record["email"] = "fixture@example.invalid"
@@ -37,9 +38,13 @@ class QuotaRecoveryTests(unittest.TestCase):
             if url == recovery.USAGE_URL:
                 self.assertNotIn("PRIVATE_REFRESH", json.dumps(options))
                 self.assertEqual(options["headers"]["Authorization"], "Bearer PRIVATE_ACCESS")
+                if usage_error is not None:
+                    raise usage_error
                 return usage() if available is None else available
             self.assertEqual(url.split("/v8/")[0], "http://127.0.0.1:12345")
             self.assertEqual(options["headers"]["Authorization"], "Bearer PRIVATE_MANAGEMENT")
+            if local_error is not None:
+                raise local_error
             return {"files": [entry]} if url.endswith("credentials") else {"status": "ok"}
 
         with tempfile.TemporaryDirectory(prefix="quota-recovery-fixture-") as temporary, \
@@ -96,6 +101,25 @@ class QuotaRecoveryTests(unittest.TestCase):
         result, requests = self.scenario(changed=True)
         self.assertEqual(result["status"], "account_changed")
         self.assertFalse(any(options.get("method") == "POST" for _, options in requests))
+
+    def test_failed_usage_request_is_categorized_without_reset_or_private_error(self):
+        for failure in (OSError("PRIVATE network"), ValueError("PRIVATE parsing"), RuntimeError("PRIVATE response")):
+            with self.subTest(kind=type(failure).__name__):
+                result, requests = self.scenario(usage_error=failure)
+                self.assertEqual(result, {"status": "usage_unavailable"})
+                self.assertEqual(sum(url == recovery.USAGE_URL for url, _ in requests), 1)
+                self.assertFalse(any(options.get("method") == "POST" for _, options in requests))
+        # A local management failure is not misidentified as a usage failure.
+        with self.assertRaisesRegex(RuntimeError, "PRIVATE local"):
+            self.scenario(local_error=RuntimeError("PRIVATE local"))
+
+    def test_failed_automatic_usage_request_keeps_probe_throttle(self):
+        attempts = {}
+        result, _ = self.scenario(usage_error=RuntimeError("PRIVATE network"), attempts=attempts, now=0)
+        self.assertEqual(result["status"], "usage_unavailable")
+        result, requests = self.scenario(attempts=attempts, now=30)
+        self.assertEqual(result["status"], "probe_throttled")
+        self.assertFalse(any(url == recovery.USAGE_URL for url, _ in requests))
 
     def test_unknown_person_never_queries_or_resets_cooldown(self):
         result, requests = self.scenario(unknown_person=True)

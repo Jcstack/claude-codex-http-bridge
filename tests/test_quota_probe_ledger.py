@@ -293,20 +293,18 @@ raise AssertionError("Synthetic crash did not occur")
              patch.object(accounts, "local_accounts", return_value=[selected]), \
              patch.object(accounts, "Management", return_value=owner), \
              patch.object(accounts, "request_json", side_effect=request):
-            with self.assertRaises(OSError):
-                recovery.recover_once(self.root, attempts={}, now=0)
+            self.assertEqual(recovery.recover_once(self.root, attempts={}, now=0), {"status": "usage_unavailable"})
             self.assertEqual(recovery.recover_once(self.root, attempts={}, now=30), {"status": "probe_throttled"})
             self.assertEqual(calls, ["usage"])
             same_process_attempts = {}
-            with self.assertRaises(OSError):
-                recovery.recover_once(self.root, attempts=same_process_attempts, now=60)
+            self.assertEqual(recovery.recover_once(self.root, attempts=same_process_attempts, now=60),
+                             {"status": "usage_unavailable"})
             self.assertEqual(calls, ["usage", "usage"])
             self.assertEqual(recovery.recover_once(self.root, attempts=same_process_attempts, now=1),
                              {"status": "probe_throttled"})
             self.assertEqual(recovery._read_probe_ledger(self.root / "runtime-quota" / "probe-ledger.json")[identity], 1)
             self.assertEqual(recovery.recover_once(self.root, attempts={}, now=60), {"status": "probe_throttled"})
-            with self.assertRaises(OSError):
-                recovery.recover_once(self.root, attempts={}, now=61)
+            self.assertEqual(recovery.recover_once(self.root, attempts={}, now=61), {"status": "usage_unavailable"})
 
     def test_invalid_probe_state_prevents_external_request_and_reset(self):
         self.write_raw(b'{"version":1,"entries":{"fixture":0}}')

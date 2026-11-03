@@ -244,9 +244,14 @@ def recover_once(root: Path, *, attempts: dict | None = None, now: float | None 
         token, account = record.get("access_token"), record.get("account_id")
         if not isinstance(token, str) or not token or not isinstance(account, str) or not account:
             return {"status": "usage_unavailable"}
-        usage = accounts.request_json(USAGE_URL, headers={"Authorization": "Bearer " + token,
-            "Chatgpt-Account-Id": account, "User-Agent": "claude-codex-http-bridge",
-            "Cache-Control": "no-cache", "Pragma": "no-cache"}, timeout=12)
+        try:
+            usage = accounts.request_json(USAGE_URL, headers={"Authorization": "Bearer " + token,
+                "Chatgpt-Account-Id": account, "User-Agent": "claude-codex-http-bridge",
+                "Cache-Control": "no-cache", "Pragma": "no-cache"}, timeout=12)
+        except (OSError, RuntimeError, ValueError):
+            # Distinguish this phase without exposing endpoint errors, URLs,
+            # account data or credentials. Keep the local gate unchanged.
+            return {"status": "usage_unavailable"}
         if not usage_allows_requests(usage):
             return {"status": "upstream_not_available"}
         # Revalidate identity and the PID-owned listener after the network read.

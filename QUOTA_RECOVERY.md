@@ -88,13 +88,18 @@ HTTP proxy and does not follow redirects. This policy also applies to the
 on-demand recovery command. Transparent operating-system or network routing
 is outside this application's control. If the origin can infer through a proxy
 but direct HTTPS to the usage endpoint is blocked, the local quota gate cannot
-be safely reconciled by this check. `check_unavailable` does not establish
-that this is the cause: local state, TLS, DNS and other failures are possible.
+be safely reconciled by this check. The updated source returns the existing
+`usage_unavailable` status when a usage request fails, as well as when the
+selected record lacks required request data. This does not identify the cause:
+HTTP errors, TLS, DNS, malformed responses and other failures are possible.
+Other check failures still use `check_unavailable`. An older running monitor
+does not gain this classification until it is safely replaced.
 A [local transport fixture](tests/test_account_transport.py) uses only fake
 HTTP servers and a synthetic credential: an environment-aware control uses a
 fake proxy, while the account helper goes directly to the fake target, refuses
-a redirect and does not fall back to that proxy after a fake DNS failure. It
-does not test actual TLS, real network policy or the older running monitor.
+a redirect and does not fall back to that proxy after a fake DNS failure. The
+[three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41655278774)
+passed. This does not test actual TLS, real network policy or the older running monitor.
 Adding an explicitly selected proxy requires separate credential, trust and
 loopback-isolation review; the helper must not silently forward a local
 management key or change from direct to proxied routing.
