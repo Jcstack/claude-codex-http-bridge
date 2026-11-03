@@ -355,3 +355,11 @@ This blocks live use. Atomic versioned controller publication and consistent
 dependency imports remain prerequisites, along with handoff and rollback tests.
 The fixture redirects its child home and uses synthetic source; it is not an OS
 sandbox for arbitrary untrusted programs.
+
+A separate owned snapshot fixture copied the watcher and its immediate imports
+to a read-only directory, selected a different runtime root through the
+launcher environment and explicit arguments, and completed synthetic quota
+recovery without importing a conflicting top-level watcher. State appeared in
+the intended runtime root and the snapshot bytes did not change. This is a
+limited root-binding observation, not an atomic publisher, a complete import
+audit, same-user tamper resistance, or a live migration.

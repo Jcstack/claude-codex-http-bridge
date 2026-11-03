@@ -470,6 +470,78 @@ time.sleep(.3)
         old.terminate()  # Only the test-owned monitor.
         old.wait(timeout=5)
 
+    def test_owned_source_snapshot_binds_watcher_to_the_separate_runtime_root(self):
+        snapshot = self.root / "source-snapshot"
+        snapshot.mkdir(mode=0o700)
+        names = ("quota_recovery.py", "accounts.py", "api_profile.py", "codex_usage.py",
+                 "launcher.py", "runtime_bundle.py", "process_identity.py")
+        for name in names:
+            target = snapshot / name
+            shutil.copyfile(SOURCE / name, target)
+            target.chmod(0o400)
+        before = {path.name: path.read_bytes() for path in snapshot.iterdir()}
+        snapshot.chmod(0o500)
+        self.addCleanup(snapshot.chmod, 0o700)
+        # A different top-level source must never be imported by this child.
+        (self.root / "quota_recovery.py").write_text(
+            "from pathlib import Path\nPath(__file__).with_name('unreviewed-used').touch()\n", encoding="utf-8")
+        program = r'''
+import os,sys
+from pathlib import Path
+from types import SimpleNamespace
+root,snapshot=Path(sys.argv[1]),Path(sys.argv[2])
+sys.path.insert(0,str(snapshot))
+import accounts,api_profile,codex_usage,launcher,process_identity,quota_recovery as q,runtime_bundle
+for module in (accounts,api_profile,codex_usage,launcher,process_identity,q,runtime_bundle):
+    assert Path(module.__file__).resolve().parent==snapshot.resolve()
+assert os.path.samefile(launcher.ROOT,root)
+record={'account_id':'fixture','email':'fixture@example.invalid','access_token':'synthetic'}
+selected={'name':'fixture.json','record':record,'fingerprint':accounts.fingerprint(record)}
+row={'name':'fixture.json','provider':'codex','auth_index':'synthetic-index',
+     'cooldowns':[{'scope':'credential','reason':'credential_quota'}]}
+owner=type('Owner',(),{'state':{'pid':10,'port':12345},'key':'synthetic-management'})()
+calls=[]
+def request(url,**_options):
+    if url.endswith('/credentials'):
+        return {'files':[row]}
+    if url==q.USAGE_URL:
+        calls.append('usage')
+        return {'rate_limit':{'allowed':True,'limit_reached':False,'primary_window':{'used_percent':1}}}
+    if url.endswith('/routing/cooldown/reset'):
+        calls.append('reset')
+        return {'status':'ok'}
+    raise AssertionError('Unexpected synthetic endpoint')
+def active(candidate):
+    assert os.path.samefile(candidate,root)
+    return record
+states=iter([{'fixture':True}]*3+[None])
+clock={'value':0}
+q.time=SimpleNamespace(monotonic=lambda:clock['value'],time=lambda:1000+clock['value'])
+launcher.read_state=lambda _path:next(states)
+launcher.state_is_live=lambda _path,_state:True
+accounts.local_accounts=lambda _root:[selected]
+accounts.Management=lambda _root:owner
+accounts.request_json=request
+codex_usage.active_bridge_auth=active
+def wait(seconds):
+    clock['value']+=seconds
+assert q.watch(root,wait=wait)==0
+assert calls==['usage','reset']
+assert not (root/'unreviewed-used').exists()
+print('snapshot-context-ok',flush=True)
+'''
+        environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(self.root),
+                       "TMPDIR": str(self.root), "LANG": "C", "CLAUDE_CODEX_BRIDGE_HOME": str(self.root)}
+        child = subprocess.Popen([sys.executable, "-I", "-B", "-c", program, str(self.root), str(snapshot)],
+                                 cwd=self.root, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, start_new_session=True, bufsize=0)
+        self.children.append(child)
+        self.assertEqual(self.read_line(child), "snapshot-context-ok")
+        self.assertEqual(child.wait(timeout=5), 0)
+        self.assertFalse((self.root / "unreviewed-used").exists())
+        self.assertEqual(before, {path.name: path.read_bytes() for path in snapshot.iterdir()})
+        self.assertTrue((self.root / "runtime-quota" / "probe-ledger.json").is_file())
+
     def test_candidate_handoff_waits_for_an_inflight_account_operation(self):
         old = self.start_synthetic_runtime()
         holder_code = r'''
