@@ -90,8 +90,11 @@ its own temporary HOME and, on Windows, temporary USERPROFILE and AppData
 directories. Its explicitly selected CA environment is retained, and the
 existing direct-network policy is unchanged. A synthetic child confirmed the
 environment boundaries in the [three-platform initial gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41646045132).
-A later local test also paired a former-HOME control with a real model helper
-against a fake loopback proxy; this extension needs a separate platform run.
+A later test also paired a former-HOME control with a real model helper
+against a fake loopback proxy. Its [expanded gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41646534202)
+passed on Linux and Windows but timed out in the macOS real-helper fixture.
+That fixture had mocked listener readiness; adding a real loopback readiness
+check is a candidate test correction, not an established root cause.
 The change is not yet installed. HOME redirection is not an OS sandbox: same-user
 filesystem access, system credential stores, arbitrary native code and other
 proxy launch paths are not isolated by it.

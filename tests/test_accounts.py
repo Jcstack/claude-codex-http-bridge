@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 import urllib.parse
@@ -137,11 +138,23 @@ class AccountTests(unittest.TestCase):
                     return SimpleNamespace(stdout="", returncode=0)
                 return real_run(command, **kwargs)
 
+            def wait_for_fake_listener(process, port):
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    if process.poll() is not None:
+                        raise RuntimeError("Synthetic validation proxy exited before readiness")
+                    try:
+                        with socket.create_connection(("127.0.0.1", port), timeout=.2):
+                            return
+                    except OSError:
+                        time.sleep(.1)
+                raise RuntimeError("Synthetic validation proxy did not become ready")
+
             with patch.object(windows_acl, "lock"), patch.object(windows_acl, "verify"), \
                  patch.object(accounts.subprocess, "Popen", side_effect=launch), \
                  patch.object(accounts.subprocess, "run", side_effect=run), \
                  patch.object(launcher, "HELPER", root / "bridge_models.py"), \
-                 patch.object(launcher, "wait_for_private_listener"):
+                 patch.object(launcher, "wait_for_private_listener", side_effect=wait_for_fake_listener):
                 with accounts.isolated_account(root, {"type": "codex", "access_token": "synthetic-access"}) as probe:
                     self.assertEqual(probe["models"]["gpt-9.2-sol"]["context_window"], 872000)
                     self.assertEqual((child_roots[0] / "home-check").read_text(), "True")
