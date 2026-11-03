@@ -47,6 +47,23 @@ class SnapshotFixtureTest(unittest.TestCase):
         self.assertTrue(all(path.stat().st_mode & 0o777 == 0o400 for path in result.iterdir()))
         self.assertFalse((self.root / "auth").exists())
 
+    def test_native_publication_reports_only_a_sanitized_error_category(self):
+        runtime = self.root / "runtime-quota"
+        runtime_bundle.private_dir(runtime)
+        parent = runtime / "source-snapshots"
+        runtime_bundle.private_dir(parent)
+        content, digest = snapshot._manifest(self.expected)
+        stage = Path(tempfile.mkdtemp(prefix=".staging-", dir=parent))
+        for name in snapshot.FILES:
+            runtime_bundle.write_file(stage / name, (self.reviewed / name).read_bytes(), 0o400)
+        runtime_bundle.write_file(stage / "manifest.json", content, 0o400)
+        stage.chmod(0o500)
+        try:
+            snapshot._publish_exclusive(stage, parent / digest)
+        except (OSError, AttributeError) as error:
+            self.fail(f"Synthetic exclusive publication failed: {type(error).__name__}, errno={getattr(error, 'errno', None)}")
+        snapshot.verify_fixture(self.root, parent / digest, self.expected)
+
     def test_manifest_mismatch_is_refused_before_publication(self):
         (self.reviewed / "quota_recovery.py").write_text("# synthetic change\n", encoding="utf-8")
         with self.assertRaises(snapshot.SnapshotUnavailable):
