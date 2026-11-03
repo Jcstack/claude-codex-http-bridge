@@ -33,6 +33,12 @@ endpoint reads that local registry. The catalog can be an embedded or remote
 community-maintained source, subject to the proxy's current configuration.
 The source does not establish that any particular registered model is usable
 by an individual account or that its reported limit is current.
+An [isolated three-platform fixture](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41645294623)
+registered synthetic OAuth-shaped records with no tokens while its HTTP
+transport refused requests. Pro and Plus records received their corresponding
+embedded plan catalogs, and an unrecognized plan received the Pro catalog.
+This tests the pinned source path; it does not exercise the real account or
+establish the contents of a remote catalog.
 
 A local read-only check found no explicit catalog-source keys in the running
 origin's config and did not observe `--local-model` in that process's command.

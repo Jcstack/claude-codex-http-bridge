@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -38,7 +40,8 @@ class AccountTests(unittest.TestCase):
         environment = {"GITSTORE_GIT_URL": sentinel, "PGSTORE_DSN": sentinel,
                        "OBJECTSTORE_ENDPOINT": sentinel, "OPENAI_API_KEY": sentinel,
                        "https_proxy": "http://127.0.0.1:8001"}
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, environment), \
+        profiles = {name: sentinel for name in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA")}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {**environment, **profiles}), \
              patch.object(windows_acl, "lock"), patch.object(windows_acl, "verify"), \
              patch.object(accounts.subprocess, "run", return_value=SimpleNamespace(stdout="{}")) as helper, \
              patch.object(accounts.subprocess, "Popen") as spawn, \
@@ -50,10 +53,55 @@ class AccountTests(unittest.TestCase):
             with accounts.isolated_account(Path(temporary), record):
                 child = spawn.call_args.kwargs["env"]
                 for name in environment: self.assertNotIn(name, child)
+                home = spawn.call_args.kwargs["cwd"]
+                self.assertEqual(child["HOME"], str(home))
+                if os.name == "nt":
+                    self.assertEqual(child["USERPROFILE"], str(home))
+                    self.assertEqual(child["APPDATA"], str(home / "AppData" / "Roaming"))
+                    self.assertEqual(child["LOCALAPPDATA"], str(home / "AppData" / "Local"))
+                else:
+                    for name in ("USERPROFILE", "APPDATA", "LOCALAPPDATA"):
+                        self.assertNotIn(name, child)
                 self.assertEqual(helper.call_count, 2)
                 for call in helper.call_args_list:
                     self.assertEqual(call.args[0][1:3], ["-E", "-S"])
                     for name in environment: self.assertNotIn(name, call.kwargs["env"])
+
+    def test_disposable_validator_child_sees_its_temporary_home(self):
+        from types import SimpleNamespace
+        import launcher
+        import windows_acl
+        child_script = '''import json,os\nfrom pathlib import Path\nhome=Path(os.environ["HOME"])\ncwd=Path.cwd()\nprofile_ok=(os.name!="nt" or (Path(os.environ["USERPROFILE"])==home and Path(os.environ["APPDATA"]).is_relative_to(home) and Path(os.environ["LOCALAPPDATA"]).is_relative_to(home)))\nresult={"home_matches_cwd":home.resolve()==cwd.resolve(),"user_home_marker_visible":(home/"user-home-marker").exists(),"credential_inherited":"OPENAI_API_KEY" in os.environ,"proxy_inherited":"HTTPS_PROXY" in os.environ,"ca_setting_preserved":os.environ.get("SSL_CERT_FILE")=="synthetic-ca-path","profile_ok":profile_ok}\n(cwd/"child-observation.json").write_text(json.dumps(result),encoding="utf-8")\n'''
+        real_popen = subprocess.Popen
+        child_roots = []
+
+        def spawn_fixture(_command, **kwargs):
+            child_roots.append(kwargs["cwd"])
+            child = real_popen([sys.executable, "-I", "-c", child_script], **kwargs)
+            self.assertEqual(child.wait(timeout=10), 0)
+            return child
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            user_home = root / "user-home"
+            user_home.mkdir()
+            (user_home / "user-home-marker").write_text("synthetic", encoding="utf-8")
+            environment = {"HOME": str(user_home), "USERPROFILE": str(user_home),
+                           "APPDATA": str(user_home), "LOCALAPPDATA": str(user_home),
+                           "OPENAI_API_KEY": "SYNTHETIC_PRIVATE_FIXTURE",
+                           "HTTPS_PROXY": "http://proxy.invalid:1234", "SSL_CERT_FILE": "synthetic-ca-path"}
+            with patch.dict(os.environ, environment), patch.object(windows_acl, "lock"), \
+                 patch.object(windows_acl, "verify"), \
+                 patch.object(accounts.subprocess, "run", return_value=SimpleNamespace(stdout="{}")), \
+                 patch.object(accounts.subprocess, "Popen", side_effect=spawn_fixture), \
+                 patch.object(launcher, "wait_for_private_listener"), patch.object(launcher, "wait_for_catalog"), \
+                 patch.object(launcher, "stop_process"):
+                record = {"type": "codex", "access_token": "synthetic-access"}
+                with accounts.isolated_account(root, record):
+                    observation = json.loads((child_roots[0] / "child-observation.json").read_text())
+                    self.assertEqual(observation, {"home_matches_cwd": True, "user_home_marker_visible": False,
+                                                  "credential_inherited": False, "proxy_inherited": False,
+                                                  "ca_setting_preserved": True, "profile_ok": True})
 
     def test_installed_inactive_validation_cannot_become_a_second_refresh_owner(self):
         with tempfile.TemporaryDirectory() as temporary:

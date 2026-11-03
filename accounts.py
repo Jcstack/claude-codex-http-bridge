@@ -344,6 +344,20 @@ def isolated_account(root: Path, record: dict):
         # The validator keeps its existing direct-network policy and must not
         # inherit credentials or upstream storage-selection environment vars.
         environment = rolling_runtime.process_environment()
+        # The disposable proxy does not need the operator's home. Upstream
+        # resolves some configuration and discovery paths from HOME/APPDATA;
+        # keep those lookups under the validator's private temporary root.
+        environment["HOME"] = str(home)
+        if windows:
+            environment["USERPROFILE"] = str(home)
+            private_directory(home / "AppData")
+            for variable, child in (("APPDATA", "Roaming"), ("LOCALAPPDATA", "Local")):
+                target = home / "AppData" / child
+                private_directory(target)
+                environment[variable] = str(target)
+        else:
+            for variable in ("USERPROFILE", "APPDATA", "LOCALAPPDATA"):
+                environment.pop(variable, None)
         process = subprocess.Popen([str(proxy), "-config", str(config_path)], cwd=home, env=environment,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:

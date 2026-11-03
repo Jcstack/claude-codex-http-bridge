@@ -85,6 +85,15 @@ its original environment until it exits; the current origin was not restarted
 to apply it. A local check found none of the known storage or management
 override variable names in that existing process, without reporting values.
 
+The current source additionally gives the disposable account-validation proxy
+its own temporary HOME and, on Windows, temporary USERPROFILE and AppData
+directories. Its explicitly selected CA environment is retained, and the
+existing direct-network policy is unchanged. A local synthetic child confirmed
+the environment boundaries; this change is pending three-platform validation
+and is not yet installed. HOME redirection is not an OS sandbox: same-user
+filesystem access, system credential stores, arbitrary native code and other
+proxy launch paths are not isolated by it.
+
 The source now restricts separate model-catalog helper processes to selected
 operating-system and routing variables, retaining the requested PDF-hook and
 Windows ACL-debug settings. It also starts those Python children without
