@@ -410,3 +410,8 @@ in-memory Go transport tests concurrent calls and request construction. These
 checks do not sandbox all possible outbound traffic. The candidate can return
 the fallback during its first refresh and does not stop its periodic goroutine
 after provider removal, so it does not yet meet the release goal.
+The [initial three-platform observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41642870542)
+passed with an unmodified upstream baseline; Linux also passed a race-enabled
+fixture. A later version tests the selected translator patches and a synthetic
+tool/stream contract, and holds the initial refresh to check fallback behavior;
+those extensions require a separate run.

@@ -39,6 +39,9 @@ jobs:
           git -C upstream-source checkout --detach FETCH_HEAD
           cd upstream-source
           go mod verify
+          for patch in 12d97cf-inline-tools-backport.patch 12d97cf-deferred-tools.patch web-search-replay.patch loopback-tls.patch url-citations.patch native-compaction-v2.patch incomplete-tool-guard.patch effort-downgrade-guard.patch midconversation-effort.patch; do
+            git apply "../upstream/patches/$patch"
+          done
           go build -o "../original${{ matrix.suffix }}" ./cmd/server
           git apply --check ../upstream/patches/antigravity-lazy-candidate.patch
           git apply ../upstream/patches/antigravity-lazy-candidate.patch
@@ -50,4 +53,4 @@ jobs:
           go build -o "../candidate${{ matrix.suffix }}" ./cmd/server
       - name: Observe startup with empty synthetic homes and a blocking local proxy
         shell: bash
-        run: python tests/probe_antigravity_lazy.py "original${{ matrix.suffix }}" "candidate${{ matrix.suffix }}"
+        run: python tests/probe_antigravity_lazy.py "original${{ matrix.suffix }}" "candidate${{ matrix.suffix }}" --contract

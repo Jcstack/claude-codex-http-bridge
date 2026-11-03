@@ -18,8 +18,8 @@ class DiagnosticsTests(unittest.TestCase):
             path = Path(temporary) / "proxy.log"
             path.write_text(
                 '[2025-12-31T23:59:59Z] [12345678] failed to refresh antigravity version: timeout\n'
-                '[2026-01-02T12:00:00Z] [12345678] failed to refresh antigravity version: timeout https://user:PRIVATE_SECRET@example.invalid/PRIVATE_PATH\n'
                 '[2026-01-02T12:00:01Z] [12345678] failed to refresh antigravity version: context deadline exceeded PRIVATE_SECRET\n'
+                '[2026-01-02T12:00:00Z] [12345678] failed to refresh antigravity version: timeout https://user:PRIVATE_SECRET@example.invalid/PRIVATE_PATH\n'
                 '[2026-01-02T12:00:02Z] [87654321] failed to refresh antigravity version: connection refused PRIVATE_SECRET\n'
                 '[2026-01-02T12:00:03Z] [aabbccdd] upstream execution failed: timeout PRIVATE_SECRET\n'
                 '[2026-01-02T12:00:04Z] [aabbccdd] [info] [gin.go:1] 503 | 2s | 127.0.0.1 | POST "/v1/messages"\n'

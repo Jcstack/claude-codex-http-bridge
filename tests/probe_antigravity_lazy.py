@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+from unittest.mock import patch
 
 from claude_fixture import isolated_environment
 
@@ -45,6 +46,15 @@ def free_port() -> int:
         return listener.getsockname()[1]
 
 
+def blocked_environment(root: Path, proxy: ThreadingHTTPServer) -> dict[str, str]:
+    environment = isolated_environment(root)
+    proxy_url = f"http://127.0.0.1:{proxy.server_port}"
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        environment[name] = proxy_url
+    environment["NO_PROXY"] = environment["no_proxy"] = "127.0.0.1,localhost"
+    return environment
+
+
 def observe(binary: Path, root: Path, proxy: ThreadingHTTPServer, expect_manifest: bool) -> None:
     root.mkdir(mode=0o700)
     auth = root / "empty-auth"
@@ -69,11 +79,7 @@ observability:
     logging-to-file: false
     request-log: false
 ''', encoding="utf-8")
-    environment = isolated_environment(root)
-    proxy_url = f"http://127.0.0.1:{proxy.server_port}"
-    for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
-        environment[name] = proxy_url
-    environment["NO_PROXY"] = environment["no_proxy"] = "127.0.0.1,localhost"
+    environment = blocked_environment(root, proxy)
     proxy.manifest_mentions.clear()  # type: ignore[attr-defined]
     process = subprocess.Popen([str(binary), "-config", str(config)], cwd=root,
                                env=environment, stdin=subprocess.DEVNULL,
@@ -117,9 +123,10 @@ observability:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit("Usage: probe_antigravity_lazy.py /path/to/original /path/to/candidate")
-    original, candidate = (Path(value).resolve(strict=True) for value in sys.argv[1:])
+    if len(sys.argv) not in (3, 4) or (len(sys.argv) == 4 and sys.argv[3] != "--contract"):
+        raise SystemExit("Usage: probe_antigravity_lazy.py /path/to/original /path/to/candidate [--contract]")
+    original, candidate = (Path(value).resolve(strict=True) for value in sys.argv[1:3])
+    contract = len(sys.argv) == 4
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), BlockingProxy)
     proxy.manifest_mentions = []  # type: ignore[attr-defined]
     worker = threading.Thread(target=proxy.serve_forever, daemon=True)
@@ -129,6 +136,17 @@ def main() -> None:
             root = Path(temporary)
             observe(original, root / "control", proxy, True)
             observe(candidate, root / "candidate", proxy, False)
+            if contract:
+                import smoke_api_contract
+                proxy.manifest_mentions.clear()  # type: ignore[attr-defined]
+                # The smoke fixture uses its own empty home and a fake Responses
+                # upstream. Preserve that setup while blocking external HTTP(S).
+                with patch.object(smoke_api_contract, "isolated_environment",
+                                  side_effect=lambda path: blocked_environment(path, proxy)), \
+                     patch.object(sys, "argv", ["smoke_api_contract.py", str(candidate)]):
+                    smoke_api_contract.main()
+                if any(proxy.manifest_mentions):  # type: ignore[attr-defined]
+                    raise AssertionError("synthetic model traffic started an Antigravity version refresh")
     finally:
         proxy.shutdown()
         proxy.server_close()

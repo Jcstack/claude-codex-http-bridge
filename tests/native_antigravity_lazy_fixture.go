@@ -20,23 +20,35 @@ func (f bridgeRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, e
 
 func TestBridgeLazyAntigravityVersion(t *testing.T) {
 	requests := make(chan *http.Request, 64)
+	allowResponse := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(allowResponse) }) }
+	defer release()
 	previousTransport := http.DefaultTransport
 	http.DefaultTransport = bridgeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests <- request
+		<-allowResponse
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header),
 			Body: io.NopCloser(strings.NewReader("version: 2.99.0\n")), Request: request}, nil
 	})
 	defer func() { http.DefaultTransport = previousTransport }()
 
 	var workers sync.WaitGroup
+	versions := make(chan string, 32)
 	for i := 0; i < 32; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			_ = AntigravityLatestVersion()
+			versions <- AntigravityLatestVersion()
 		}()
 	}
 	workers.Wait()
+	close(versions)
+	for version := range versions {
+		if version != antigravityFallbackVersion {
+			t.Fatal("the held initial refresh did not expose the fallback behavior")
+		}
+	}
 	var request *http.Request
 	select {
 	case request = <-requests:
@@ -49,6 +61,7 @@ func TestBridgeLazyAntigravityVersion(t *testing.T) {
 		request.Header.Get("User-Agent") != "electron-builder" || request.Header.Get("Cache-Control") != "no-cache" {
 		t.Fatal("unexpected synthetic request construction")
 	}
+	release()
 	deadline := time.Now().Add(5 * time.Second)
 	for AntigravityLatestVersion() != "2.99.0" {
 		if time.Now().After(deadline) {

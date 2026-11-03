@@ -181,7 +181,8 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                 category = ("antigravity_version_refresh_timeout" if timed_out
                             else "antigravity_version_refresh_other")
                 background_events[category] += 1
-                background_last[category] = at.isoformat()
+                if category not in background_last or at > background_last[category]:
+                    background_last[category] = at
             if "stream disconnected before completion" in lower or "stream closed before response.completed" in lower:
                 category = "incomplete_native_stream"
                 inband[category] += 1
@@ -254,7 +255,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "seconds_after_failure": round(rows[0]["delay"], 3) if unique else None})
     ordered = sorted(latencies)
     return {"completed_http_statuses": dict(counts), "transport_error_mentions": dict(errors),
-            "background_event_mentions": {category: {"mentions": count, "last_at": background_last[category]}
+            "background_event_mentions": {category: {"mentions": count, "last_at": background_last[category].isoformat()}
                                           for category, count in background_events.items()},
             "upstream_preconnection_failures": {category: {
                 "attempt_mentions": count, "tagged_requests": len(preconnect_requests.get(category, set())),

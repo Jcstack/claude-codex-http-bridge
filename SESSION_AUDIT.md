@@ -98,7 +98,10 @@ before sharing. It is not automatically saved or committed.
   a backend containing only such a marker remains visible. These are log-text
   observations, not inference-failure counts, proof of a network connection,
   or a cross-process correlation. General transport mentions can include the
-  same lines, so do not add the categories together.
+  same lines, so do not add the categories together. The
+  [three-platform metadata gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41642870095)
+  passed, and the module was installed locally with a private rollback and no
+  service restart. A subsequent local regression covers out-of-order timestamps.
 - The managed-log filter must retain an incomplete-stream sentinel even when
   no HTTP access record or general transport keyword exists. Oversized lines
   also need visible coverage because their timestamps and content are unknown.
