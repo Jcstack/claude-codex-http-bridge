@@ -64,6 +64,19 @@ class SnapshotFixtureTest(unittest.TestCase):
             self.fail(f"Synthetic exclusive publication failed: {type(error).__name__}, errno={getattr(error, 'errno', None)}")
         snapshot.verify_fixture(self.root, parent / digest, self.expected)
 
+    def test_native_publication_with_a_writable_source_directory_control(self):
+        runtime = self.root / "runtime-quota"
+        runtime_bundle.private_dir(runtime)
+        parent = runtime / "source-snapshots"
+        runtime_bundle.private_dir(parent)
+        stage = Path(tempfile.mkdtemp(prefix=".staging-control-", dir=parent))
+        runtime_bundle.write_file(stage / "synthetic", b"fixture", 0o400)
+        try:
+            snapshot._publish_exclusive(stage, parent / "control")
+        except (OSError, AttributeError) as error:
+            self.fail(f"Synthetic writable publication failed: {type(error).__name__}, errno={getattr(error, 'errno', None)}")
+        self.assertTrue((parent / "control" / "synthetic").is_file())
+
     def test_manifest_mismatch_is_refused_before_publication(self):
         (self.reviewed / "quota_recovery.py").write_text("# synthetic change\n", encoding="utf-8")
         with self.assertRaises(snapshot.SnapshotUnavailable):
@@ -219,13 +232,18 @@ print(result.name)
         try:
             for child in children:
                 out, err = child.communicate(timeout=20)
-                self.assertEqual((child.returncode, err), (0, ""))
+                self.assertEqual(child.returncode, 0, "Synthetic snapshot process failed")
+                self.assertEqual(err, "", "Synthetic snapshot process wrote to stderr")
                 outputs.append(out.strip())
         finally:
             for child in children:
                 if child.poll() is None:
                     child.terminate()
                     child.communicate(timeout=5)
+                if child.stdout and not child.stdout.closed:
+                    child.stdout.close()
+                if child.stderr and not child.stderr.closed:
+                    child.stderr.close()
         self.assertEqual(len(set(outputs)), 1)
         result = self.root / "runtime-quota" / "source-snapshots" / outputs[0]
         snapshot.verify_fixture(self.root, result, self.expected)
