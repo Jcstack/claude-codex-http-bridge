@@ -618,6 +618,72 @@ time.sleep(.3)
         old.terminate()  # Only the owned synthetic monitor.
         old.wait(timeout=5)
 
+    def test_memory_fixture_handoff_waits_for_lock_and_replaces_owned_monitor(self):
+        old = self.start_synthetic_runtime()
+        sentinel = self.start("import sys; print('sentinel-ready',flush=True); sys.stdin.readline()")
+        self.assertEqual(self.read_line(sentinel), "sentinel-ready")
+        holder_code = r'''
+import sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import accounts
+with accounts.switch_lock(Path(sys.argv[2]),wait_seconds=5):
+    print('in-flight',flush=True)
+    sys.stdin.readline()
+'''
+        holder = self.start(holder_code, SOURCE, self.root)
+        self.assertEqual(self.read_line(holder), "in-flight")
+        expected = self.fixture_manifest()
+        successors, result = [], []
+        entered = threading.Event()
+        actual_switch_lock = accounts.switch_lock
+
+        def spawn_memory(root, script):
+            frame, digest = quota_memory_fixture.prepare_fixture(root, script.parent, expected)
+            child = quota_memory_fixture.spawn_fixture(root, frame, digest)
+            self.children.append(child)
+            successors.append(child)
+            return child
+
+        def observed_lock(root, **options):
+            entered.set()
+            return actual_switch_lock(root, **options)
+
+        def run():
+            try:
+                result.append(self.invoke_handoff())
+            except Exception as error:
+                result.append(error)
+
+        worker = threading.Thread(target=run)
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=spawn_memory), \
+             patch.object(accounts, "switch_lock", side_effect=observed_lock):
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(timeout=5))
+                time.sleep(.2)
+                self.assertTrue(worker.is_alive())
+                self.assertIsNone(old.poll())
+                self.assertEqual(successors, [])
+            finally:
+                holder.stdin.write(b"complete\n")
+                holder.stdin.flush()
+                holder.wait(timeout=5)
+                worker.join(timeout=20)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(result, [{"status": "replacement_reported", "monitor_protocol": 2}])
+        self.assertEqual(old.wait(timeout=5), -signal.SIGTERM)
+        self.assertEqual(len(successors), 1)
+        self.assertIsNone(successors[0].poll())
+        self.assertIsNone(sentinel.poll())
+        self.assertTrue((self.root / "runtime-quota" / "probe-ledger.json").is_file())
+        # The existing observer recognizes script-based watchers, not this
+        # memory bootstrap. It must refuse rather than infer the new identity.
+        with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
+            quota_monitor_identity.observe(self.root)
+        successors[0].terminate()  # Only the owned synthetic replacement.
+        successors[0].wait(timeout=5)
+
     def test_owned_source_snapshot_binds_watcher_to_the_separate_runtime_root(self):
         runtime_bundle.write_file(self.root / ".quota-handoff-fixture", b"synthetic quota fixture\n", 0o600)
         expected = {name: hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() for name in quota_snapshot_fixture.FILES}

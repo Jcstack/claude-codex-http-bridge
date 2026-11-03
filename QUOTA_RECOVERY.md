@@ -123,7 +123,7 @@ import. A separate synthetic case runs the actual recovery function against
 fake account, usage and reset services, with a shortened polling/quiet interval
 and a stub account lock. It demonstrates a recovery path in the fixture, not
 real upstream behavior or concurrent lock correctness. The tests do not use
-account credentials or signal an existing watcher.
+real account credentials or signal the user's existing watcher.
 
 The [initial gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41650357114)
 passed on macOS and Linux; Windows ran the broader suite but skipped the
@@ -133,6 +133,14 @@ the coordinator rechecked. The changed source did not run; the signal was
 mocked, the prior owned synthetic watcher stayed alive, and both test children
 were cleaned up. This does not demonstrate an actual handoff or authenticate a
 production replacement process.
+
+A separate local macOS fixture used a real generation-bound signal only on its
+own synthetic monitor. It waited for a separate fixture to release the account
+lock, reported a new protocol-2 child and ledger, and left an unrelated owned
+process alive. The existing read-only identity observer rejects that memory
+child because it recognizes script-based commands, so repeated handoff and
+identity verification remain unimplemented. This does not authorize signaling
+the real monitor or establish safety for an in-flight real quota request.
 
 This is not a production launcher or OS sandbox. It trusts the manifest, parent
 code, interpreter and standard library; it does not prove protection against
