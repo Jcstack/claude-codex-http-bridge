@@ -27,6 +27,7 @@ import process_identity
 import quota_monitor_identity
 import quota_monitor_handoff
 import quota_recovery
+import quota_snapshot_fixture
 import runtime_bundle
 
 
@@ -471,16 +472,10 @@ time.sleep(.3)
         old.wait(timeout=5)
 
     def test_owned_source_snapshot_binds_watcher_to_the_separate_runtime_root(self):
-        snapshot = self.root / "source-snapshot"
-        snapshot.mkdir(mode=0o700)
-        names = ("quota_recovery.py", "accounts.py", "api_profile.py", "codex_usage.py",
-                 "launcher.py", "runtime_bundle.py", "process_identity.py")
-        for name in names:
-            target = snapshot / name
-            shutil.copyfile(SOURCE / name, target)
-            target.chmod(0o400)
+        runtime_bundle.write_file(self.root / ".quota-handoff-fixture", b"synthetic quota fixture\n", 0o600)
+        expected = {name: hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() for name in quota_snapshot_fixture.FILES}
+        snapshot = quota_snapshot_fixture.publish_fixture(self.root, SOURCE, expected)
         before = {path.name: path.read_bytes() for path in snapshot.iterdir()}
-        snapshot.chmod(0o500)
         self.addCleanup(snapshot.chmod, 0o700)
         # A different top-level source must never be imported by this child.
         (self.root / "quota_recovery.py").write_text(

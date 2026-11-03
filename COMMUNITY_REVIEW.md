@@ -356,10 +356,16 @@ dependency imports remain prerequisites, along with handoff and rollback tests.
 The fixture redirects its child home and uses synthetic source; it is not an OS
 sandbox for arbitrary untrusted programs.
 
-A separate owned snapshot fixture copied the watcher and its immediate imports
-to a read-only directory, selected a different runtime root through the
-launcher environment and explicit arguments, and completed synthetic quota
-recovery without importing a conflicting top-level watcher. State appeared in
-the intended runtime root and the snapshot bytes did not change. This is a
-limited root-binding observation, not an atomic publisher, a complete import
-audit, same-user tamper resistance, or a live migration.
+A separate [fixture-only snapshot publisher](quota_snapshot_fixture.py) checks
+an explicit source manifest and publishes a read-only directory with Darwin's
+exclusive atomic rename; it does not replace an existing destination. Apple
+[documents that support is volume-dependent](https://developer.apple.com/documentation/foundation/urlresourcevalues/volumesupportsexclusiverenaming);
+the fixture fails closed when the operation is unavailable. Local
+tests cover concurrent publishers, malformed or changed files, failed staging,
+unsupported rename, and process exits immediately before and after publication.
+An interrupted staging directory remains for a later safe cleanup design; it is
+not silently deleted. A watcher loaded from the published fixture snapshot and
+its immediate imports used a separate temporary runtime root for synthetic
+quota recovery, without importing a conflicting top-level source. This is not
+a complete dependency audit, a power-loss guarantee, same-user tamper
+resistance, or a live migration. The handoff does not use this publisher yet.

@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
 import select
 import signal
 import stat
@@ -20,7 +21,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import re
 
 import accounts
 import quota_monitor_identity
