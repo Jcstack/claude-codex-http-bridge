@@ -118,8 +118,10 @@ the reviewed bytes into a bounded frame, and passes that frame through an
 inherited unlinked file descriptor to a temporary owned child. The isolated
 child checks the frame digest and individual file hashes and loads the listed
 Python modules from memory. Synthetic local tests replace source files and a
-published snapshot after capture, corrupt a frame, and try an unlisted local
-import. A separate synthetic case runs the actual recovery function against
+published snapshot after capture, corrupt a frame and its inherited descriptor,
+and try an unlisted local import. The descriptor corruption is performed by
+the test parent before the owned child reads it; it is not evidence that an
+unrelated process could access that descriptor. A separate synthetic case runs the actual recovery function against
 fake account, usage and reset services, with a shortened polling/quiet interval
 and a stub account lock. It demonstrates a recovery path in the fixture, not
 real upstream behavior or concurrent lock correctness. The tests do not use
@@ -134,13 +136,15 @@ mocked, the prior owned synthetic watcher stayed alive, and both test children
 were cleaned up. This does not demonstrate an actual handoff or authenticate a
 production replacement process.
 
-A separate local macOS fixture used a real generation-bound signal only on its
+A separate macOS fixture used a real generation-bound signal only on its
 own synthetic monitor. It waited for a separate fixture to release the account
 lock, reported a new protocol-2 child and ledger, and left an unrelated owned
 process alive. The existing read-only identity observer rejects that memory
 child because it recognizes script-based commands, so repeated handoff and
 identity verification remain unimplemented. A second synthetic handoff
 attempt refused before spawning or signaling and left the successor alive.
+That fixture passed in the [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41651716086);
+the owned signal and handoff test runs only on macOS.
 This does not authorize signaling the real monitor or establish safety for an
 in-flight real quota request.
 

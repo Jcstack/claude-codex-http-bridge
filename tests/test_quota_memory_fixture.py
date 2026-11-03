@@ -81,6 +81,24 @@ class MemoryFixtureTests(unittest.TestCase):
         self.assertEqual(output, b"")
         self.assertFalse((self.root / "runtime-quota").exists())
 
+    def test_descriptor_content_changed_before_child_reads_is_rejected(self):
+        frame, digest = quota_memory_fixture.prepare_fixture(self.root, self.source, self.manifest())
+        real_popen = subprocess.Popen
+
+        def corrupt_descriptor(command, **kwargs):
+            descriptor, = kwargs["pass_fds"]
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            os.write(descriptor, b"!")
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            return real_popen(command, **kwargs)
+
+        with patch.object(quota_memory_fixture.subprocess, "Popen", side_effect=corrupt_descriptor):
+            child = self.spawn(frame, digest)
+        output, _ = child.communicate(input=b"go\n", timeout=10)
+        self.assertNotEqual(child.returncode, 0)
+        self.assertEqual(output, b"")
+        self.assertFalse((self.root / "runtime-quota").exists())
+
     @unittest.skipUnless(sys.platform == "darwin", "Snapshot publisher requires macOS exclusive rename")
     def test_published_snapshot_swap_after_capture_does_not_execute_changed_source(self):
         expected = self.manifest()
