@@ -89,6 +89,50 @@ class OwnedDarwinHandoffTest(unittest.TestCase):
         token[5], token[7] = child.pid, version
         return self.native(token, signal.SIGTERM)
 
+    def test_an_open_lock_file_alone_does_not_identify_its_exclusive_owner(self):
+        import fcntl
+
+        owner_code = r'''
+import sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import quota_recovery
+with quota_recovery.monitor_lock(Path(sys.argv[2])/'runtime-quota') as acquired:
+    assert acquired
+    print('locked',flush=True)
+    sys.stdin.readline()
+'''
+        reader_code = r'''
+import sys
+with open(sys.argv[1],'rb'):
+    print('open',flush=True)
+    sys.stdin.readline()
+'''
+        owner = self.start(owner_code, SOURCE, self.root)
+        self.assertEqual(self.read_line(owner), "locked")
+        path = self.root / "runtime-quota" / "monitor.lock"
+        reader = self.start(reader_code, path)
+        self.assertEqual(self.read_line(reader), "open")
+        environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C"}
+        result = subprocess.run(["/usr/sbin/lsof", "-nP", "-Fp", "--", str(path)],
+                                env=environment, cwd=self.root, capture_output=True, text=True,
+                                timeout=10, check=True)
+        openers = {int(line[1:]) for line in result.stdout.splitlines() if line.startswith("p")}
+        self.assertEqual(openers, {owner.pid, reader.pid})
+        # Even a reader that has not locked the file appears in the openers.
+        # A separate nonblocking lock attempt only establishes that some
+        # process holds it, and must not be used on the live service here.
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            self.assertEqual((os.fstat(descriptor).st_dev, os.fstat(descriptor).st_ino),
+                             (path.stat().st_dev, path.stat().st_ino))
+            with self.assertRaises(BlockingIOError):
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(descriptor)
+        self.assertIsNone(owner.poll())
+        self.assertIsNone(reader.poll())
+
     def test_query_drains_before_owned_monitor_is_signaled_and_successor_acquires_locks(self):
         old_code = r'''
 import sys

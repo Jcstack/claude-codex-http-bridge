@@ -316,3 +316,14 @@ the lock, bind all identity checks to its generation, ensure a successor is
 ready, and test failure and rollback paths. The private metadata ABI and other
 macOS versions may differ; unsupported reads must fail closed. Windows and
 Linux need their own identity-bound mechanisms.
+
+One read-only observation of the existing monitor found the expected command,
+an open lock file, and unchanged process identity across the observation; it
+did not establish exclusive lock ownership. On this host the native executable
+matched the current interpreter's native process image but not Python's
+`sys.executable` launcher path. A synthetic negative control also showed that
+an unrelated reader appears as an opener of the same file; the local `lsof`
+lock field was blank for both the flock holder and reader in that fixture.
+That observation is not a claim about every macOS version. Any eventual owner
+check must account for both facts and must not acquire a live lock just to make
+a read-only status check, which could race a watcher startup.
