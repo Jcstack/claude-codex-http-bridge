@@ -338,7 +338,8 @@ raise AssertionError("Synthetic crash did not occur")
         before = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
         result = recovery.monitor_status(self.root)
         self.assertEqual(result, {"last_status": "probe_throttled", "checked_at": 123,
-                                  "monitor_protocol": None, "liveness": "unverified", "probe_ledger": "valid"})
+                                  "monitor_protocol": None, "liveness": "unverified", "probe_ledger": "valid",
+                                  "lock_observation": "absent" if sys.platform == "darwin" else "unsupported"})
         self.assertNotIn("SYNTHETIC_PRIVATE", json.dumps(result))
         self.assertEqual(before, {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()})
         with patch("builtins.print") as display:
@@ -347,7 +348,8 @@ raise AssertionError("Synthetic crash did not occur")
 
     def test_status_with_no_monitor_creates_nothing(self):
         self.assertEqual(recovery.monitor_status(self.root), {"last_status": None, "checked_at": None,
-            "monitor_protocol": None, "liveness": "unverified", "probe_ledger": "absent"})
+            "monitor_protocol": None, "liveness": "unverified", "probe_ledger": "absent",
+            "lock_observation": "absent" if sys.platform == "darwin" else "unsupported"})
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_status_refuses_a_non_directory_runtime(self):

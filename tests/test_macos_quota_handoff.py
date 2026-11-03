@@ -19,6 +19,7 @@ import unittest
 
 import accounts
 import process_identity
+import quota_recovery
 
 
 SOURCE = Path(__file__).resolve().parent.parent
@@ -112,6 +113,10 @@ with open(sys.argv[1],'rb'):
         owner = self.start(owner_code, SOURCE, self.root)
         self.assertEqual(self.read_line(owner), "locked")
         path = self.root / "runtime-quota" / "monitor.lock"
+        before = path.stat()
+        observed = quota_recovery.monitor_status(self.root)
+        self.assertEqual((observed["lock_observation"], observed["liveness"]), ("conflict", "unverified"))
+        self.assertEqual((path.stat().st_mtime_ns, path.stat().st_size), (before.st_mtime_ns, before.st_size))
         reader = self.start(reader_code, path)
         self.assertEqual(self.read_line(reader), "open")
         environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C"}
@@ -133,6 +138,28 @@ with open(sys.argv[1],'rb'):
             os.close(descriptor)
         self.assertIsNone(owner.poll())
         self.assertIsNone(reader.poll())
+        owner.stdin.write(b"done\n")
+        owner.stdin.flush()
+        self.assertEqual(owner.wait(timeout=5), 0)
+        self.assertEqual(quota_recovery.monitor_status(self.root)["lock_observation"], "no_conflict")
+        self.assertIsNone(reader.poll())
+
+    def test_read_only_lock_observation_refuses_symlinks(self):
+        directory = self.root / "runtime-quota"
+        directory.mkdir(mode=0o700)
+        outside = self.root / "outside"
+        outside.write_bytes(b"synthetic")
+        (directory / "monitor.lock").symlink_to(outside)
+        self.assertEqual(quota_recovery.monitor_status(self.root)["lock_observation"], "unavailable")
+        self.assertEqual(outside.read_bytes(), b"synthetic")
+
+    def test_read_only_lock_observation_refuses_broad_permissions(self):
+        directory = self.root / "runtime-quota"
+        directory.mkdir(mode=0o700)
+        path = directory / "monitor.lock"
+        path.touch(mode=0o600)
+        path.chmod(0o644)
+        self.assertEqual(quota_recovery.monitor_status(self.root)["lock_observation"], "unavailable")
 
     def test_query_drains_before_owned_monitor_is_signaled_and_successor_acquires_locks(self):
         old_code = r'''

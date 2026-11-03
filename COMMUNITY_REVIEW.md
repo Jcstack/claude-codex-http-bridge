@@ -327,5 +327,9 @@ matched the current interpreter's native process image but not Python's
 an unrelated reader appears as an opener of the same file; the local `lsof`
 lock field was blank for both the flock holder and reader in that fixture.
 That observation is not a claim about every macOS version. Any eventual owner
-check must account for both facts and must not acquire a live lock just to make
-a read-only status check, which could race a watcher startup.
+check must account for both facts. Apple's [fcntl documentation](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fcntl.2.html)
+describes the read-only `F_GETLK` query; the local macOS manual specifies that
+an `flock` conflict does not reveal a process owner. An owned fixture observed
+both a conflict and its removal without acquiring the lock. The status source
+reports this observation on macOS without claiming process liveness; it does
+not acquire a live lock, which could race a watcher startup.

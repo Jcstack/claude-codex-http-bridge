@@ -78,7 +78,12 @@ claude-codex quota recover
 `status` reads only the last allowlisted monitor result, reported protocol and
 whether probe state passes structural and local-permission checks. It does not
 authenticate the ledger, contact a service, report account or process
-identifiers, or establish that the monitor is still alive. A missing
+identifiers, or establish that the monitor is still alive. On macOS it also
+uses `F_GETLK` to report a conflicting lock, no conflict, missing lock file, or
+an unavailable observation without taking the lock. A conflicting lock does
+not identify its owner, and either result can change immediately. No conflict
+does not prove a watcher is absent. Other platforms currently report this
+observation as unsupported. A missing
 protocol can indicate an older monitor or unavailable state. `recover`
 performs the checks once. `recovered` means the local stale gate was
 released; `no_stale_credential_quota` means no matching local gate needed work.

@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 import platform
 import re
+import stat
+import struct
 import subprocess
 import sys
 import threading
@@ -344,11 +346,45 @@ def ensure_watch(root: Path) -> None:
         env=environment, cwd=root, **options)
 
 
+def monitor_lock_observation(directory: Path) -> str:
+    """Observe a macOS lock conflict without acquiring or identifying its owner."""
+    if sys.platform != "darwin":
+        return "unsupported"
+    try:
+        import fcntl
+        if directory.is_symlink():
+            return "unavailable"
+        path = directory / "monitor.lock"
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            return "absent"
+        try:
+            opened = os.fstat(descriptor)
+            named = os.stat(path, follow_symlinks=False)
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.geteuid()
+                    or opened.st_mode & 0o077 or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
+                return "unavailable"
+            request = struct.pack("@qqihh", 0, 0, 0, fcntl.F_WRLCK, os.SEEK_SET)
+            response = fcntl.fcntl(descriptor, fcntl.F_GETLK, request)
+            kind = struct.unpack("@qqihh", response)[3]
+            if kind == fcntl.F_UNLCK:
+                return "no_conflict"
+            if kind in (fcntl.F_RDLCK, fcntl.F_WRLCK):
+                return "conflict"
+            return "unavailable"
+        finally:
+            os.close(descriptor)
+    except (OSError, RuntimeError, ValueError, AttributeError, struct.error):
+        return "unavailable"
+
+
 def monitor_status(root: Path) -> dict:
     """Read only allowlisted status; do not claim that the process is alive."""
-    result = {"last_status": None, "checked_at": None, "monitor_protocol": None,
-              "liveness": "unverified", "probe_ledger": "absent"}
     directory = root / "runtime-quota"
+    result = {"last_status": None, "checked_at": None, "monitor_protocol": None,
+              "liveness": "unverified", "probe_ledger": "absent",
+              "lock_observation": monitor_lock_observation(directory)}
     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
         return {**result, "probe_ledger": "unavailable"}
     status = directory / "status.json"
