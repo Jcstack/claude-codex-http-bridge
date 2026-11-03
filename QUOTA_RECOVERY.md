@@ -125,6 +125,15 @@ and a stub account lock. It demonstrates a recovery path in the fixture, not
 real upstream behavior or concurrent lock correctness. The tests do not use
 account credentials or signal an existing watcher.
 
+The [initial gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41650357114)
+passed on macOS and Linux; Windows ran the broader suite but skipped the
+POSIX-descriptor fixture. A later macOS-only coordinator control substituted
+the memory child, replaced the snapshot during startup, and restored it before
+the coordinator rechecked. The changed source did not run; the signal was
+mocked, the prior owned synthetic watcher stayed alive, and both test children
+were cleaned up. This does not demonstrate an actual handoff or authenticate a
+production replacement process.
+
 This is not a production launcher or OS sandbox. It trusts the manifest, parent
 code, interpreter and standard library; it does not prove protection against
 same-user manipulation of the parent or child process, complete dependency

@@ -26,6 +26,7 @@ import accounts
 import process_identity
 import quota_monitor_identity
 import quota_monitor_handoff
+import quota_memory_fixture
 import quota_recovery
 import quota_snapshot_fixture
 import runtime_bundle
@@ -576,6 +577,45 @@ time.sleep(.3)
         self.assertTrue(armed.exists())
         self.assertIsNone(old.poll())
         old.terminate()  # Only the test-owned monitor.
+        old.wait(timeout=5)
+
+    def test_memory_fixture_blocks_the_snapshot_swap_in_handoff_negative_control(self):
+        old = self.start_synthetic_runtime()
+        expected = self.fixture_manifest()
+        loaded = self.root / "synthetic-memory-attack-loaded"
+        program = ("from pathlib import Path\n"
+                   "Path.home().joinpath('synthetic-memory-attack-loaded').touch()\n")
+        children = []
+
+        def memory_spawn_with_tamper(root, script):
+            frame, digest = quota_memory_fixture.prepare_fixture(root, script.parent, expected)
+            directory = script.parent
+            saved = directory / "synthetic-saved-source.py"
+            directory.chmod(0o700)
+            os.replace(script, saved)
+            try:
+                runtime_bundle.write_file(script, program.encode(), 0o400)
+                child = quota_memory_fixture.spawn_fixture(root, frame, digest)
+                self.children.append(child)
+                children.append(child)
+                readable, _, _ = select.select([child.stdout], [], [], 10)
+                self.assertTrue(readable, "Memory fixture did not finish importing")
+                self.assertFalse(loaded.exists())
+            finally:
+                os.replace(saved, script)
+                directory.chmod(0o500)
+            return child
+
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=memory_spawn_with_tamper), \
+             patch.object(quota_monitor_handoff, "_signal", return_value=errno.EPERM) as mocked_signal:
+            result = self.invoke_handoff()
+        self.assertEqual(result, {"status": "replacement_unverified"})
+        self.assertEqual(mocked_signal.call_count, 1)
+        self.assertFalse(loaded.exists())
+        self.assertIsNone(old.poll())
+        children[0].terminate()  # Only the owned synthetic replacement.
+        children[0].wait(timeout=5)
+        old.terminate()  # Only the owned synthetic monitor.
         old.wait(timeout=5)
 
     def test_owned_source_snapshot_binds_watcher_to_the_separate_runtime_root(self):
