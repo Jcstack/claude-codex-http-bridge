@@ -7,6 +7,7 @@ from io import StringIO
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
@@ -70,6 +71,7 @@ class AccountTests(unittest.TestCase):
     def test_disposable_validator_child_sees_its_temporary_home(self):
         from types import SimpleNamespace
         import launcher
+        import rolling_runtime
         import windows_acl
         child_script = '''import json,os\nfrom pathlib import Path\nhome=Path(os.environ["HOME"])\ncwd=Path.cwd()\nprofile_ok=(os.name!="nt" or (Path(os.environ["USERPROFILE"])==home and Path(os.environ["APPDATA"]).is_relative_to(home) and Path(os.environ["LOCALAPPDATA"]).is_relative_to(home)))\nresult={"home_matches_cwd":home.resolve()==cwd.resolve(),"user_home_marker_visible":(home/"user-home-marker").exists(),"credential_inherited":"OPENAI_API_KEY" in os.environ,"proxy_inherited":"HTTPS_PROXY" in os.environ,"ca_setting_preserved":os.environ.get("SSL_CERT_FILE")=="synthetic-ca-path","profile_ok":profile_ok}\n(cwd/"child-observation.json").write_text(json.dumps(result),encoding="utf-8")\n'''
         real_popen = subprocess.Popen
@@ -90,6 +92,12 @@ class AccountTests(unittest.TestCase):
                            "APPDATA": str(user_home), "LOCALAPPDATA": str(user_home),
                            "OPENAI_API_KEY": "SYNTHETIC_PRIVATE_FIXTURE",
                            "HTTPS_PROXY": "http://proxy.invalid:1234", "SSL_CERT_FILE": "synthetic-ca-path"}
+            with patch.dict(os.environ, environment):
+                control = subprocess.run([sys.executable, "-I", "-c",
+                                          'import os,pathlib; print((pathlib.Path(os.environ["HOME"])/"user-home-marker").exists())'],
+                                         env=rolling_runtime.process_environment(), capture_output=True,
+                                         text=True, timeout=10, check=True)
+            self.assertEqual(control.stdout.strip(), "True")
             with patch.dict(os.environ, environment), patch.object(windows_acl, "lock"), \
                  patch.object(windows_acl, "verify"), \
                  patch.object(accounts.subprocess, "run", return_value=SimpleNamespace(stdout="{}")), \
@@ -102,6 +110,41 @@ class AccountTests(unittest.TestCase):
                     self.assertEqual(observation, {"home_matches_cwd": True, "user_home_marker_visible": False,
                                                   "credential_inherited": False, "proxy_inherited": False,
                                                   "ca_setting_preserved": True, "profile_ok": True})
+
+    def test_temporary_home_validator_can_use_real_model_helper_against_fake_proxy(self):
+        from types import SimpleNamespace
+        import launcher
+        import windows_acl
+        fake_proxy = '''import json,os,re,sys\nfrom http.server import BaseHTTPRequestHandler,HTTPServer\nfrom pathlib import Path\nconfig=Path(sys.argv[-1]).read_text(encoding="utf-8")\nport=int(re.search(r"(?m)^  port: (\\d+)$",config).group(1))\nhome=Path(os.environ["HOME"])\n(Path.cwd()/"home-check").write_text(str(home.resolve()==Path.cwd().resolve()),encoding="utf-8")\nrow={"slug":"gpt-9.2-sol","context_window":272000,"max_context_window":872000,"input_modalities":["text"],"supports_search_tool":True,"supported_reasoning_levels":[{"effort":v} for v in ("low","medium","high","xhigh","max")]}\nclass Handler(BaseHTTPRequestHandler):\n def log_message(self,*args): pass\n def do_GET(self):\n  data={"data":[{"id":row["slug"]}]} if self.path=="/v1/models" else {"models":[row]}\n  body=json.dumps(data).encode(); self.send_response(200); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body)\nHTTPServer(("127.0.0.1",port),Handler).serve_forever()\n'''
+        real_run, real_popen = subprocess.run, subprocess.Popen
+        with tempfile.TemporaryDirectory(prefix="validator-helper-") as temporary:
+            root = Path(temporary) / "模型-fixture"
+            root.mkdir()
+            source = Path(accounts.__file__).resolve().parent
+            for name in ("bridge_models.py", "windows_acl.py"):
+                shutil.copyfile(source / name, root / name)
+            fake_binary = root / "bin" / ("cli-proxy-api.exe" if os.name == "nt" else "cli-proxy-api")
+            child_roots = []
+
+            def launch(command, **kwargs):
+                if Path(command[0]) == fake_binary:
+                    child_roots.append(kwargs["cwd"])
+                    return real_popen([sys.executable, "-I", "-c", fake_proxy, *command[1:]], **kwargs)
+                return real_popen(command, **kwargs)
+
+            def run(command, **kwargs):
+                if command[-1] == "verify":
+                    return SimpleNamespace(stdout="", returncode=0)
+                return real_run(command, **kwargs)
+
+            with patch.object(windows_acl, "lock"), patch.object(windows_acl, "verify"), \
+                 patch.object(accounts.subprocess, "Popen", side_effect=launch), \
+                 patch.object(accounts.subprocess, "run", side_effect=run), \
+                 patch.object(launcher, "HELPER", root / "bridge_models.py"), \
+                 patch.object(launcher, "wait_for_private_listener"):
+                with accounts.isolated_account(root, {"type": "codex", "access_token": "synthetic-access"}) as probe:
+                    self.assertEqual(probe["models"]["gpt-9.2-sol"]["context_window"], 872000)
+                    self.assertEqual((child_roots[0] / "home-check").read_text(), "True")
 
     def test_installed_inactive_validation_cannot_become_a_second_refresh_owner(self):
         with tempfile.TemporaryDirectory() as temporary:
