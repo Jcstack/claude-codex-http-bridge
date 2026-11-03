@@ -27,7 +27,9 @@ or conflicting observation does not trigger a start. This is best-effort
 recovery after a monitor exits, not proof of its liveness or a live replacement
 of an older monitor. The check targets a 120-second cadence and the new watcher
 still observes its startup quiet period; scheduling and sleep can add delay.
-This source change is not yet installed locally.
+The controller was installed on the active Mac with a private rollback copy;
+its running login agent and inference services were not restarted. A later
+scheduled health receipt reported healthy; an actual reboot was not tested.
 
 The source now keeps automatic probe timestamps in a private, bounded ledger,
 using only a short account fingerprint and monotonic time. It writes a
