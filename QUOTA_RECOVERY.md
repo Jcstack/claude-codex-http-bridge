@@ -29,9 +29,9 @@ file replacement and same-user manipulation remain limitations. This is
 best-effort recovery after a monitor exits, not proof of liveness or a live
 replacement of an older monitor. The check targets a 120-second cadence and
 the new watcher still observes its startup quiet period; scheduling and sleep
-can add delay. The earlier controller was installed on the active Mac without
-restarting its login agent or inference services; the additional PID check is a
-source candidate pending rollout. An actual reboot was not tested.
+can add delay. The hardened controller was installed on the active Mac with a
+private rollback, without restarting its login agent or inference services. An
+actual reboot was not tested.
 
 The source now keeps automatic probe timestamps in a private, bounded ledger,
 using only a short account fingerprint and monotonic time. It writes a
