@@ -108,13 +108,14 @@ standalone policy until a later source update.
 The installed parent launch path still starts Python with normal site
 initialization. A temporary fake launcher demonstrated that an injected
 `PYTHONPATH` can run synthetic startup code before the launcher; this is not
-evidence of an actual credential exposure. The source wrapper now uses `-E
--s`, which ignores Python environment configuration for this interpreter and
-disables the user site while keeping the environment available to Claude and
-plugins. The selected interpreter's site and its `.pth` files still run; the
-selected interpreter remains a trust boundary. A separate Python 3.11 virtual
-environment showed that the stronger `-S` option changes `sys.prefix` even
-though creating a child environment with pip worked in that sample.
+evidence of an actual credential exposure. The source wrapper uses `-E -s -X
+utf8`, which ignores Python environment configuration for this interpreter,
+disables the user site, and selects UTF-8 while keeping the environment
+available to Claude and plugins. The selected interpreter's site and its
+`.pth` files still run; the selected interpreter remains a trust boundary. A
+separate Python 3.11 virtual environment showed that the stronger `-S` option
+changes `sys.prefix` even though creating a child environment with pip worked in
+that sample.
 [Python's documentation](https://docs.python.org/3.14/library/sys_path_init.html)
 describes the changed virtual-environment behavior in 3.14. The wrapper source
 change is not yet installed on the active Mac.

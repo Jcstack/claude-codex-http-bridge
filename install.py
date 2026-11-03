@@ -180,7 +180,7 @@ def command_spec(root: Path, bin_dir: Path, *, legacy_windows: bool = False) -> 
         home = str(root).replace("%", "%%")
         python = str(Path(sys.executable)).replace("%", "%%")
         launcher = str(root / "launcher.py").replace("%", "%%")
-        python_flags = "" if legacy_windows else " -E -s"
+        python_flags = "" if legacy_windows else " -E -s -X utf8"
         wrapper = (
             "@echo off\r\n"
             "setlocal DisableDelayedExpansion\r\n"

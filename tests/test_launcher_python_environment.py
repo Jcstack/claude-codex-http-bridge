@@ -19,7 +19,7 @@ SOURCE = Path(__file__).resolve().parent.parent
 class LauncherPythonEnvironmentTest(unittest.TestCase):
     def test_wrapper_preserves_plugin_env_but_ignores_pythonpath_at_startup(self):
         with tempfile.TemporaryDirectory(prefix="bridge-launcher-fixture-") as temporary:
-            root = Path(temporary) / "launcher root"
+            root = Path(temporary) / "launcher 模型 root"
             root.mkdir()
             custom = root / "untrusted-pythonpath"
             custom.mkdir()
@@ -30,7 +30,7 @@ class LauncherPythonEnvironmentTest(unittest.TestCase):
             (root / "launcher.py").write_text('''import json,os,sys
 import trusted_sibling
 print(json.dumps({"ignore_python_env":bool(sys.flags.ignore_environment),
-    "no_user_site":bool(sys.flags.no_user_site),"plugin_env":os.environ.get("PLUGIN_FIXTURE"),
+    "no_user_site":bool(sys.flags.no_user_site),"utf8_mode":bool(sys.flags.utf8_mode),"plugin_env":os.environ.get("PLUGIN_FIXTURE"),
     "pythonpath_env":os.environ.get("PYTHONPATH"),"sibling":trusted_sibling.VALUE,
     "prefix":sys.prefix,"arguments":sys.argv[1:]}))
 ''', encoding="utf-8")
@@ -47,8 +47,8 @@ print(json.dumps({"ignore_python_env":bool(sys.flags.ignore_environment),
             parent_venv = root / "selected-venv"
             venv.EnvBuilder(with_pip=False).create(parent_venv)
             python = parent_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-            purelib = subprocess.run([str(python), "-E", "-s", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
-                                     env=environment, capture_output=True, text=True, timeout=20, check=True).stdout.strip()
+            purelib = subprocess.run([str(python), "-E", "-s", "-X", "utf8", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+                                     env=environment, capture_output=True, text=True, encoding="utf-8", timeout=20, check=True).stdout.strip()
             trusted_marker = root / "selected-interpreter-pth-ran"
             (Path(purelib) / "synthetic-fixture.pth").write_text(
                 f"import pathlib; pathlib.Path({str(trusted_marker)!r}).touch()\n", encoding="utf-8")
@@ -67,6 +67,7 @@ print(json.dumps({"ignore_python_env":bool(sys.flags.ignore_environment),
             self.assertTrue(trusted_marker.exists())  # The chosen interpreter's site remains trusted.
             self.assertTrue(value["ignore_python_env"])
             self.assertTrue(value["no_user_site"])
+            self.assertTrue(value["utf8_mode"])
             self.assertEqual(value["plugin_env"], "preserved")
             self.assertEqual(value["pythonpath_env"], str(custom))
             self.assertEqual(value["sibling"], "fixture")
