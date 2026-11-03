@@ -407,6 +407,20 @@ Model ID: `gpt-6.1-sol`
             with self.assertRaisesRegex(RuntimeError, "Existing"):
                 install.preflight_command(root, bin_dir, False)
 
+    def test_installer_upgrades_only_an_exact_legacy_windows_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.object(install.platform, "system", return_value="Windows"):
+            root = Path(directory) / "install"
+            bin_dir = root / "bin"
+            bin_dir.mkdir(parents=True)
+            command, legacy = install.command_spec(root, bin_dir, legacy_windows=True)
+            command.write_bytes(legacy)
+            self.assertFalse(install.preflight_command(root, bin_dir, False)[2])
+            install.install_command(root, bin_dir, False)
+            self.assertEqual(command.read_bytes(), install.command_spec(root, bin_dir)[1])
+            command.write_bytes(legacy + b"unexpected modification")
+            with self.assertRaisesRegex(RuntimeError, "Existing"):
+                install.preflight_command(root, bin_dir, False)
+
     def test_installer_rejects_bad_release_hash(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "bad.tar.gz"

@@ -98,14 +98,34 @@ The parent launcher, other subprocesses, user HOME, filesystem, and same-user
 programs remain outside this child-level restriction. This is not an OS
 sandbox. The launcher change was installed on the active Mac as a single
 atomic replacement, with a private rollback copy and read-only help, model-list
-and quota-status checks. The already-running services were not restarted. The
-account-controller change has not yet been installed locally.
+and quota-status checks. The shared policy module and account controller were
+then installed in dependency-first order, with a private account-controller
+rollback copy and additional read-only account-list and native-tool checks.
+The already-running services were not restarted, and in-memory processes keep
+the versions they already loaded. The installed launcher retains the equivalent
+standalone policy until a later source update.
 
-New frozen native-capability bundles include the shared helper module. Older
-bundles remain eligible when their integrity-checked launcher has no direct
-import of that module; a legacy-shaped bundle with the direct dependency is
-rejected. This targeted check is not a complete analysis of dynamic imports or
-future dependency changes. Existing frozen code is not rewritten.
+The installed parent launch path still starts Python with normal site
+initialization. A temporary fake launcher demonstrated that an injected
+`PYTHONPATH` can run synthetic startup code before the launcher; this is not
+evidence of an actual credential exposure. The source wrapper now uses `-E
+-s`, which ignores Python environment configuration for this interpreter and
+disables the user site while keeping the environment available to Claude and
+plugins. The selected interpreter's site and its `.pth` files still run; the
+selected interpreter remains a trust boundary. A separate Python 3.11 virtual
+environment showed that the stronger `-S` option changes `sys.prefix` even
+though creating a child environment with pip worked in that sample.
+[Python's documentation](https://docs.python.org/3.14/library/sys_path_init.html)
+describes the changed virtual-environment behavior in 3.14. The wrapper source
+change is not yet installed on the active Mac.
+
+The source for new frozen native-capability bundles includes the shared helper
+module. Older bundles remain eligible when their integrity-checked launcher has
+no direct import of that module; a legacy-shaped bundle with the direct
+dependency is rejected. This targeted check is not a complete analysis of
+dynamic imports or future dependency changes. The updated capability
+controller is not installed on the active Mac; its existing frozen code was
+verified read-only and was not rewritten.
 
 The macOS login policy stores only selected proxy schemes and bypass rules in
 the private runtime directory; proxy addresses and credentials are read from

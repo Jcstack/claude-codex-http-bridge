@@ -166,7 +166,7 @@ def install_config(root: Path) -> None:
     write_file(config, text.encode(), 0o600)
 
 
-def command_spec(root: Path, bin_dir: Path) -> tuple[Path, bytes]:
+def command_spec(root: Path, bin_dir: Path, *, legacy_windows: bool = False) -> tuple[Path, bytes]:
     """Build the command bytes without changing either installation path."""
     if bin_dir.is_symlink():
         raise RuntimeError(f"Refusing symlinked command directory: {bin_dir}")
@@ -180,11 +180,12 @@ def command_spec(root: Path, bin_dir: Path) -> tuple[Path, bytes]:
         home = str(root).replace("%", "%%")
         python = str(Path(sys.executable)).replace("%", "%%")
         launcher = str(root / "launcher.py").replace("%", "%%")
+        python_flags = "" if legacy_windows else " -E -s"
         wrapper = (
             "@echo off\r\n"
             "setlocal DisableDelayedExpansion\r\n"
             f'set "CLAUDE_CODEX_BRIDGE_HOME={home}"\r\n'
-            f'"{python}" "{launcher}" %*\r\n'
+            f'"{python}"{python_flags} "{launcher}" %*\r\n'
             "exit /b %ERRORLEVEL%\r\n"
         ).encode()
     else:
@@ -202,7 +203,9 @@ def preflight_command(root: Path, bin_dir: Path, replace: bool) -> tuple[Path, b
     """Reject an unrelated command before writing installation files."""
     command, wrapper = command_spec(root, bin_dir)
     same = command.is_file() and not command.is_symlink() and command.read_bytes() == wrapper
-    if (command.exists() or command.is_symlink()) and not same and not replace:
+    legacy = (platform.system() == "Windows" and command.is_file() and not command.is_symlink() and
+              command.read_bytes() == command_spec(root, bin_dir, legacy_windows=True)[1])
+    if (command.exists() or command.is_symlink()) and not same and not legacy and not replace:
         raise RuntimeError(f"Existing {command} was not changed; rerun with --replace-command to replace it")
     return command, wrapper, same
 

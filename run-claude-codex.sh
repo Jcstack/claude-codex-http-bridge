@@ -10,17 +10,17 @@ if [[ -z "$python_bin" ]]; then
 fi
 
 if [[ -z "${TMUX_PANE:-}" ]] || ! command -v tmux >/dev/null 2>&1; then
-  exec "$python_bin" "$bridge_root/launcher.py" "$@"
+  exec "$python_bin" -E -s "$bridge_root/launcher.py" "$@"
 fi
 
 window_id=$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}' 2>/dev/null || true)
 if [[ -z "$window_id" ]]; then
-  exec "$python_bin" "$bridge_root/launcher.py" "$@"
+  exec "$python_bin" -E -s "$bridge_root/launcher.py" "$@"
 fi
 previous_name=$(tmux display-message -p -t "$window_id" '#{window_name}' 2>/dev/null || true)
 previous_local_auto=$(tmux show-option -w -v -t "$window_id" automatic-rename 2>/dev/null || true)
 if ! tmux rename-window -t "$window_id" claude-codex 2>/dev/null; then
-  exec "$python_bin" "$bridge_root/launcher.py" "$@"
+  exec "$python_bin" -E -s "$bridge_root/launcher.py" "$@"
 fi
 
 restore_tmux_name() {
@@ -37,4 +37,4 @@ restore_tmux_name() {
   fi
 }
 trap restore_tmux_name EXIT
-"$python_bin" "$bridge_root/launcher.py" "$@"
+"$python_bin" -E -s "$bridge_root/launcher.py" "$@"
