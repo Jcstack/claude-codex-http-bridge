@@ -84,6 +84,13 @@ The API route is separate from subscription OAuth and uses separate service port
 
 macOS/Linux/WSL: run `./install.sh`. Native Windows: run `py -3 .\install.py` in PowerShell or `py -3 install.py` in CMD, then open a new terminal before using `claude-codex`. If `py` is unavailable but Python is installed, use `python`.
 
+The command starts its Python controller with `-E -s -X utf8`: Python-specific
+environment configuration and the user site are ignored for that controller.
+The selected interpreter's own site and `.pth` files remain active, and Python
+environment variables remain available to Claude Code and its plugins. Select
+a working interpreter explicitly with `CLAUDE_CODEX_PYTHON_BIN` on POSIX if the
+default interpreter depends on `PYTHONHOME`.
+
 ```text
 claude-codex codex-login
 claude-codex models

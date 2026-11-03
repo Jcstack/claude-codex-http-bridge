@@ -51,7 +51,8 @@ print(json.dumps({"ignore_python_env":bool(sys.flags.ignore_environment),
                                      env=environment, capture_output=True, text=True, encoding="utf-8", timeout=20, check=True).stdout.strip()
             trusted_marker = root / "selected-interpreter-pth-ran"
             (Path(purelib) / "synthetic-fixture.pth").write_text(
-                f"import pathlib; pathlib.Path({str(trusted_marker)!r}).touch()\n", encoding="utf-8")
+                "import os; open(os.environ['TRUSTED_MARKER_FIXTURE'], 'w').close()\n", encoding="ascii")
+            environment["TRUSTED_MARKER_FIXTURE"] = str(trusted_marker)
 
             if os.name == "nt":
                 with patch.object(install.sys, "executable", str(python)):
@@ -64,7 +65,12 @@ print(json.dumps({"ignore_python_env":bool(sys.flags.ignore_environment),
             result = subprocess.run(run, env=environment, capture_output=True, text=True, timeout=30, check=True)
             value = json.loads(result.stdout)
             self.assertFalse(marker.exists())
-            self.assertTrue(trusted_marker.exists())  # The chosen interpreter's site remains trusted.
+            # The selected interpreter's own site remains trusted. Keep any
+            # platform diagnostics to booleans, never paths or environment.
+            self.assertTrue(trusted_marker.exists(), json.dumps({"ignore_python_env": value["ignore_python_env"],
+                "no_user_site": value["no_user_site"], "utf8_mode": value["utf8_mode"],
+                "prefix_matches": Path(value["prefix"]).resolve() == parent_venv.resolve(),
+                "pth_error": "Error processing line" in result.stderr}))
             self.assertTrue(value["ignore_python_env"])
             self.assertTrue(value["no_user_site"])
             self.assertTrue(value["utf8_mode"])
