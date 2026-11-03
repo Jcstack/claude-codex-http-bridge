@@ -10,6 +10,18 @@ The proxy writes OAuth credentials only after the user completes `claude-codex c
 
 Optional HUD quota telemetry follows exactly one enabled bridge account and excludes disabled backups. It uses the official Codex app-server only when native Codex has the same account ID. Otherwise it reads the selected bridge credential locally and sends its access token only to the fixed `https://chatgpt.com/backend-api/wham/usage` endpoint, with verified TLS and no redirects or ambient proxies. Native Codex auth is never replaced to make these accounts match. The private runtime cache stores only reported quota percentages, reset times, a fetch timestamp, and a SHA-256 account fingerprint. It rejects old-account caches and never invents a missing window. Raw usage responses and credentials are not logged.
 
+The source's one-time `quota recover --usage-proxy-port PORT` option explicitly
+selects an unauthenticated HTTP CONNECT listener at `127.0.0.1:PORT` for the
+fixed usage endpoint. This does not enable a background proxy. TLS checks the
+official hostname using the configured system trust; a proxy able to present a
+trusted interception certificate can read the account token. The proxy sees
+the destination and connection timing, and the bridge does not authenticate
+which local process owns the port. The local management credential is never
+passed to that proxy. The option refuses redirects, ambient-proxy and direct
+fallbacks, and does not activate ambient `SSLKEYLOGFILE` logging. Synthetic
+tests are described in [quota recovery](QUOTA_RECOVERY.md); this option was not
+yet installed on the active Mac at the time of this source change.
+
 An additional source change strengthens that account binding. A workspace ID
 alone does not distinguish people within a shared workspace: the source now
 requires a nonempty person identifier from local credential metadata before

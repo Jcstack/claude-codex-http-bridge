@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import accounts
 import codex_usage
+import launcher
 import quota_recovery as recovery
 import rolling_runtime
 
@@ -23,7 +24,7 @@ def usage(percent=0):
 
 class QuotaRecoveryTests(unittest.TestCase):
     def scenario(self, *, available=None, views=None, changed=False, attempts=None, now=0, unknown_person=False,
-                 usage_error=None, local_error=None):
+                 usage_error=None, local_error=None, usage_proxy_port=None):
         record = {"account_id": "fixture-account", "access_token": "PRIVATE_ACCESS", "refresh_token": "PRIVATE_REFRESH"}
         if not unknown_person:
             record["email"] = "fixture@example.invalid"
@@ -47,16 +48,26 @@ class QuotaRecoveryTests(unittest.TestCase):
                 raise local_error
             return {"files": [entry]} if url.endswith("credentials") else {"status": "ok"}
 
+        def proxy_usage(port, token, account):
+            requests.append(("synthetic-proxy-usage", {"port": port}))
+            self.assertEqual(token, "PRIVATE_ACCESS")
+            self.assertEqual(account, "fixture-account")
+            if usage_error is not None:
+                raise usage_error
+            return usage() if available is None else available
+
         with tempfile.TemporaryDirectory(prefix="quota-recovery-fixture-") as temporary, \
              patch.object(accounts, "switch_lock", return_value=nullcontext()), \
              patch.object(accounts, "local_accounts", return_value=[row]), \
              patch.object(accounts, "Management", return_value=owner), \
              patch.object(accounts, "request_json", side_effect=request), \
+             patch.object(recovery, "_loopback_usage", side_effect=proxy_usage), \
              patch.object(codex_usage, "active_bridge_auth", return_value={**record, "account_id": "changed"} if changed else record):
             if attempts is not None:
                 # Exercise the running-monitor path after its startup grace.
                 recovery._write_probe_ledger(recovery._probe_ledger(Path(temporary)), {})
-            result = recovery.recover_once(Path(temporary), attempts=attempts, now=now)
+            result = recovery.recover_once(Path(temporary), attempts=attempts, now=now,
+                                           usage_proxy_port=usage_proxy_port)
         self.assertNotIn("PRIVATE", json.dumps(result))
         return result, requests
 
@@ -120,6 +131,43 @@ class QuotaRecoveryTests(unittest.TestCase):
         result, requests = self.scenario(attempts=attempts, now=30)
         self.assertEqual(result["status"], "probe_throttled")
         self.assertFalse(any(url == recovery.USAGE_URL for url, _ in requests))
+
+    def test_selected_proxy_is_used_only_for_usage_not_local_management(self):
+        result, requests = self.scenario(usage_proxy_port=7890)
+        self.assertEqual(result, {"status": "recovered"})
+        self.assertEqual(sum(url == "synthetic-proxy-usage" for url, _ in requests), 1)
+        self.assertFalse(any(url == recovery.USAGE_URL for url, _ in requests))
+        self.assertEqual(sum(options.get("method") == "POST" for _, options in requests), 1)
+        result, requests = self.scenario(usage_proxy_port=7890, usage_error=RuntimeError("PRIVATE proxy"))
+        self.assertEqual(result, {"status": "usage_unavailable"})
+        self.assertFalse(any(options.get("method") == "POST" for _, options in requests))
+
+    def test_proxy_port_is_an_explicit_recover_only_option(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(recovery, "recover_once", return_value={"status": "no_stale_credential_quota"}) as run, \
+                 patch("builtins.print"):
+                self.assertEqual(recovery.main(["recover", "--usage-proxy-port", "7890"], root=root), 0)
+            run.assert_called_once_with(root, usage_proxy_port=7890)
+            for args in (["status", "--usage-proxy-port", "7890"], ["recover", "--usage-proxy-port", "0"],
+                         ["recover", "--usage-proxy-port", "65536"]):
+                with self.subTest(args=args), patch.object(recovery, "recover_once") as run, \
+                     patch("sys.stderr"), self.assertRaises(SystemExit):
+                    recovery.main(args, root=root)
+                run.assert_not_called()
+            with patch.object(accounts, "local_accounts") as local, self.assertRaises(ValueError):
+                recovery.recover_once(root, attempts={}, usage_proxy_port=7890)
+            local.assert_not_called()
+
+    def test_launcher_forwards_the_manual_proxy_option_without_starting_a_service(self):
+        argv = ["launcher.py", "quota", "recover", "--usage-proxy-port", "7890"]
+        with patch.object(sys, "argv", argv), patch.object(launcher, "helper_output"), \
+             patch.object(launcher, "ensure_service") as service, \
+             patch.object(recovery, "recover_once", return_value={"status": "no_stale_credential_quota"}) as run, \
+             patch("builtins.print"):
+            self.assertEqual(launcher.main(), 0)
+        run.assert_called_once_with(launcher.ROOT, usage_proxy_port=7890)
+        service.assert_not_called()
 
     def test_unknown_person_never_queries_or_resets_cooldown(self):
         result, requests = self.scenario(unknown_person=True)

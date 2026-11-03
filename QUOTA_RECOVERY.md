@@ -82,13 +82,12 @@ Workspace proxy settings and API keys are not inherited by the helper. It uses
 the existing origin refresh owner; no second refresh owner is created. The
 ordinary `usage` and `diagnostics` commands remain read-only.
 
-The installed recovery implementation requests the fixed usage endpoint over
-direct, certificate-verified HTTPS; it does not use an environment or system
-HTTP proxy and does not follow redirects. This policy also applies to the
-on-demand recovery command. Transparent operating-system or network routing
-is outside this application's control. If the origin can infer through a proxy
-but direct HTTPS to the usage endpoint is blocked, the local quota gate cannot
-be safely reconciled by this check. The current source returns the existing
+The automatic monitor and the default on-demand command request the fixed usage
+endpoint over direct, certificate-verified HTTPS; they do not use an environment
+or system HTTP proxy and do not follow redirects. Transparent operating-system
+or network routing is outside this application's control. If the origin can
+infer through a proxy but direct HTTPS to the usage endpoint is blocked, the
+default check may fail. The current source returns the existing
 `usage_unavailable` status when a usage request fails, as well as when the
 selected record lacks required request data. This change was installed locally
 without restarting the monitor or inference services. This does not identify the cause:
@@ -101,9 +100,6 @@ fake proxy, while the account helper goes directly to the fake target, refuses
 a redirect and does not fall back to that proxy after a fake DNS failure. The
 [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41655278774)
 passed. This does not test actual TLS, real network policy or the older running monitor.
-Adding an explicitly selected proxy requires separate credential, trust and
-loopback-isolation review; the helper must not silently forward a local
-management key or change from direct to proxied routing.
 
 ## On-demand check
 
@@ -127,6 +123,37 @@ released; `no_stale_credential_quota` means no matching local gate needed work.
 Other statuses preserve the gate. The command does not enable a project-API
 profile or change the current Claude conversation. A running client can retry
 its message after recovery without being closed.
+
+The source also supports a one-time, explicitly chosen local HTTP CONNECT proxy:
+
+```text
+claude-codex quota recover --usage-proxy-port 7890
+```
+
+Replace `7890` with the listening port of a trusted proxy on `127.0.0.1`.
+The flag applies to this command only, is not saved, and cannot be used by the
+automatic monitor. The implementation sends the loopback management key only
+to the existing direct local management endpoint. The usage request tunnels
+only to `chatgpt.com:443`, verifies the provider hostname and the system's
+configured certificate authorities, refuses redirects and does not fall back
+to direct or ambient-proxy routing. It does not use proxy authentication,
+SOCKS, IPv6 proxy listeners, PAC or non-loopback proxies. The selected proxy
+can observe the destination and timing; a proxy with a trusted TLS-interception
+certificate can also read the account token. The port is not authenticated as
+a particular local process. Same-user manipulation and system trust changes
+remain outside this check's guarantees. A per-socket timeout is not a hard
+deadline for a peer that continues sending data.
+Python documents the [CONNECT tunnel](https://docs.python.org/3/library/http.client.html#http.client.HTTPConnection.set_tunnel)
+and the certificate and hostname checks provided by [TLS client contexts](https://docs.python.org/3/library/ssl.html#ssl.PROTOCOL_TLS_CLIENT).
+
+Synthetic tests use only owned local sockets, a generated temporary test CA,
+and fake credentials. They cover a successful tunnel, a complete recovery with
+fake management, rejected CONNECT, wrong-host and untrusted certificates,
+redirects, invalid or oversized bodies and an ambient-proxy negative control.
+They also check that `SSLKEYLOGFILE` is not activated by the proxy client.
+This does not establish the behavior of a real proxy, account or provider.
+The new option is present in source and has not yet been installed on the
+active Mac. The running monitor retains its previous direct-network behavior.
 
 Updating the source makes `status` available to new command invocations. An
 older monitor already in memory does not gain the ledger or identity checks

@@ -83,6 +83,7 @@
 !tests/native_codex_catalog_provenance_fixture.go
 !tests/tool_contract_benchmark.go
 !tests/fake_quota_codex.go
+!tests/generate_quota_tls_fixture.go
 !tests/native_gateway_names_fixture.go
 !tests/native_incomplete_fixture.go
 !tests/translator_incomplete_fixture.go

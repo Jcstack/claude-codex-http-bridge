@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import http.client
 import json
 import math
 import os
@@ -18,6 +19,7 @@ import stat
 import struct
 import subprocess
 import sys
+import ssl
 import threading
 import time
 
@@ -30,7 +32,9 @@ import launcher
 import runtime_bundle
 
 
-USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+USAGE_HOST = "chatgpt.com"
+USAGE_PATH = "/backend-api/wham/usage"
+USAGE_URL = f"https://{USAGE_HOST}{USAGE_PATH}"
 POLL_SECONDS = 30
 USAGE_PROBE_SECONDS = 60
 PROBE_LEDGER_LIMIT = 128
@@ -47,6 +51,48 @@ MONITOR_RESULTS = frozenset({
 
 class ProbeLedgerError(RuntimeError):
     """Automatic recovery cannot safely establish its previous probe time."""
+
+
+def _loopback_usage(port: int, token: str, account: str) -> dict:
+    """Read the fixed usage endpoint through an explicitly selected local proxy.
+
+    This path is only available to the on-demand command. It never uses
+    environment-selected proxies or falls back to direct networking.
+    """
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("Invalid loopback proxy port")
+    if (not isinstance(token, str) or not token or len(token) > 100_000
+            or not isinstance(account, str) or not account or len(account) > 512
+            or any(c in token + account for c in "\r\n\x00")):
+        raise ValueError("Invalid usage request data")
+    # PROTOCOL_TLS_CLIENT requires certificate and hostname checks. Unlike
+    # create_default_context(), constructing it directly does not honor an
+    # ambient SSLKEYLOGFILE. Explicit system CA configuration remains in use.
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_default_certs()
+    if context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname:
+        raise RuntimeError("Verified usage TLS is required")
+    connection = http.client.HTTPSConnection("127.0.0.1", port, timeout=12, context=context)
+    try:
+        connection.set_tunnel(USAGE_HOST, 443)
+        connection.request("GET", USAGE_PATH, headers={"Host": USAGE_HOST,
+            "Authorization": "Bearer " + token, "Chatgpt-Account-Id": account,
+            "User-Agent": "claude-codex-http-bridge", "Cache-Control": "no-cache",
+            "Pragma": "no-cache", "Connection": "close"})
+        response = connection.getresponse()
+        if response.status != 200:
+            raise RuntimeError("Usage request failed")
+        payload = response.read(2_000_001)
+        if len(payload) > 2_000_000:
+            raise RuntimeError("Usage response is unexpectedly large")
+        value = json.loads(payload, object_pairs_hook=_unique_json_pairs)
+        if not isinstance(value, dict):
+            raise RuntimeError("Usage response is not an object")
+        return value
+    except (OSError, http.client.HTTPException, ValueError):
+        raise RuntimeError("Usage request failed") from None
+    finally:
+        connection.close()
 
 
 def _unique_json_pairs(pairs):
@@ -199,7 +245,12 @@ def quota_only(row: dict) -> bool:
             and any(view.get("scope") == "credential" and view.get("reason") == "credential_quota" for view in views))
 
 
-def recover_once(root: Path, *, attempts: dict | None = None, now: float | None = None) -> dict:
+def recover_once(root: Path, *, attempts: dict | None = None, now: float | None = None,
+                 usage_proxy_port: int | None = None) -> dict:
+    if usage_proxy_port is not None and (type(usage_proxy_port) is not int or not 1 <= usage_proxy_port <= 65535):
+        raise ValueError("Invalid loopback proxy port")
+    if usage_proxy_port is not None and attempts is not None:
+        raise ValueError("The loopback proxy is available only for manual recovery")
     with accounts.switch_lock(root):
         active = [row for row in accounts.local_accounts(root) if not row["record"].get("disabled")]
         if len(active) != 1:
@@ -245,9 +296,12 @@ def recover_once(root: Path, *, attempts: dict | None = None, now: float | None 
         if not isinstance(token, str) or not token or not isinstance(account, str) or not account:
             return {"status": "usage_unavailable"}
         try:
-            usage = accounts.request_json(USAGE_URL, headers={"Authorization": "Bearer " + token,
-                "Chatgpt-Account-Id": account, "User-Agent": "claude-codex-http-bridge",
-                "Cache-Control": "no-cache", "Pragma": "no-cache"}, timeout=12)
+            if usage_proxy_port is None:
+                usage = accounts.request_json(USAGE_URL, headers={"Authorization": "Bearer " + token,
+                    "Chatgpt-Account-Id": account, "User-Agent": "claude-codex-http-bridge",
+                    "Cache-Control": "no-cache", "Pragma": "no-cache"}, timeout=12)
+            else:
+                usage = _loopback_usage(usage_proxy_port, token, account)
         except (OSError, RuntimeError, ValueError):
             # Distinguish this phase without exposing endpoint errors, URLs,
             # account data or credentials. Keep the local gate unchanged.
@@ -438,11 +492,15 @@ def monitor_status(root: Path) -> dict:
 def main(arguments: list[str], *, root: Path) -> int:
     parser = argparse.ArgumentParser(prog="claude-codex quota")
     parser.add_argument("action", choices=("recover", "status"))
+    parser.add_argument("--usage-proxy-port", type=int, metavar="PORT",
+                        help="For this recovery only, use an HTTP CONNECT proxy on 127.0.0.1:PORT")
     options = parser.parse_args(arguments)
+    if options.usage_proxy_port is not None and (options.action != "recover" or not 1 <= options.usage_proxy_port <= 65535):
+        parser.error("--usage-proxy-port requires recover and a port between 1 and 65535")
     if options.action == "status":
         print(json.dumps(monitor_status(root)))
         return 0
-    try: result = recover_once(root)
+    try: result = recover_once(root, usage_proxy_port=options.usage_proxy_port)
     except (OSError, RuntimeError, ValueError): result = {"status": "check_unavailable"}
     print(json.dumps(result))
     return 0 if result["status"] in ("recovered", "no_stale_credential_quota") else 1
