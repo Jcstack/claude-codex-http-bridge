@@ -19,8 +19,9 @@ the destination and connection timing, and the bridge does not authenticate
 which local process owns the port. The local management credential is never
 passed to that proxy. The option refuses redirects, ambient-proxy and direct
 fallbacks, and does not activate ambient `SSLKEYLOGFILE` logging. Synthetic
-tests are described in [quota recovery](QUOTA_RECOVERY.md); this option was not
-yet installed on the active Mac at the time of this source change.
+tests and the local no-restart installation are described in
+[quota recovery](QUOTA_RECOVERY.md). It has not been tested with a real proxy
+or an authenticated Windows account.
 
 An additional source change strengthens that account binding. A workspace ID
 alone does not distinguish people within a shared workspace: the source now

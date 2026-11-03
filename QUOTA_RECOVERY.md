@@ -152,8 +152,14 @@ fake management, rejected CONNECT, wrong-host and untrusted certificates,
 redirects, invalid or oversized bodies and an ambient-proxy negative control.
 They also check that `SSLKEYLOGFILE` is not activated by the proxy client.
 This does not establish the behavior of a real proxy, account or provider.
-The new option is present in source and has not yet been installed on the
-active Mac. The running monitor retains its previous direct-network behavior.
+The [three-platform quota gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41660465685)
+and [source-and-install gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41660430157)
+passed. The reviewed change was installed on the active Mac with a private
+rollback and no service restart; 44 synthetic checks using copies of the
+installed sources passed. The actual wrapper's help and invalid-port refusal
+were checked without a real usage request. This is not an authenticated Windows
+account or real-proxy test. The running monitor retains its previous
+direct-network behavior.
 
 Updating the source makes `status` available to new command invocations. An
 older monitor already in memory does not gain the ledger or identity checks
