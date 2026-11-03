@@ -185,10 +185,15 @@ def usage_allows_requests(value: dict) -> bool:
 
 
 def quota_only(row: dict) -> bool:
+    def quota_view(view):
+        if not isinstance(view, dict) or view.get("reason") not in ("quota", "credential_quota"):
+            return False
+        status = view.get("http_status", 429)
+        return status is None or (type(status) is int and status in (0, 429))
+
     views = row.get("cooldowns")
     return (isinstance(views, list) and bool(views)
-            and all(isinstance(view, dict) and view.get("reason") in ("quota", "credential_quota")
-                    and view.get("http_status", 429) in (None, 0, 429) for view in views)
+            and all(quota_view(view) for view in views)
             and any(view.get("scope") == "credential" and view.get("reason") == "credential_quota" for view in views))
 
 

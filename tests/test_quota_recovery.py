@@ -63,6 +63,12 @@ class QuotaRecoveryTests(unittest.TestCase):
         self.assertEqual(posts[0][0], "http://127.0.0.1:12345/v8/management/routing/cooldown/reset")
         self.assertEqual(json.loads(posts[0][1]["data"]), {"auth_index": "PRIVATE_INDEX"})
 
+    def test_known_quota_status_representations_remain_recoverable(self):
+        for status in (None, 0, 429):
+            with self.subTest(status=status):
+                views = [{"scope": "credential", "reason": "credential_quota", "http_status": status}]
+                self.assertEqual(self.scenario(views=views)[0]["status"], "recovered")
+
     def test_exhausted_unknown_and_model_specific_limits_are_preserved(self):
         cases = [usage(100), {}, {"rate_limit": {"allowed": True, "limit_reached": False}},
                  {**usage(), "additional_rate_limits": [{"rate_limit": usage(100)["rate_limit"]}]},
@@ -78,7 +84,9 @@ class QuotaRecoveryTests(unittest.TestCase):
     def test_auth_failures_and_model_only_throttles_are_never_cleared(self):
         cases = [[{"scope": "model", "reason": "quota", "http_status": 429}],
                  [{"scope": "credential", "reason": "credential_quota"}, {"reason": "unauthorized", "http_status": 401}],
-                 [{"scope": "credential", "reason": "credential_quota", "http_status": 403}], []]
+                 [{"scope": "credential", "reason": "credential_quota", "http_status": 403}],
+                 *[[{"scope": "credential", "reason": "credential_quota", "http_status": value}]
+                   for value in (False, 0.0, 429.0, "429")], []]
         for views in cases:
             result, requests = self.scenario(views=views)
             self.assertEqual(result["status"], "no_stale_credential_quota")
