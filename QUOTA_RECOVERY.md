@@ -139,8 +139,10 @@ own synthetic monitor. It waited for a separate fixture to release the account
 lock, reported a new protocol-2 child and ledger, and left an unrelated owned
 process alive. The existing read-only identity observer rejects that memory
 child because it recognizes script-based commands, so repeated handoff and
-identity verification remain unimplemented. This does not authorize signaling
-the real monitor or establish safety for an in-flight real quota request.
+identity verification remain unimplemented. A second synthetic handoff
+attempt refused before spawning or signaling and left the successor alive.
+This does not authorize signaling the real monitor or establish safety for an
+in-flight real quota request.
 
 This is not a production launcher or OS sandbox. It trusts the manifest, parent
 code, interpreter and standard library; it does not prove protection against

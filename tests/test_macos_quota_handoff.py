@@ -681,6 +681,14 @@ with accounts.switch_lock(Path(sys.argv[2]),wait_seconds=5):
         # memory bootstrap. It must refuse rather than infer the new identity.
         with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
             quota_monitor_identity.observe(self.root)
+        with patch.object(quota_monitor_handoff, "_signal") as signal_again, \
+             patch.object(quota_monitor_handoff, "_spawn_successor") as spawn_again:
+            with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+                self.invoke_handoff()
+        signal_again.assert_not_called()
+        spawn_again.assert_not_called()
+        self.assertIsNone(successors[0].poll())
+        self.assertIsNone(sentinel.poll())
         successors[0].terminate()  # Only the owned synthetic replacement.
         successors[0].wait(timeout=5)
 
