@@ -28,6 +28,7 @@ import urllib.request
 import webbrowser
 
 import api_profile
+from model_helper import model_helper_command, model_helper_environment
 
 
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"  # Public OAuth client, not a credential.
@@ -315,8 +316,8 @@ def isolated_account(root: Path, record: dict):
     private_directory(directory)
     windows = platform.system() == "Windows"
     proxy = root / "bin" / ("cli-proxy-api.exe" if windows else "cli-proxy-api")
-    subprocess.run(launcher.model_helper_command(root / "bridge_models.py", "verify"),
-                   env=launcher.model_helper_environment(), check=True, capture_output=True, timeout=20)
+    subprocess.run(model_helper_command(root / "bridge_models.py", "verify"),
+                   env=model_helper_environment(), check=True, capture_output=True, timeout=20)
     with tempfile.TemporaryDirectory(prefix="check-", dir=directory) as temporary:
         home = Path(temporary)
         private_directory(home)
@@ -350,8 +351,8 @@ def isolated_account(root: Path, record: dict):
             environment.update(CODEX_BRIDGE_PORT=str(port), CODEX_BRIDGE_KEY_FILE=str(key_path))
             environment.pop("CODEX_BRIDGE_ROUTE", None)
             launcher.wait_for_catalog(process, environment, True)
-            completed = subprocess.run(launcher.model_helper_command(root / "bridge_models.py", "snapshot"),
-                                       env=launcher.model_helper_environment(environment),
+            completed = subprocess.run(model_helper_command(root / "bridge_models.py", "snapshot"),
+                                       env=model_helper_environment(environment),
                                        capture_output=True, text=True, encoding="utf-8", check=True, timeout=15)
             models = json.loads(completed.stdout)
             yield {"url": f"http://127.0.0.1:{port}", "key": key, "models": models}
@@ -509,8 +510,8 @@ def selected_catalog(root: Path, management: Management) -> dict:
                 and not slug.startswith("gpt-image-") and isinstance(row.get("input_modalities"), list)
                 and "text" in row["input_modalities"] and bridge_models.eligible(bridge_models.context_metadata(row))}
     try:
-        completed = subprocess.run(launcher.model_helper_command(root / "bridge_models.py", "snapshot"),
-            env=launcher.model_helper_environment(launcher.service_environment(management.state, runtime)),
+        completed = subprocess.run(model_helper_command(root / "bridge_models.py", "snapshot"),
+            env=model_helper_environment(launcher.service_environment(management.state, runtime)),
             capture_output=True, text=True, encoding="utf-8",
             check=True, timeout=20)
         if len(completed.stdout) > 4 * 1024 * 1024:
@@ -602,8 +603,8 @@ def validation_route(root: Path, record: dict):
     state = management.state
     runtime = root / "runtime"
     environment = launcher.service_environment(state, runtime)
-    result = subprocess.run(launcher.model_helper_command(root / "bridge_models.py", "snapshot"),
-                            env=launcher.model_helper_environment(environment),
+    result = subprocess.run(model_helper_command(root / "bridge_models.py", "snapshot"),
+                            env=model_helper_environment(environment),
                             capture_output=True, text=True, encoding="utf-8", check=True, timeout=15)
     key = launcher.state_paths(runtime, state)[2].read_text().strip()
     yield {"url": f"http://127.0.0.1:{state['port']}", "key": key, "models": json.loads(result.stdout)}

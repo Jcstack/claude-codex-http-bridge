@@ -23,7 +23,7 @@ import runtime_bundle
 
 
 FILES = ("quota_recovery.py", "accounts.py", "api_profile.py", "codex_usage.py",
-         "launcher.py", "runtime_bundle.py", "process_identity.py")
+         "launcher.py", "model_helper.py", "runtime_bundle.py", "process_identity.py")
 LIMIT = 2 * 1024 * 1024
 
 

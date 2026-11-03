@@ -96,7 +96,10 @@ A loopback-only catalog fixture exercises dynamic model and compact-window
 selection, a separate synthetic API catalog, and a Unicode installation path.
 The parent launcher, other subprocesses, user HOME, filesystem, and same-user
 programs remain outside this child-level restriction. This is not an OS
-sandbox. The change has not been installed into the active local controller.
+sandbox. The launcher change was installed on the active Mac as a single
+atomic replacement, with a private rollback copy and read-only help, model-list
+and quota-status checks. The already-running services were not restarted. The
+account-controller change has not yet been installed locally.
 
 The macOS login policy stores only selected proxy schemes and bypass rules in
 the private runtime directory; proxy addresses and credentials are read from

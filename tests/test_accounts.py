@@ -42,6 +42,8 @@ class AccountTests(unittest.TestCase):
              patch.object(windows_acl, "lock"), patch.object(windows_acl, "verify"), \
              patch.object(accounts.subprocess, "run", return_value=SimpleNamespace(stdout="{}")) as helper, \
              patch.object(accounts.subprocess, "Popen") as spawn, \
+             patch.object(launcher, "model_helper_command", side_effect=AssertionError("old launcher"), create=True), \
+             patch.object(launcher, "model_helper_environment", side_effect=AssertionError("old launcher"), create=True), \
              patch.object(launcher, "wait_for_private_listener"), patch.object(launcher, "wait_for_catalog"), \
              patch.object(launcher, "stop_process"):
             record = {"type": "codex", "access_token": "synthetic-access", "refresh_token": "synthetic-refresh"}

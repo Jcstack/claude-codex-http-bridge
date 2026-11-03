@@ -24,7 +24,7 @@ import autostart  # noqa: E402
 
 
 SOURCE = Path(__file__).resolve().parents[1]
-MODULES = ("autostart.py", "launcher.py", "rolling_runtime.py", "runtime_bundle.py", "api_profile.py")
+MODULES = ("autostart.py", "launcher.py", "model_helper.py", "rolling_runtime.py", "runtime_bundle.py", "api_profile.py")
 PREFIX = "org.claude-codex-http-bridge.fixture."
 SENTINEL_NAME = "CLAUDE_CODEX_FIXTURE_SHELL_ONLY"
 

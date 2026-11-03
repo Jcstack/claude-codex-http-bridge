@@ -30,6 +30,7 @@
 !install.py
 !install.sh
 !launcher.py
+!model_helper.py
 !diagnostics.py
 !session_audit.py
 !taskstop_advisory.py

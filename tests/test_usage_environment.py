@@ -118,7 +118,7 @@ for line in sys.stdin:
             for directory in (controller, native, bin_dir, runtime, controller / "auth"):
                 directory.mkdir(mode=0o700)
             project = Path(codex_usage.__file__).resolve().parent
-            for name in ("accounts.py", "api_profile.py", "windows_acl.py"):
+            for name in ("accounts.py", "api_profile.py", "windows_acl.py", "model_helper.py"):
                 shutil.copyfile(project / name, controller / name)
             source = (project / "codex_usage.py").read_text(encoding="utf-8")
             # Refuse the fallback HTTPS path even if this fixture is malformed.

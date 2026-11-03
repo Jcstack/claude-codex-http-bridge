@@ -16,7 +16,7 @@ from claude_fixture import isolated_environment
 
 
 SOURCE = Path(__file__).resolve().parents[1]
-MODULES = ("launcher.py", "bridge_models.py", "codex_usage.py", "statusline_adapter.py",
+MODULES = ("launcher.py", "bridge_models.py", "model_helper.py", "codex_usage.py", "statusline_adapter.py",
            "session_models.py", "api_profile.py", "autostart.py", "rolling_runtime.py",
            "runtime_bundle.py", "windows_acl.py", "accounts.py", "process_identity.py")
 

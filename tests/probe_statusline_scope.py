@@ -59,7 +59,7 @@ def run_case(claude, scope, wrap, *, legacy=False):
         adapter = root / "adapter"; adapter.mkdir(mode=0o700)
         source = Path(launcher.__file__).resolve().parent
         for name in ("statusline_adapter.py", "session_models.py", "codex_usage.py", "accounts.py",
-                     "api_profile.py", "windows_acl.py"):
+                     "api_profile.py", "windows_acl.py", "model_helper.py"):
             shutil.copyfile(source / name, adapter / name)
         (config / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True,
             "projects": {str(work): {"hasTrustDialogAccepted": True}}}), encoding="utf-8")

@@ -92,7 +92,7 @@ with quota_recovery.monitor_lock(root/'runtime-quota') as acquired:
 
     def start_synthetic_runtime(self):
         runtime_bundle.write_file(self.root / ".quota-handoff-fixture", b"synthetic quota fixture\n", 0o600)
-        for name in ("quota_recovery.py", "runtime_bundle.py", "api_profile.py", "process_identity.py"):
+        for name in ("quota_recovery.py", "runtime_bundle.py", "api_profile.py", "process_identity.py", "model_helper.py"):
             target = self.root / name
             shutil.copyfile(SOURCE / name, target)
             target.chmod(0o700)
