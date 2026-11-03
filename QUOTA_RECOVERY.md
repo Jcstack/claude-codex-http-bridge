@@ -156,8 +156,9 @@ temporary local filesystem, an owned process holds an advisory `flock` and
 passes its open descriptor across `execve`; a separately opened contender
 repeatedly tries the lock before, during and after the transition. A
 close-on-exec control verifies that the contender can observe a released lock
-while the replacement process remains alive. The replacement checks its PID and
-descriptor's file identity. This is a sampled test, not a proof that every
+while the replacement process remains alive. A second contender blocks in
+`flock` and acquires only after the exec owner releases the lock. The replacement
+checks its PID and descriptor's file identity. This is a bounded fixture, not a proof that every
 instant was observed or that an open descriptor is itself proof of lock
 ownership. Linux's [flock manual](https://man7.org/linux/man-pages/man2/flock.2.html)
 documents preservation across `execve`; Apple's [flock manual](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html)

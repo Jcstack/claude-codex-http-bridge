@@ -93,6 +93,16 @@ while True:
 os.close(fd)
 '''
 
+BLOCKING_CONTENDER = r'''
+import fcntl,os,sys
+fd=os.open(sys.argv[1],os.O_RDWR)
+print("waiting",flush=True)
+fcntl.flock(fd,fcntl.LOCK_EX)
+print("acquired",flush=True)
+fcntl.flock(fd,fcntl.LOCK_UN)
+os.close(fd)
+'''
+
 
 @unittest.skipUnless(os.name == "posix", "POSIX flock and exec fixture")
 class OwnedExecLockTests(unittest.TestCase):
@@ -161,6 +171,23 @@ class OwnedExecLockTests(unittest.TestCase):
 
     def test_monitor_lock_remains_contended_across_owned_exec(self):
         self.observe_exec("retain")
+
+    def test_waiting_contender_acquires_after_exec_owner_releases_lock(self):
+        lock = self.root / "monitor.lock"
+        owner = self.start(BEFORE_EXEC, lock, "retain", AFTER_EXEC)
+        self.assertEqual(self.line(owner), "old-ready")
+        contender = self.start(BLOCKING_CONTENDER, lock)
+        self.assertEqual(self.line(contender), "waiting")
+        self.assertFalse(select.select([contender.stdout], [], [], .05)[0])
+        owner.stdin.write(b"exec\n")
+        owner.stdin.flush()
+        self.assertEqual(self.line(owner), "new-retained")
+        self.assertFalse(select.select([contender.stdout], [], [], .1)[0])
+        owner.stdin.write(b"finish\n")
+        owner.stdin.flush()
+        self.assertEqual(owner.wait(timeout=5), 0)
+        self.assertEqual(self.line(contender), "acquired")
+        self.assertEqual(contender.wait(timeout=5), 0)
 
     def test_cloexec_control_releases_lock_while_replacement_is_alive(self):
         self.observe_exec("close")
