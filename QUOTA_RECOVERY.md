@@ -19,17 +19,19 @@ It checks the local selected-account state every 30 seconds. Only an active,
 credential-wide quota gate permits an automatic upstream usage query. Healthy
 operation makes no extra upstream usage queries.
 
-On macOS, the source login-recovery check also attempts to start a watcher
-when the inference service is healthy and a read-only observation finds no
-conflicting monitor lock. The watcher takes its own exclusive lock, so a
-concurrent start cannot create two active watchers. An unavailable, unsupported
-or conflicting observation does not trigger a start. This is best-effort
-recovery after a monitor exits, not proof of its liveness or a live replacement
-of an older monitor. The check targets a 120-second cadence and the new watcher
-still observes its startup quiet period; scheduling and sleep can add delay.
-The controller was installed on the active Mac with a private rollback copy;
-its running login agent and inference services were not restarted. A later
-scheduled health receipt reported healthy; an actual reboot was not tested.
+On macOS, the login-recovery check attempts to start a watcher when the
+inference service is healthy, an existing monitor lock has no observed conflict,
+and the PID in a private monitor receipt is confirmed absent using signal zero.
+Missing, malformed, inaccessible or ambiguous evidence blocks the attempt. PID
+reuse can conservatively prevent recovery. The watcher takes its own exclusive
+lock; ordinary concurrent starts using the same lock file are serialized. Lock
+file replacement and same-user manipulation remain limitations. This is
+best-effort recovery after a monitor exits, not proof of liveness or a live
+replacement of an older monitor. The check targets a 120-second cadence and
+the new watcher still observes its startup quiet period; scheduling and sleep
+can add delay. The earlier controller was installed on the active Mac without
+restarting its login agent or inference services; the additional PID check is a
+source candidate pending rollout. An actual reboot was not tested.
 
 The source now keeps automatic probe timestamps in a private, bounded ledger,
 using only a short account fingerprint and monotonic time. It writes a

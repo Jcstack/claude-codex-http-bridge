@@ -15,6 +15,7 @@ import plistlib
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -282,14 +283,36 @@ def record(root: Path, result: str, reason: str | None = None) -> None:
                               json.dumps(state) + "\n")
 
 
+def previous_quota_monitor_gone(root: Path, quota_recovery) -> bool:
+    """Require a private recorded PID to be definitely absent, never signal it."""
+    try:
+        path = root / "runtime-quota" / "status.json"
+        details = path.lstat()
+        if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.geteuid()
+                or details.st_mode & 0o077):
+            return False
+        value = json.loads(quota_recovery._private_text(path, 4096),
+                           object_pairs_hook=quota_recovery._unique_json_pairs)
+        pid = value.get("monitor_pid") if isinstance(value, dict) else None
+        if type(pid) is not int or not 1 < pid < 2**31:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+    except (OSError, RuntimeError, ValueError, AttributeError, TypeError):
+        return False
+    return False
+
+
 def ensure_missing_quota_monitor(root: Path) -> None:
-    """Best-effort local recovery only when the monitor lock has no conflict."""
+    """Best-effort recovery only with independent missing-process evidence."""
     try:
         import quota_recovery
         observation = quota_recovery.monitor_lock_observation(root / "runtime-quota")
-        if observation in ("absent", "no_conflict"):
-            # A concurrent monitor may start after the observation; its own
-            # exclusive lock prevents more than one watcher from running.
+        if observation == "no_conflict" and previous_quota_monitor_gone(root, quota_recovery):
+            # A concurrent ordinary start on this same lock inode is serialized
+            # by the watcher's own lock. Replaced lock files remain a boundary.
             quota_recovery.ensure_watch(root)
     except (OSError, RuntimeError, ValueError, ImportError, AttributeError, TypeError):
         # Failure to restore quota monitoring must not mark a healthy inference

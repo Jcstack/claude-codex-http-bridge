@@ -53,15 +53,17 @@ class AutostartTests(unittest.TestCase):
 
     def test_healthy_service_tries_recovery_when_no_lock_conflict_is_observed(self):
         import quota_recovery
-        for observation in ("absent", "no_conflict", "conflict", "unavailable", "unsupported"):
-            with self.subTest(observation=observation), \
+        for observation, gone in (("absent", True), ("no_conflict", True), ("no_conflict", False),
+                                  ("conflict", True), ("unavailable", True), ("unsupported", True)):
+            with self.subTest(observation=observation, gone=gone), \
                  patch.object(autostart, "healthy", return_value=True), \
                  patch.object(quota_recovery, "monitor_lock_observation", return_value=observation) as inspect, \
+                 patch.object(autostart, "previous_quota_monitor_gone", return_value=gone), \
                  patch.object(quota_recovery, "ensure_watch") as start, \
                  patch.object(launcher, "bridge_start", side_effect=AssertionError("unexpected service start")):
                 self.assertEqual(autostart.run_once(self.root), 0)
                 inspect.assert_called_once_with(self.root / "runtime-quota")
-                self.assertEqual(start.call_count, int(observation in ("absent", "no_conflict")))
+                self.assertEqual(start.call_count, int(observation == "no_conflict" and gone))
                 if start.call_count:
                     start.assert_called_once_with(self.root)
                 self.assertEqual(self.result()["result"], "healthy")
@@ -70,19 +72,47 @@ class AutostartTests(unittest.TestCase):
         import quota_recovery
         with patch.object(autostart, "healthy", return_value=True), \
              patch.object(quota_recovery, "monitor_lock_observation", return_value="no_conflict"), \
+             patch.object(autostart, "previous_quota_monitor_gone", return_value=True), \
              patch.object(quota_recovery, "ensure_watch", side_effect=OSError("PRIVATE_FIXTURE_SENTINEL")):
             self.assertEqual(autostart.run_once(self.root), 0)
         self.assertEqual(self.result()["result"], "healthy")
         self.assertNotIn("PRIVATE_FIXTURE_SENTINEL", (self.root / "runtime" / "autostart-status.json").read_text())
+
+    @unittest.skipIf(os.name == "nt", "Uses POSIX ownership and signal-zero semantics")
+    def test_missing_monitor_evidence_fails_closed(self):
+        import quota_recovery
+        directory = self.root / "runtime-quota"
+        directory.mkdir(mode=0o700)
+        status = directory / "status.json"
+        self.assertFalse(autostart.previous_quota_monitor_gone(self.root, quota_recovery))
+        for payload in ('{}', '{"monitor_pid":true}', '{"monitor_pid":0}',
+                        '{"monitor_pid":2147483648}', '{"monitor_pid":3,"monitor_pid":4}', 'invalid'):
+            runtime_bundle.write_file(status, payload.encode(), 0o600)
+            with self.subTest(payload=payload), patch.object(autostart.os, "kill") as probe:
+                self.assertFalse(autostart.previous_quota_monitor_gone(self.root, quota_recovery))
+                probe.assert_not_called()
+        runtime_bundle.write_file(status, b'{"monitor_pid":12345}', 0o600)
+        for effect, expected in ((None, False), (ProcessLookupError(), True), (PermissionError(), False)):
+            with self.subTest(effect=type(effect).__name__), patch.object(autostart.os, "kill", side_effect=effect) as probe:
+                self.assertEqual(autostart.previous_quota_monitor_gone(self.root, quota_recovery), expected)
+                probe.assert_called_once_with(12345, 0)
+        status.chmod(0o644)
+        with patch.object(autostart.os, "kill") as probe:
+            self.assertFalse(autostart.previous_quota_monitor_gone(self.root, quota_recovery))
+            probe.assert_not_called()
 
     @unittest.skipUnless(sys.platform == "darwin", "Requires macOS read-only lock observation")
     def test_quota_monitor_recovery_waits_for_a_real_owned_lock(self):
         import quota_recovery
         directory = self.root / "runtime-quota"
         directory.mkdir(mode=0o700)
-        program = '''import fcntl,os,sys
+        program = '''import fcntl,json,os,sys
+from pathlib import Path
 fd=os.open(sys.argv[1],os.O_CREAT|os.O_RDWR,0o600)
 fcntl.flock(fd,fcntl.LOCK_EX)
+status=Path(sys.argv[1]).parent/"status.json"
+out=os.open(status,os.O_CREAT|os.O_WRONLY|os.O_TRUNC,0o600)
+os.write(out,json.dumps({"monitor_pid":os.getpid()}).encode()); os.close(out)
 print("ready",flush=True)
 sys.stdin.read(1)
 os.close(fd)
@@ -97,6 +127,12 @@ os.close(fd)
             with patch.object(quota_recovery, "ensure_watch") as start:
                 autostart.ensure_missing_quota_monitor(self.root)
                 start.assert_not_called()
+                (directory / "monitor.lock").unlink()
+                replacement = os.open(directory / "monitor.lock", os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+                os.close(replacement)
+                self.assertEqual(quota_recovery.monitor_lock_observation(directory), "no_conflict")
+                autostart.ensure_missing_quota_monitor(self.root)
+                start.assert_not_called()  # The recorded process still exists.
                 child.stdin.write("x")
                 child.stdin.flush()
                 self.assertEqual(child.wait(timeout=5), 0)
@@ -117,11 +153,13 @@ os.close(fd)
         directory = self.root / "runtime-quota"
         directory.mkdir(mode=0o700)
         entry = self.root / "quota_recovery.py"
-        entry.write_text('''import fcntl,os,sys,time
+        entry.write_text('''import fcntl,json,os,sys,time
 from pathlib import Path
 root=Path(sys.argv[3])
 fd=os.open(root/"runtime-quota"/"monitor.lock",os.O_CREAT|os.O_RDWR,0o600)
 fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+status=os.open(root/"runtime-quota"/"status.json",os.O_CREAT|os.O_WRONLY|os.O_TRUNC,0o600)
+os.write(status,json.dumps({"monitor_pid":os.getpid()}).encode()); os.close(status)
 (root/"synthetic-watcher-ready").write_text("ready")
 while True: time.sleep(1)
 ''', encoding="utf-8")
@@ -145,7 +183,7 @@ while True: time.sleep(1)
             with patch.object(codex_usage, "active_bridge_auth", return_value={"account_id": "fixture"}), \
                  patch.object(accounts, "Management", return_value=object()), \
                  patch.object(quota_recovery.subprocess, "Popen", side_effect=spawn):
-                autostart.ensure_missing_quota_monitor(self.root)
+                quota_recovery.ensure_watch(self.root)  # Start the owned synthetic watcher.
                 wait_ready()
                 autostart.ensure_missing_quota_monitor(self.root)
                 self.assertEqual(len(children), 1)
