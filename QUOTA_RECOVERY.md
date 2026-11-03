@@ -148,6 +148,28 @@ the owned signal and handoff test runs only on macOS.
 This does not authorize signaling the real monitor or establish safety for an
 in-flight real quota request.
 
+## Cooperative exec observation
+
+The isolated [exec-lock fixture](tests/test_quota_exec_lock_fixture.py) explores
+a possible later-generation watcher that cooperatively replaces itself. On a
+temporary local filesystem, an owned process holds an advisory `flock` and
+passes its open descriptor across `execve`; a separately opened contender
+repeatedly tries the lock before, during and after the transition. A
+close-on-exec control verifies that the contender can observe a released lock
+while the replacement process remains alive. The replacement checks its PID and
+descriptor's file identity. This is a sampled test, not a proof that every
+instant was observed or that an open descriptor is itself proof of lock
+ownership. Linux's [flock manual](https://man7.org/linux/man-pages/man2/flock.2.html)
+documents preservation across `execve`; Apple's [flock manual](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html)
+describes advisory lock and duplicate-descriptor behavior. Platform and
+filesystem semantics still require their own checks.
+
+This fixture does not implement an updater, authenticate a source manifest,
+drain an in-flight account operation, handle process crashes, or preserve a
+lock on Windows. It cannot upgrade the current legacy watcher, which has no
+cooperative self-exec protocol. It is not installed or connected to the
+running service.
+
 This is not a production launcher or OS sandbox. It trusts the manifest, parent
 code, interpreter and standard library; it does not prove protection against
 same-user manipulation of the parent or child process, complete dependency
