@@ -333,3 +333,12 @@ an `flock` conflict does not reveal a process owner. An owned fixture observed
 both a conflict and its removal without acquiring the lock. The status source
 reports this observation on macOS without claiming process liveness; it does
 not acquire a live lock, which could race a watcher startup.
+
+The separate [monitor-evidence candidate](quota_monitor_identity.py) combines a
+recent private report, an identity snapshot, expected process arguments, lock
+file identity, `F_GETLK`, and the set of processes visible to `lsof`. It rejects
+multiple visible openers and repeats the identity and lock observations. Local
+fixtures cover ambiguity and malformed expectations, and one read-only check
+matched the existing monitor. The evidence is not atomic, `lsof` visibility is
+not an exclusive-ownership proof, and the candidate sends no signals. It is not
+installed or used automatically; no live handoff follows from this result.

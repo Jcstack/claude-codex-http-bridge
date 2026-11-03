@@ -19,7 +19,9 @@ import unittest
 
 import accounts
 import process_identity
+import quota_monitor_identity
 import quota_recovery
+import runtime_bundle
 
 
 SOURCE = Path(__file__).resolve().parent.parent
@@ -51,6 +53,33 @@ class OwnedDarwinHandoffTest(unittest.TestCase):
                                  cwd=self.root, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, start_new_session=True, bufsize=0)
         self.children.append(child)
+        return child
+
+    def start_monitor_script(self, *extra):
+        program = r'''
+import json,sys,time
+from pathlib import Path
+sys.path.insert(0,SOURCE)
+import quota_recovery,runtime_bundle
+root=Path(sys.argv[3])
+with quota_recovery.monitor_lock(root/'runtime-quota') as acquired:
+    assert acquired
+    payload={'status':'no_stale_credential_quota','checked_at':time.time(),'monitor_pid':__import__('os').getpid()}
+    runtime_bundle.write_file(root/'runtime-quota'/'status.json',json.dumps(payload).encode(),0o600)
+    print('ready',flush=True)
+    sys.stdin.readline()
+'''.replace("SOURCE", repr(str(SOURCE)))
+        path = self.root / "quota_recovery.py"
+        path.write_text(program, encoding="utf-8")
+        path.chmod(0o700)
+        allowed = ("PATH", "TMPDIR", "LANG")
+        environment = {key: os.environ[key] for key in allowed if key in os.environ}
+        environment["HOME"] = str(self.root)
+        child = subprocess.Popen([sys.executable, "-I", str(path), "watch", "--root", str(self.root), *extra],
+                                 cwd=self.root, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, start_new_session=True, bufsize=0)
+        self.children.append(child)
+        self.assertEqual(self.read_line(child), "ready")
         return child
 
     def stop_children(self):
@@ -161,6 +190,41 @@ with open(sys.argv[1],'rb'):
         path.chmod(0o644)
         self.assertEqual(quota_recovery.monitor_status(self.root)["lock_observation"], "unavailable")
 
+    def test_read_only_monitor_evidence_rejects_ambiguous_openers_and_stale_reports(self):
+        owner = self.start_monitor_script()
+        observed = quota_monitor_identity.observe(self.root)
+        self.assertEqual(observed.pid, owner.pid)
+        self.assertIsNone(owner.poll())
+        path = self.root / "runtime-quota" / "monitor.lock"
+        reader = self.start("import sys; f=open(sys.argv[1],'rb'); print('open',flush=True); sys.stdin.readline()", path)
+        self.assertEqual(self.read_line(reader), "open")
+        with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
+            quota_monitor_identity.observe(self.root)
+        self.assertIsNone(owner.poll())
+        self.assertIsNone(reader.poll())
+        reader.stdin.write(b"done\n")
+        reader.stdin.flush()
+        self.assertEqual(reader.wait(timeout=5), 0)
+        status = self.root / "runtime-quota" / "status.json"
+        runtime_bundle.write_file(status, json.dumps({"status": "no_stale_credential_quota", "checked_at": 1,
+                                                       "monitor_pid": owner.pid}).encode(), 0o600)
+        with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
+            quota_monitor_identity.observe(self.root)
+        self.assertIsNone(owner.poll())
+
+    def test_read_only_monitor_evidence_rejects_unexpected_command_arguments(self):
+        owner = self.start_monitor_script("--synthetic-extra")
+        with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
+            quota_monitor_identity.observe(self.root)
+        self.assertIsNone(owner.poll())
+
+    def test_read_only_monitor_evidence_rejects_broad_script_permissions(self):
+        owner = self.start_monitor_script()
+        (self.root / "quota_recovery.py").chmod(0o755)
+        with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
+            quota_monitor_identity.observe(self.root)
+        self.assertIsNone(owner.poll())
+
     def test_query_drains_before_owned_monitor_is_signaled_and_successor_acquires_locks(self):
         old_code = r'''
 import sys
@@ -251,6 +315,16 @@ sys.stdin.readline()
         self.assertIsNone(child.poll())
         self.assertEqual(self.send(child, current), 0)
         self.assertEqual(child.wait(timeout=5), -signal.SIGTERM)
+
+
+@unittest.skipIf(sys.platform == "darwin", "Exercises the unsupported-platform refusal")
+class UnsupportedMonitorIdentityTest(unittest.TestCase):
+    def test_refuses_without_creating_state(self):
+        with tempfile.TemporaryDirectory(prefix="quota-identity-unsupported-") as directory:
+            root = Path(directory)
+            with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
+                quota_monitor_identity.observe(root)
+            self.assertEqual(list(root.iterdir()), [])
 
 
 if __name__ == "__main__":
