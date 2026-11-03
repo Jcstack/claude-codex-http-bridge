@@ -22,7 +22,12 @@ import quota_recovery as recovery
 
 def generate_certificate(directory: Path, hostname: str) -> None:
     directory.mkdir()
-    go = shutil.which("go")
+    choice = os.environ.get("BRIDGE_QUOTA_TLS_GENERATOR", "auto")
+    if choice not in ("auto", "go", "openssl"):
+        raise RuntimeError("Invalid synthetic TLS generator selection")
+    go = shutil.which("go") if choice != "openssl" else None
+    if choice == "go" and not go:
+        raise RuntimeError("The required synthetic Go TLS generator is unavailable")
     if go:
         env = {name: os.environ[name] for name in ("PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "SYSTEMROOT",
                                                   "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "TMPDIR")
@@ -33,14 +38,20 @@ def generate_certificate(directory: Path, hostname: str) -> None:
     else:
         executable = shutil.which("openssl")
         if not executable:
-            if os.environ.get("BRIDGE_REQUIRE_QUOTA_TLS_FIXTURE") == "1":
+            if choice == "openssl" or os.environ.get("BRIDGE_REQUIRE_QUOTA_TLS_FIXTURE") == "1":
                 raise RuntimeError("The required synthetic TLS certificate generator is unavailable")
             raise unittest.SkipTest("Go or OpenSSL is required to generate a disposable TLS fixture")
         env = None
+        config = directory / "fixture-openssl.cnf"
+        config.write_text("[req]\ndistinguished_name=fixture_dn\nx509_extensions=fixture_ext\n"
+                          "[fixture_dn]\nCN=" + hostname + "\n[fixture_ext]\n"
+                          "subjectAltName=DNS:" + hostname + "\n"
+                          "basicConstraints=critical,CA:TRUE\n"
+                          "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign\n"
+                          "extendedKeyUsage=serverAuth\n", encoding="ascii")
         command = [executable, "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-nodes", "-days", "1",
                    "-keyout", str(directory / "key.pem"), "-out", str(directory / "certificate.pem"),
-                   "-subj", "/CN=" + hostname, "-addext", "subjectAltName=DNS:" + hostname,
-                   "-addext", "basicConstraints=critical,CA:TRUE"]
+                   "-config", str(config), "-extensions", "fixture_ext", "-subj", "/CN=" + hostname]
     subprocess.run(command, env=env, cwd=directory, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                    stderr=subprocess.PIPE, timeout=90, check=True)
 
@@ -121,6 +132,7 @@ class ManualQuotaProxyTests(unittest.TestCase):
 
     def proxy(self, *, hostname="correct", mode="ok", body=None):
         server = Proxy(("127.0.0.1", 0), ProxyHandler)
+        self.addCleanup(server.server_close)
         server.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         server.context.load_cert_chain(self.root / hostname / "certificate.pem", self.root / hostname / "key.pem")
         server.mode = mode
@@ -133,7 +145,6 @@ class ManualQuotaProxyTests(unittest.TestCase):
         def cleanup():
             server.shutdown()
             thread.join(timeout=2)
-            server.server_close()
 
         self.addCleanup(cleanup)
         return server
