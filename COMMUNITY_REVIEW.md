@@ -291,3 +291,28 @@ storage, which was not independently verified here. The project was inspected
 read-only and not installed or executed. Automatically editing project settings
 would introduce trust, concurrency, rollback and `/cd` questions, so the bridge
 does not adopt that mechanism as a default.
+
+## macOS monitor identity (2026-11-03)
+
+The existing monitor cannot voluntarily reload its code. Apple's open-source
+[libproc interface](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.h)
+exposes `proc_signal_with_audittoken`; its
+[implementation](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)
+passes the token to the kernel. XNU also defines the combined BSD and process
+generation reader in a [private header](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/proc_info_private.h).
+[CodexBar](https://github.com/steipete/CodexBar/blob/main/docs/DEVELOPMENT.md)
+uses generation-bound signaling for its own test-process cleanup. At review the
+repository was active and MIT-licensed, with about 23,000 stars and 102 open
+issues. Those numbers are context, not an audit; no dependency was installed.
+
+On this Mac, [our owned-process fixture](tests/test_macos_quota_handoff.py)
+observed a wrong generation rejected, including after same-PID `exec`, and a
+matching signal reaching only the owned target. It also held the account lock
+during a fake usage operation, then released it before signaling the owned
+monitor and allowing a synthetic successor to acquire its locks. The sentinel
+survived. This is not proof of actual PID reuse or a safe live migration. Before
+any real handoff we must independently establish that the intended monitor owns
+the lock, bind all identity checks to its generation, ensure a successor is
+ready, and test failure and rollback paths. The private metadata ABI and other
+macOS versions may differ; unsupported reads must fail closed. Windows and
+Linux need their own identity-bound mechanisms.

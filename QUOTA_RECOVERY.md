@@ -86,8 +86,10 @@ Other statuses preserve the gate. The command does not enable a project-API
 profile or change the current Claude conversation. A running client can retry
 its message after recovery without being closed.
 
-The durable ledger and `status` command are source changes undergoing
-validation. They do not affect an older monitor process that is already running.
+Updating the source makes `status` available to new command invocations. An
+older monitor already in memory does not gain the ledger or identity checks
+until it is safely replaced. An absent ledger or missing protocol in `status`
+therefore does not prove that the running monitor uses the new behavior.
 
 ## Verification
 
