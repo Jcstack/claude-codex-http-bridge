@@ -42,6 +42,35 @@ if sys.stdin.readline()!="finish\n": raise SystemExit(5)
 if same: os.close(fd)
 '''
 
+FAIL_EXEC = r'''
+import fcntl,os,sys
+lock,missing=sys.argv[1:]
+fd=os.open(lock,os.O_CREAT|os.O_RDWR,0o600)
+fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+os.set_inheritable(fd,True)
+print("old-ready",flush=True)
+if sys.stdin.readline()!="exec\n": raise SystemExit(2)
+try:
+    os.execve(missing,[missing],dict(os.environ))
+except FileNotFoundError:
+    print("exec-failed",flush=True)
+else:
+    raise SystemExit(3)
+if sys.stdin.readline()!="finish\n": raise SystemExit(4)
+os.close(fd)
+'''
+
+AFTER_CRASH = r'''
+import os,sys
+fd,mode,path,original_pid=sys.argv[1:]
+fd=int(fd);actual=os.fstat(fd);expected=os.stat(path)
+if mode!="retain" or os.getpid()!=int(original_pid) or (actual.st_dev,actual.st_ino)!=(expected.st_dev,expected.st_ino):
+    raise SystemExit(3)
+print("new-ready",flush=True)
+if sys.stdin.readline()!="crash\n": raise SystemExit(4)
+os._exit(23)
+'''
+
 CONTENDER = r'''
 import fcntl,os,select,sys
 fd=os.open(sys.argv[1],os.O_RDWR)
@@ -135,6 +164,39 @@ class OwnedExecLockTests(unittest.TestCase):
 
     def test_cloexec_control_releases_lock_while_replacement_is_alive(self):
         self.observe_exec("close")
+
+    def test_failed_exec_leaves_old_owned_process_holding_the_lock(self):
+        lock = self.root / "monitor.lock"
+        owner = self.start(FAIL_EXEC, lock, self.root / "nonexistent-executable")
+        self.assertEqual(self.line(owner), "old-ready")
+        contender = self.start(CONTENDER, lock)
+        self.assertEqual(self.line(contender), "contender-ready")
+        owner.stdin.write(b"exec\n")
+        owner.stdin.flush()
+        self.assertEqual(self.line(owner), "exec-failed")
+        self.assertIsNone(owner.poll())
+        contender.stdin.write(b"stop\n")
+        contender.stdin.flush()
+        self.assertEqual(self.line(contender).split()[0], "blocked")
+        self.assertEqual(contender.wait(timeout=5), 0)
+        owner.stdin.write(b"finish\n")
+        owner.stdin.flush()
+        self.assertEqual(owner.wait(timeout=5), 0)
+
+    def test_crash_after_exec_releases_the_lock(self):
+        lock = self.root / "monitor.lock"
+        owner = self.start(BEFORE_EXEC, lock, "retain", AFTER_CRASH)
+        self.assertEqual(self.line(owner), "old-ready")
+        contender = self.start(CONTENDER, lock)
+        self.assertEqual(self.line(contender), "contender-ready")
+        owner.stdin.write(b"exec\n")
+        owner.stdin.flush()
+        self.assertEqual(self.line(owner), "new-ready")
+        owner.stdin.write(b"crash\n")
+        owner.stdin.flush()
+        self.assertEqual(owner.wait(timeout=5), 23)
+        self.assertEqual(self.line(contender), "acquired")
+        self.assertEqual(contender.wait(timeout=5), 0)
 
 
 if __name__ == "__main__":

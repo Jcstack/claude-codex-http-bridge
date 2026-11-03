@@ -164,6 +164,12 @@ documents preservation across `execve`; Apple's [flock manual](https://developer
 describes advisory lock and duplicate-descriptor behavior. Platform and
 filesystem semantics still require their own checks.
 
+Two further local controls distinguish failure modes: when a synthetic
+`execve` fails before replacing the process, the old test process continues
+holding its lock; when the replacement crashes after a successful exec, the
+contender acquires the released lock. Recovery from a crash therefore still
+needs a separate verified monitor and durable probe-throttling policy.
+
 This fixture does not implement an updater, authenticate a source manifest,
 drain an in-flight account operation, handle process crashes, or preserve a
 lock on Windows. It cannot upgrade the current legacy watcher, which has no
