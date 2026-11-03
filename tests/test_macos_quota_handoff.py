@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 import accounts
 import process_identity
@@ -223,6 +224,15 @@ with open(sys.argv[1],'rb'):
         (self.root / "quota_recovery.py").chmod(0o755)
         with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
             quota_monitor_identity.observe(self.root)
+        self.assertIsNone(owner.poll())
+
+    def test_read_only_monitor_evidence_rejects_a_changed_generation(self):
+        owner = self.start_monitor_script()
+        birth, unique, generation = quota_monitor_identity._snapshot(owner.pid)
+        with patch.object(quota_monitor_identity, "_snapshot",
+                          side_effect=[(birth, unique, generation), (birth, unique, generation ^ 1)]):
+            with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
+                quota_monitor_identity.observe(self.root)
         self.assertIsNone(owner.poll())
 
     def test_query_drains_before_owned_monitor_is_signaled_and_successor_acquires_locks(self):
