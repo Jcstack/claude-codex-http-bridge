@@ -21,6 +21,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install the pinned capability dependencies
-        run: python -m pip --isolated install --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r requirements-capabilities.lock
+        run: |
+          python -m pip --isolated install --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r requirements-capabilities.lock
       - name: Test frozen sources and login recovery with synthetic providers
         run: python -m unittest tests.test_native_capabilities tests.test_autostart -v
