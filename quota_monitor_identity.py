@@ -56,7 +56,7 @@ def _snapshot(pid: int) -> tuple[bytes, bytes, int]:
     return birth, unique, generation
 
 
-def observe(root: Path) -> MonitorEvidence:
+def observe(root: Path, *, allowed_script: Path | None = None) -> MonitorEvidence:
     """Return limited, non-atomic evidence; no network, locks or writes occur."""
     if sys.platform != "darwin":
         raise MonitorEvidenceUnavailable("Monitor evidence is unsupported on this platform")
@@ -76,10 +76,6 @@ def observe(root: Path) -> MonitorEvidence:
         lock = directory / "monitor.lock"
         metadata = lock.lstat()
         _require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.geteuid() and not metadata.st_mode & 0o077)
-        script = root / "quota_recovery.py"
-        script_metadata = script.lstat()
-        _require(stat.S_ISREG(script_metadata.st_mode) and script_metadata.st_uid == os.geteuid()
-                 and not script_metadata.st_mode & 0o077 and script_metadata.st_size <= 2 * 1024 * 1024)
         _require(quota_recovery.monitor_lock_observation(directory) == "conflict")
         first = _snapshot(pid)
         birth, executable = process_identity.capture(pid)
@@ -90,10 +86,22 @@ def observe(root: Path) -> MonitorEvidence:
         command = subprocess.run(["/bin/ps", "-ww", "-p", str(pid), "-o", "command="],
             env=environment, capture_output=True, text=True, timeout=5, check=True).stdout.strip()
         arguments = shlex.split(command)
-        _require(len(arguments) == 6 and arguments[1] == "-I" and arguments[3] in ("watch", "watch-wait")
-                 and arguments[4] == "--root")
+        if len(arguments) == 6 and arguments[1] == "-I":
+            entry, mode, option, root_argument = arguments[2:]
+        elif len(arguments) == 7 and arguments[1:3] == ["-I", "-B"]:
+            entry, mode, option, root_argument = arguments[3:]
+        else:
+            raise MonitorEvidenceUnavailable("Monitor evidence is incomplete")
+        _require(mode in ("watch", "watch-wait") and option == "--root")
         _require(os.path.samefile(arguments[0], executable))
-        _require(os.path.samefile(arguments[2], script) and os.path.samefile(arguments[5], root))
+        script = root / "quota_recovery.py"
+        if not os.path.samefile(entry, script):
+            _require(allowed_script is not None and os.path.samefile(entry, allowed_script))
+            script = Path(allowed_script)
+        script_metadata = script.lstat()
+        _require(stat.S_ISREG(script_metadata.st_mode) and script_metadata.st_uid == os.geteuid()
+                 and not script_metadata.st_mode & 0o077 and script_metadata.st_size <= 2 * 1024 * 1024)
+        _require(os.path.samefile(root_argument, root))
         output = subprocess.run(["/usr/sbin/lsof", "-nP", "-Fp", "--", str(lock)],
             env=environment, capture_output=True, text=True, timeout=5, check=True).stdout.splitlines()
         openers = {int(line[1:]) for line in output if line.startswith("p")}

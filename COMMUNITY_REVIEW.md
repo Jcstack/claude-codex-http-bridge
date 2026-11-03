@@ -346,26 +346,33 @@ installed or used automatically; no live handoff follows from this result.
 The separate [fixture-only handoff experiment](quota_monitor_handoff.py) uses
 the account lock, prepares a successor, rechecks evidence, and uses an
 audit-token-bound signal in a credential-free temporary runtime. It refuses
-non-fixture roots and processes that are not direct children of the caller. A
-synthetic adversarial control replaced the source just while the successor
-loaded it, then restored the original inode before the second observation. The
-unreviewed child was armed despite the original source hash and matching
-metadata; the signal was mocked and the original test monitor remained alive.
-This blocks live use. Atomic versioned controller publication and consistent
-dependency imports remain prerequisites, along with handoff and rollback tests.
-The fixture redirects its child home and uses synthetic source; it is not an OS
-sandbox for arbitrary untrusted programs.
+non-fixture roots and processes that are not direct children of the caller. An
+earlier synthetic control replaced the top-level source during child launch and
+restored it before the second observation; the unreviewed child was armed. The
+signal was mocked and the original test monitor remained alive. The revised
+fixture launches its successor from the published snapshot: this specific
+top-level swap no longer affects the child, while a deliberately unversioned
+negative control still reproduces the issue. The fixture redirects its child
+home and uses synthetic source; it is not an OS sandbox for arbitrary programs.
 
 A separate [fixture-only snapshot publisher](quota_snapshot_fixture.py) checks
-an explicit source manifest and publishes a read-only directory with Darwin's
+an explicit source manifest and publishes a private directory with Darwin's
 exclusive atomic rename; it does not replace an existing destination. Apple
 [documents that support is volume-dependent](https://developer.apple.com/documentation/foundation/urlresourcevalues/volumesupportsexclusiverenaming);
 the fixture fails closed when the operation is unavailable. Local
 tests cover concurrent publishers, malformed or changed files, failed staging,
 unsupported rename, and process exits immediately before and after publication.
-An interrupted staging directory remains for a later safe cleanup design; it is
-not silently deleted. A watcher loaded from the published fixture snapshot and
-its immediate imports used a separate temporary runtime root for synthetic
-quota recovery, without importing a conflicting top-level source. This is not
-a complete dependency audit, a power-loss guarantee, same-user tamper
-resistance, or a live migration. The handoff does not use this publisher yet.
+The macOS 15 runner refused an exclusive rename from a directory with mode
+`0500`, although the same operation succeeded from `0700`. The publisher now
+renames the private `0700` stage first and seals the verified directory inode
+to `0500`; verification rejects the unsealed directory. Cooperating publishers
+wait briefly for sealing. A process exit in that gap leaves an unusable
+directory, and an interrupted staging directory also remains for a later safe
+cleanup design; neither is silently deleted. A watcher loaded from the
+published fixture snapshot and its immediate imports used a separate temporary
+runtime root for synthetic quota recovery, without importing a conflicting
+top-level source. The fixture
+handoff now uses this publisher, but a controlled same-user test changed the
+snapshot itself during launch and reproduced the unsafe load. This is not a
+complete dependency audit, a power-loss guarantee, same-user tamper resistance,
+or a live migration. The fixture-only restriction remains in place.

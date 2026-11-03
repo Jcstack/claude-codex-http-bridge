@@ -47,7 +47,7 @@ class SnapshotFixtureTest(unittest.TestCase):
         self.assertTrue(all(path.stat().st_mode & 0o777 == 0o400 for path in result.iterdir()))
         self.assertFalse((self.root / "auth").exists())
 
-    def test_native_publication_reports_only_a_sanitized_error_category(self):
+    def test_native_read_only_stage_is_published_or_refused_without_overwrite(self):
         runtime = self.root / "runtime-quota"
         runtime_bundle.private_dir(runtime)
         parent = runtime / "source-snapshots"
@@ -60,6 +60,12 @@ class SnapshotFixtureTest(unittest.TestCase):
         stage.chmod(0o500)
         try:
             snapshot._publish_exclusive(stage, parent / digest)
+        except PermissionError as error:
+            # macOS 15 can reject renaming a directory without owner write access.
+            self.assertEqual(error.errno, errno.EACCES)
+            self.assertTrue(stage.is_dir())
+            self.assertFalse((parent / digest).exists())
+            return
         except (OSError, AttributeError) as error:
             self.fail(f"Synthetic exclusive publication failed: {type(error).__name__}, errno={getattr(error, 'errno', None)}")
         snapshot.verify_fixture(self.root, parent / digest, self.expected)
@@ -211,6 +217,49 @@ raise AssertionError('Synthetic crash did not occur')
         self.assertEqual(len(entries), 1)
         snapshot.verify_fixture(self.root, entries[0], self.expected)
         self.assertEqual(snapshot.publish_fixture(self.root, self.reviewed, self.expected), entries[0])
+
+    def test_crash_between_rename_and_seal_leaves_unusable_snapshot(self):
+        program = r'''
+import json,os,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import quota_snapshot_fixture
+publish=quota_snapshot_fixture._publish_exclusive
+def crash(stage,final):
+    publish(stage,final)
+    os._exit(49)
+quota_snapshot_fixture._publish_exclusive=crash
+quota_snapshot_fixture.publish_fixture(Path(sys.argv[2]),Path(sys.argv[3]),json.loads(sys.argv[4]))
+raise AssertionError('Synthetic crash did not occur')
+'''
+        environment = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
+        environment["HOME"] = str(self.root)
+        result = subprocess.run([sys.executable, "-I", "-c", program, str(SOURCE), str(self.root),
+                                 str(self.reviewed), json.dumps(self.expected)], cwd=self.root, env=environment,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (49, "", ""))
+        parent = self.root / "runtime-quota" / "source-snapshots"
+        entries = list(parent.iterdir())
+        self.assertEqual(len(entries), 1)
+        final = entries[0]
+        self.assertEqual(final.stat().st_mode & 0o777, 0o700)
+        original = {path.name: path.read_bytes() for path in final.iterdir()}
+        with self.assertRaises(snapshot.SnapshotUnavailable):
+            snapshot.verify_fixture(self.root, final, self.expected)
+        with self.assertRaises(snapshot.SnapshotUnavailable):
+            snapshot.publish_fixture(self.root, self.reviewed, self.expected)
+        self.assertEqual(final.stat().st_mode & 0o777, 0o700)
+        self.assertEqual({path.name: path.read_bytes() for path in final.iterdir()}, original)
+
+    def test_seal_rejects_a_replacement_inode_without_changing_permissions(self):
+        stage = self.root / "stage"
+        final = self.root / "final"
+        stage.mkdir(mode=0o700)
+        final.mkdir(mode=0o700)
+        info = stage.stat()
+        with self.assertRaises(snapshot.SnapshotUnavailable):
+            snapshot._seal_published(final, info.st_dev, info.st_ino)
+        self.assertEqual(final.stat().st_mode & 0o777, 0o700)
 
     def test_independent_publishers_converge_without_overwriting(self):
         program = r'''

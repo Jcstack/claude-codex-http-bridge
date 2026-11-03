@@ -16,6 +16,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 
 import quota_monitor_handoff
 import runtime_bundle
@@ -99,6 +100,38 @@ def verify_fixture(root: Path, snapshot: Path, expected: dict) -> None:
         raise SnapshotUnavailable("Snapshot is unavailable") from None
 
 
+def _verify_or_wait(root: Path, final: Path, expected: dict) -> None:
+    """Allow a cooperating publisher a short time to seal its new directory."""
+    deadline = time.monotonic() + 2
+    while True:
+        try:
+            verify_fixture(root, final, expected)
+            return
+        except SnapshotUnavailable:
+            try:
+                info = final.lstat()
+                pending = (stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+                           and info.st_mode & 0o777 == 0o700)
+            except OSError:
+                pending = False
+            if not pending or time.monotonic() >= deadline:
+                raise
+            time.sleep(.02)
+
+
+def _seal_published(final: Path, device: int, inode: int) -> None:
+    """Seal only the directory that was just published, never a replacement."""
+    descriptor = os.open(final, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                or (info.st_dev, info.st_ino) != (device, inode)):
+            raise SnapshotUnavailable("Published snapshot identity changed")
+        os.fchmod(descriptor, 0o500)
+    finally:
+        os.close(descriptor)
+
+
 def publish_fixture(root: Path, source: Path, expected: dict) -> Path:
     """Atomically publish reviewed source into an owned temporary fixture."""
     if sys.platform != "darwin":
@@ -119,20 +152,22 @@ def publish_fixture(root: Path, source: Path, expected: dict) -> Path:
         runtime_bundle.private_dir(parent)
         final = parent / digest
         if final.exists() or final.is_symlink():
-            verify_fixture(root, final, expected)
+            _verify_or_wait(root, final, expected)
             return final
         stage = Path(tempfile.mkdtemp(prefix=".staging-", dir=parent))
         for name, data in values.items():
             runtime_bundle.write_file(stage / name, data, 0o400)
         runtime_bundle.write_file(stage / "manifest.json", content, 0o400)
-        stage.chmod(0o500)
+        stage_info = stage.lstat()
         try:
             _publish_exclusive(stage, final)
-            stage = None
         except OSError as error:
             if error.errno not in (errno.EEXIST, errno.ENOTEMPTY):
                 raise
-        verify_fixture(root, final, expected)
+        else:
+            stage = None
+            _seal_published(final, stage_info.st_dev, stage_info.st_ino)
+        _verify_or_wait(root, final, expected)
         return final
     except SnapshotUnavailable:
         raise

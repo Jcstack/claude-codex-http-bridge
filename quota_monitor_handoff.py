@@ -75,11 +75,11 @@ def _source_bytes(path: Path) -> bytes:
     return content
 
 
-def _spawn_successor(root: Path) -> subprocess.Popen:
+def _spawn_successor(root: Path, script: Path) -> subprocess.Popen:
     environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(root), "TMPDIR": str(root),
                    "LANG": "C", "CODEX_HOME": str(root / "codex-fixture"),
-                   "XDG_CONFIG_HOME": str(root / "xdg-fixture")}
-    return subprocess.Popen([sys.executable, "-I", str(root / "quota_recovery.py"), "watch-wait", "--root", str(root)], cwd=root,
+                   "XDG_CONFIG_HOME": str(root / "xdg-fixture"), "CLAUDE_CODEX_BRIDGE_HOME": str(root)}
+    return subprocess.Popen([sys.executable, "-I", "-B", str(script), "watch-wait", "--root", str(root)], cwd=root,
         env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         start_new_session=True, bufsize=0)
 
@@ -134,7 +134,7 @@ def _confirmed(root: Path, pid: int, *, after: float) -> bool:
         return False
 
 
-def handoff(root: Path, *, expected_source_sha256: str) -> dict:
+def handoff(root: Path, *, expected_source_sha256: str, fixture_source: Path, expected_manifest: dict) -> dict:
     """Attempt a bounded transition; no raw process or account metadata is returned.
 
     This source candidate only accepts owned temporary fixtures, not a live root.
@@ -145,13 +145,24 @@ def handoff(root: Path, *, expected_source_sha256: str) -> dict:
         raise HandoffUnavailable("A reviewed replacement source hash is required")
     root = Path(root).absolute()
     _fixture_root(root)
+    import quota_snapshot_fixture
+    try:
+        if expected_manifest.get("quota_recovery.py") != expected_source_sha256:
+            raise HandoffUnavailable("Reviewed snapshot manifest does not match the monitor source")
+        snapshot = quota_snapshot_fixture.publish_fixture(root, fixture_source, expected_manifest)
+        quota_snapshot_fixture.verify_fixture(root, snapshot, expected_manifest)
+    except HandoffUnavailable:
+        raise
+    except (OSError, RuntimeError, ValueError, AttributeError):
+        raise HandoffUnavailable("Reviewed snapshot is unavailable") from None
+    script = snapshot / "quota_recovery.py"
     child = None
     armed = False
     started_at = time.time()
     try:
         # The legacy monitor holds this same lock throughout a usage read/reset.
         with accounts.switch_lock(root, wait_seconds=15):
-            first = quota_monitor_identity.observe(root)
+            first = quota_monitor_identity.observe(root, allowed_script=script)
             _fixture_child(first)
             installed = root / "quota_recovery.py"
             reviewed = Path(quota_recovery.__file__).resolve()
@@ -160,10 +171,11 @@ def handoff(root: Path, *, expected_source_sha256: str) -> dict:
             if (not hmac.compare_digest(installed_hash, expected_source_sha256)
                     or not hmac.compare_digest(reviewed_hash, expected_source_sha256)):
                 raise HandoffUnavailable("Replacement monitor source differs from the reviewed source")
-            child = _spawn_successor(root)
+            child = _spawn_successor(root, script)
             if not _ready(child):
                 raise HandoffUnavailable("Replacement monitor did not become ready")
-            second = quota_monitor_identity.observe(root)
+            quota_snapshot_fixture.verify_fixture(root, snapshot, expected_manifest)
+            second = quota_monitor_identity.observe(root, allowed_script=script)
             if second != first:
                 raise HandoffUnavailable("Monitor evidence changed")
             child.stdin.write(b"go\n")
