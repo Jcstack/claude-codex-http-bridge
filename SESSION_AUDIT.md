@@ -122,6 +122,14 @@ independently of inference; its construction and privacy limits are documented
 in [SECURITY.md](SECURITY.md). Avoid using generic timeout counts as model-error
 counts. Existing logs and in-flight requests remain incomplete evidence.
 
+A later four-hour read-only sample included 74 main/child log files and 39
+deduplicated responses with reported usage. Cached input accounted for 96.3093%
+of their reported input tokens; no API-error records or compactions were
+recorded in that sample. No usage records were omitted at the combined identity
+limit or lacked a valid identity. This percentage is a token fraction, not a
+request hit rate, a billing measure, or a guarantee of future reuse; missing
+counters and unrecorded activity remain limitations.
+
 The first complete scan found working cache reads, slow classic compactions
 and separate connection/stream failures. See [CACHE_AUDIT.md](CACHE_AUDIT.md)
 for synthetic cache controls and [PLAN.md](PLAN.md) for acceptance gates.
