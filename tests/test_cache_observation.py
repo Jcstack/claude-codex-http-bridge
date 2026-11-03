@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -95,6 +96,59 @@ class CacheObservationTests(unittest.TestCase):
         self.assertFalse(status["telemetry_enabled"] or status["source_fields_inspected"])
         self.assertTrue(all(not value for key, value in status.items() if key != "state"))
 
+    def test_quota_presence_is_separate_opt_in_and_never_stores_values(self):
+        past, future = int(time.time()) - 10, int(time.time()) + 3600
+        limits = {"five_hour": {"used_percentage": 12.5, "resets_at": past},
+                  "seven_day": {"used_percentage": 45.6, "resets_at": future}}
+        corrected = statusline_adapter.corrected_payload(self.payload, {}, limits, expose_cache_metrics=True)
+        observation.begin(self.root)
+        observation.capture(self.root, self.payload, corrected, enabled=True, quota_configured=True, quota_snapshot=limits)
+        self.assertTrue(observation.QUOTA_FIELDS.isdisjoint(observation.status(self.root)))
+        observation.begin(self.root, include_quota=True)
+        observation.capture(self.root, self.payload, corrected, enabled=True, quota_configured=True, quota_snapshot=limits)
+        result = observation.status(self.root)
+        expected = {"quota_cache_configured": True, "quota_snapshot_fresh": True,
+                    "quota_five_hour_reported": True, "quota_seven_day_reported": True,
+                    "quota_five_hour_prepared": False, "quota_seven_day_prepared": True}
+        self.assertEqual({key: result[key] for key in observation.QUOTA_FIELDS}, expected)
+        for name in (observation.CONTROL, observation.RESULT):
+            raw = (self.audit / name).read_text()
+            for forbidden in (SESSION, PRIVATE, "12.5", "45.6", str(past), str(future)):
+                self.assertNotIn(forbidden, raw)
+
+    def test_quota_opt_in_does_not_override_cache_telemetry_opt_out(self):
+        future = int(time.time()) + 3600
+        limits = {"five_hour": {"used_percentage": 12.5, "resets_at": future}}
+        corrected = statusline_adapter.corrected_payload(self.payload, {}, limits, expose_cache_metrics=False)
+        observation.begin(self.root, include_quota=True)
+        observation.capture(self.root, self.payload, corrected, enabled=False, quota_configured=True, quota_snapshot=limits)
+        result = observation.status(self.root)
+        self.assertFalse(result["source_fields_inspected"] or result["source_cache_object"] or result["output_cache_object"])
+        self.assertTrue(result["quota_five_hour_reported"] and result["quota_five_hour_prepared"])
+        self.assertFalse(result["quota_seven_day_reported"] or result["quota_seven_day_prepared"])
+
+    def test_quota_results_require_exact_boolean_shape(self):
+        observation.begin(self.root, include_quota=True)
+        observation.capture(self.root, self.payload, self.corrected(), enabled=True)
+        path = self.audit / observation.RESULT
+        valid = json.loads(path.read_text())
+        for invalid in ({}, {**valid["quota"], "unexpected": False}, {**valid["quota"], "quota_snapshot_fresh": 1}):
+            with self.subTest(invalid=invalid):
+                api_profile.write_private(path, json.dumps({**valid, "quota": invalid}))
+                self.assertEqual(observation.status(self.root), {"state": "unavailable"})
+
+    def test_quota_window_rejects_nonfinite_invalid_and_expired_fields(self):
+        future = int(time.time()) + 3600
+        for window in ({"used_percentage": float("nan"), "resets_at": future},
+                       {"used_percentage": float("inf"), "resets_at": future},
+                       {"used_percentage": True, "resets_at": future},
+                       {"used_percentage": 20, "resets_at": True},
+                       {"used_percentage": 101, "resets_at": future},
+                       {"used_percentage": 20, "resets_at": 0}):
+            with self.subTest(window=window):
+                self.assertFalse(observation._window_shape(window, unexpired=False))
+        self.assertFalse(observation._window_shape({"used_percentage": 20, "resets_at": future - 7200}, unexpired=True))
+
     def test_start_replaces_a_previous_nonce_and_stop_is_bounded(self):
         observation.begin(self.root)
         old = json.loads((self.audit / observation.CONTROL).read_text())
@@ -180,6 +234,50 @@ class CacheObservationTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {"state": "waiting"})
         with redirect_stdout(StringIO()):
             self.assertEqual(statusline_adapter.cache_metrics_command(self.root, ["telemetry", "stop-observation"]), 0)
+
+    def test_cli_accepts_quota_scope_only_on_observe(self):
+        with redirect_stdout(StringIO()) as output:
+            self.assertEqual(statusline_adapter.cache_metrics_command(self.root, ["telemetry", "observe", "--include-quota"]), 0)
+        self.assertIn("Quota presence is included", output.getvalue())
+        self.assertIs(json.loads((self.audit / observation.CONTROL).read_text())["include_quota"], True)
+        for arguments in (["telemetry", "observation", "--include-quota"],
+                          ["telemetry", "observe", "--include-quota", "extra"],
+                          ["telemetry", "observe", "--unknown"]):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                statusline_adapter.cache_metrics_command(self.root, arguments)
+        with self.assertRaises(ValueError):
+            observation.begin(self.root, include_quota="true")
+
+    def test_adapter_captures_fresh_or_unavailable_quota_without_extra_reads(self):
+        import codex_usage
+        profile = self.root / "profile.json"
+        profile.write_text(json.dumps({"context_windows": {}, "route": "subscription", "expose_cache_metrics": True,
+                                       "usage_cache": str(self.root / "synthetic-cache")}))
+        future = int(time.time()) + 3600
+        limits = {"five_hour": {"used_percentage": 12.5, "resets_at": future}}
+
+        def invoke(snapshot):
+            observation.begin(self.root, include_quota=True)
+            source = TextIOWrapper(BytesIO(json.dumps(self.payload).encode()), encoding="utf-8")
+            output = BytesIO()
+            target = TextIOWrapper(output, encoding="utf-8", write_through=True)
+            with patch.object(statusline_adapter, "ROOT", self.root), patch.object(statusline_adapter.sys, "stdin", source), \
+                 patch.object(statusline_adapter.sys, "stdout", target), patch.object(statusline_adapter.sys, "argv", ["adapter", str(profile)]), \
+                 patch.object(codex_usage, "read_cache", return_value=snapshot) as read, \
+                 patch.object(codex_usage, "start_refresh") as refresh:
+                self.assertEqual(statusline_adapter.main(), 0)
+                read.assert_called_once()
+                self.assertEqual(refresh.call_count, 1 if snapshot is None else 0)
+            return observation.status(self.root), json.loads(output.getvalue())
+
+        result, payload = invoke(limits)
+        self.assertTrue(result["quota_cache_configured"] and result["quota_snapshot_fresh"])
+        self.assertTrue(result["quota_five_hour_reported"] and result["quota_five_hour_prepared"])
+        self.assertEqual(payload["rate_limits"], limits)
+        result, payload = invoke(None)
+        self.assertTrue(result["quota_cache_configured"])
+        self.assertFalse(result["quota_snapshot_fresh"] or result["quota_five_hour_reported"] or result["quota_five_hour_prepared"])
+        self.assertNotIn("rate_limits", payload)
 
     def test_adapter_observation_respects_explicit_session_opt_out(self):
         profile = self.root / "profile.json"

@@ -25,6 +25,8 @@ SUMMARY_FIELDS = frozenset({
     "source_positive_requests", "source_valid_ratio", "preexisting_namespace",
     "output_cache_object", "output_observed_boolean", "output_positive_requests", "output_valid_ratio",
 })
+QUOTA_FIELDS = frozenset({"quota_cache_configured", "quota_snapshot_fresh", "quota_five_hour_reported",
+                          "quota_seven_day_reported", "quota_five_hour_prepared", "quota_seven_day_prepared"})
 
 
 class ObservationUnavailable(RuntimeError):
@@ -85,17 +87,21 @@ def _read(handle) -> dict:
 def _control(directory: Path) -> dict:
     with _open_private(directory / CONTROL) as handle:
         value = _read(handle)
-    if (set(value) != {"version", "nonce", "session_tag", "expires_at"}
+    base = {"version", "nonce", "session_tag", "expires_at"}
+    if (set(value) not in (base, base | {"include_quota"})
             or type(value.get("version")) is not int or value["version"] != 1
             or not isinstance(value.get("nonce"), str) or not re.fullmatch(r"[a-f0-9]{32}", value["nonce"])
             or not isinstance(value.get("session_tag"), str) or not re.fullmatch(r"[a-f0-9]{12}", value["session_tag"])
-            or type(value.get("expires_at")) is not int or not 0 <= value["expires_at"] <= 2**53):
+            or type(value.get("expires_at")) is not int or not 0 <= value["expires_at"] <= 2**53
+            or ("include_quota" in value and type(value["include_quota"]) is not bool)):
         raise ObservationUnavailable("Observation is unavailable")
     return value
 
 
-def begin(root: Path) -> None:
+def begin(root: Path, *, include_quota: bool = False) -> None:
     """Enable one bounded observation of the existing tracked session."""
+    if type(include_quota) is not bool:
+        raise ValueError("Invalid observation scope")
     directory = _directory(root)
     import api_profile
     import session_audit
@@ -106,6 +112,8 @@ def begin(root: Path) -> None:
     nonce = secrets.token_hex(16)
     waiting = {"version": 1, "nonce": nonce, "state": "waiting"}
     control = {"version": 1, "nonce": nonce, "session_tag": tag, "expires_at": int(time.time()) + WINDOW_SECONDS}
+    if include_quota:
+        control["include_quota"] = True
     # A changed nonce makes any in-flight observer for a previous run harmless.
     api_profile.write_private(directory / RESULT, json.dumps(waiting, separators=(",", ":")) + "\n")
     api_profile.write_private(directory / CONTROL, json.dumps(control, separators=(",", ":")) + "\n")
@@ -120,7 +128,16 @@ def _cache_shape(value: object, prefix: str) -> dict[str, bool]:
             prefix + "_valid_ratio": type(ratio) in (int, float) and 0 <= ratio <= 1}
 
 
-def capture(root: Path, payload: dict, corrected: dict, *, enabled: bool) -> None:
+def _window_shape(value: object, *, unexpired: bool) -> bool:
+    if not isinstance(value, dict):
+        return False
+    percent, reset = value.get("used_percentage"), value.get("resets_at")
+    return (type(percent) in (int, float) and 0 <= percent <= 100 and type(reset) is int and reset > 0
+            and (not unexpired or reset > time.time()))
+
+
+def capture(root: Path, payload: dict, corrected: dict, *, enabled: bool,
+            quota_configured: bool = False, quota_snapshot: object = None) -> None:
     """Capture the first matching field shape; never block on another writer."""
     directory = _directory(root)
     control = _control(directory)
@@ -142,6 +159,17 @@ def capture(root: Path, payload: dict, corrected: dict, *, enabled: bool) -> Non
     summary = {"telemetry_enabled": inspecting, "source_fields_inspected": inspecting,
                "preexisting_namespace": inspecting and "claude_codex_bridge" in payload,
                **_cache_shape(original, "source"), **_cache_shape(output, "output")}
+    quota = None
+    if control.get("include_quota") is True:
+        snapshot = quota_snapshot if isinstance(quota_snapshot, dict) else {}
+        prepared = corrected.get("rate_limits")
+        prepared = prepared if isinstance(prepared, dict) else {}
+        quota = {"quota_cache_configured": quota_configured is True,
+                 "quota_snapshot_fresh": isinstance(quota_snapshot, dict),
+                 "quota_five_hour_reported": _window_shape(snapshot.get("five_hour"), unexpired=False),
+                 "quota_seven_day_reported": _window_shape(snapshot.get("seven_day"), unexpired=False),
+                 "quota_five_hour_prepared": _window_shape(prepared.get("five_hour"), unexpired=True),
+                 "quota_seven_day_prepared": _window_shape(prepared.get("seven_day"), unexpired=True)}
     path = directory / RESULT
     with _open_private(path, writable=True) as handle:
         if os.name == "nt":
@@ -163,6 +191,8 @@ def capture(root: Path, payload: dict, corrected: dict, *, enabled: bool) -> Non
             if _control(directory) != control or not 0 <= control["expires_at"] - time.time() <= WINDOW_SECONDS:
                 return
             result = {"version": 1, "nonce": control["nonce"], "state": "observed", "summary": summary}
+            if quota is not None:
+                result["quota"] = quota
             data = (json.dumps(result, separators=(",", ":")) + "\n").encode("utf-8")
             handle.seek(0)
             handle.write(data)
@@ -190,10 +220,19 @@ def status(root: Path) -> dict:
             raise ObservationUnavailable("Observation is unavailable")
         if result["state"] == "observed":
             summary = result.get("summary")
-            if (set(result) != {"version", "nonce", "state", "summary"} or not isinstance(summary, dict)
+            required = {"version", "nonce", "state", "summary"}
+            if control.get("include_quota") is True:
+                required.add("quota")
+            if (set(result) != required or not isinstance(summary, dict)
                     or set(summary) != SUMMARY_FIELDS or any(type(value) is not bool for value in summary.values())):
                 raise ObservationUnavailable("Observation is unavailable")
-            return {"state": "observed", **summary}
+            quota = {}
+            if control.get("include_quota") is True:
+                quota = result.get("quota")
+                if (not isinstance(quota, dict) or set(quota) != QUOTA_FIELDS
+                        or any(type(value) is not bool for value in quota.values())):
+                    raise ObservationUnavailable("Observation is unavailable")
+            return {"state": "observed", **summary, **quota}
         if set(result) != {"version", "nonce", "state"}:
             raise ObservationUnavailable("Observation is unavailable")
         if control["expires_at"] - time.time() > WINDOW_SECONDS:

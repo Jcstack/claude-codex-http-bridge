@@ -305,6 +305,11 @@ identity or protection against other processes running as the same user.
 It was installed locally without restarting sessions; a one-shot observation
 was subsequently stopped and its two diagnostic files removed. A real adapter
 field-shape observation does not prove what a downstream plugin displayed.
+An additional quota-presence scope is off by default and requires the explicit
+`--include-quota` option. It retains only fixed Boolean categories, no quota
+values, account identifiers, reset times or paths. It observes the adapter's
+existing snapshot read and does not itself issue a network request. A stale or
+unavailable snapshot is not evidence that a provider does not offer a window.
 
 The experimental [task-stop advisory](taskstop_advisory.py) is not installed or
 enabled. It accepts bounded hook input and returns only fixed context for a

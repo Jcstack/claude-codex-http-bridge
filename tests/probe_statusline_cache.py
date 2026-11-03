@@ -115,9 +115,12 @@ def main() -> None:
             hud_config = config / "plugins" / "claude-hud"
             hud_config.mkdir(parents=True)
             (hud_config / "config.json").write_text(json.dumps({"gitStatus": {"enabled": False},
-                "display": {"showPromptCache": True, "showUsage": False}}), encoding="utf-8")
+                "display": {"showPromptCache": True, "showUsage": args.observe_fields,
+                            "sevenDayThreshold": 0, "usageThreshold": 0}}), encoding="utf-8")
             profile = root / "profile.json"
             profile_data = {"context_windows": {"gpt-6.1-sol": 872_000}}
+            if args.observe_fields:
+                profile_data["usage_cache"] = str(root / "synthetic-usage.json")
             if not args.legacy_opt_out_check:
                 profile_data["expose_cache_metrics"] = True
             profile.write_text(json.dumps(profile_data), encoding="utf-8")
@@ -129,9 +132,13 @@ def main() -> None:
             if args.legacy_opt_out_check or args.observe_fields:
                 bootstrap = root / "adapter-bootstrap.py"
                 preference_check = "assert adapter.cache_metrics_preference(adapter.ROOT)\n" if args.legacy_opt_out_check else ""
+                synthetic_quota = ("import codex_usage,time\n"
+                    "codex_usage.read_cache=lambda _path: {'five_hour': {'used_percentage': 13, 'resets_at': int(time.time())+3600}, "
+                    "'seven_day': {'used_percentage': 67, 'resets_at': int(time.time())+86400}}\n"
+                    "codex_usage.start_refresh=lambda _path: None\n") if args.observe_fields else ""
                 bootstrap.write_text("import sys\nfrom pathlib import Path\n"
                     "sys.path.insert(0,sys.argv[1])\nimport statusline_adapter as adapter\n"
-                    "adapter.ROOT=Path(sys.argv[2])\n" + preference_check +
+                    "adapter.ROOT=Path(sys.argv[2])\n" + preference_check + synthetic_quota +
                     "sys.argv=['adapter',sys.argv[3]]\n"
                     "raise SystemExit(adapter.main())\n", encoding="utf-8")
                 adapter = [sys.executable, str(bootstrap), str(Path(statusline_adapter.__file__).parent), str(root), str(profile)]
@@ -146,7 +153,8 @@ def main() -> None:
             output_recorder.write_text("import json,sys\nfrom pathlib import Path\n"
                 "text=sys.stdin.read(); label='Reported cache-read input (main)';"
                 "row={'shown': label in text, 'fraction': label in text and '37.5%' in text,"
-                "'timer': any(word in text.lower() for word in ('expired','until','5m'))}\n"
+                "'timer': any(word in text.lower() for word in ('expired','until','5m')) ,"
+                "'quota': '13%' in text and '67%' in text}\n"
                 "with Path(sys.argv[1]).open('a',encoding='utf-8') as out: out.write(json.dumps(row)+'\\n')\n"
                 "sys.stdout.write(text)\n", encoding="utf-8")
             commands = [[sys.executable, str(recorder), str(marker), "passthrough"], adapter]
@@ -197,7 +205,7 @@ def main() -> None:
                     raise RuntimeError("Synthetic client did not reach the fake service")
                 collect(3)
                 if args.observe_fields and index == 0:
-                    cache_observation.begin(root)
+                    cache_observation.begin(root, include_quota=True)
             frames = [json.loads(line) for line in marker.read_text(encoding="utf-8").splitlines()] if marker.exists() else []
             caches = [frame["cache"] for frame in frames if isinstance(frame.get("cache"), dict)]
             usages = [frame["usage"] for frame in frames if isinstance(frame.get("usage"), dict)]
@@ -221,7 +229,9 @@ def main() -> None:
             observation = cache_observation.status(root) if args.observe_fields else None
             observed_fields = bool(observation and observation.get("state") == "observed" and
                                    observation.get("source_cache_object") and observation.get("telemetry_enabled") and
-                                   observation.get("output_cache_object") and observation.get("output_valid_ratio"))
+                                   observation.get("output_cache_object") and observation.get("output_valid_ratio") and
+                                   all(observation.get(key) is True for key in cache_observation.QUOTA_FIELDS))
+            hud_quota = any(row.get("quota") is True for row in hud_rows)
             print(json.dumps({"synthetic_only": True, "fake_message_requests": len(server.requests), "frames": len(frames), "frames_with_usage": len(usages),
                 "frames_with_prompt_cache": len(caches), "cache_read_fraction_matches_reported_tokens": correct_counters,
                 "client_inferred_five_minute_ttl_without_provider_ttl": inferred_ttl,
@@ -231,6 +241,7 @@ def main() -> None:
                 "hud_display_checked": args.hud_dir is not None,
                 "hud_reported_fraction_without_timer": hud_correct if args.hud_dir is not None and not args.legacy_opt_out_check else None,
                 "tracked_field_observation": observed_fields if args.observe_fields else None,
+                "hud_synthetic_quota_windows": hud_quota if args.observe_fields else None,
                 "legacy_opt_out_hides_hud_cache": hud_opted_out if args.legacy_opt_out_check else None,
                 "session_opt_out_inherited": opt_out_inherited if args.legacy_env_check or args.legacy_opt_out_check else None}, sort_keys=True))
             if len(server.requests) != 2 or not (full_usage and correct_counters and inferred_ttl and "prompt_cache" not in default):
@@ -240,7 +251,9 @@ def main() -> None:
             if args.legacy_opt_out_check and not hud_opted_out:
                 raise RuntimeError("Synthetic legacy opt-out did not hide the HUD cache")
             if args.observe_fields and not observed_fields:
-                raise RuntimeError("Synthetic tracked cache-field observation did not complete")
+                raise RuntimeError("Synthetic tracked field observation did not complete")
+            if args.observe_fields and not hud_quota:
+                raise RuntimeError("Synthetic HUD quota display did not complete")
             if (args.legacy_env_check or args.legacy_opt_out_check) and not opt_out_inherited:
                 raise RuntimeError("Synthetic session opt-out was not inherited")
         finally:

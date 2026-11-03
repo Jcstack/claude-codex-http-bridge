@@ -382,6 +382,24 @@ claude-codex cache telemetry observation
 claude-codex cache telemetry stop-observation
 ```
 
+To additionally inspect only the presence and shape of the existing local quota
+snapshot, explicitly request the separate scope:
+
+```text
+claude-codex cache telemetry observe --include-quota
+```
+
+That option adds Boolean categories for whether a quota cache was configured,
+whether its local snapshot passed the normal freshness and selected-account
+checks, and whether the five-hour and seven-day windows have the expected field
+shapes in the snapshot and the prepared adapter output. The prepared-window
+category also requires a future reset time. It records no percentage, reset
+time, account identifier or cache path. Missing, malformed, stale or unavailable
+data yields false categories, not an assertion that the provider has no window.
+The capture can precede an asynchronous refresh; it neither initiates a new
+refresh nor proves that one completed. Cache-field inspection continues to
+respect an explicit session opt-out independently of this quota scope.
+
 It does not send a prompt or make an inference request. At the next matching
 subscription status-line invocation, the adapter records one set of Boolean
 field-shape categories: whether Claude supplied a cache object, whether its

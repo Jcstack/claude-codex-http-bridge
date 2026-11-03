@@ -62,6 +62,6 @@ jobs:
       - name: Honor an inherited legacy opt-out through the real client and HUD
         if: runner.os != 'Windows'
         run: python tests/probe_statusline_cache.py --hud-dir external-hud --legacy-opt-out-check
-      - name: Observe one tracked status-line cache shape without recording its contents
+      - name: Observe tracked cache and synthetic quota shapes through the real client and HUD
         if: runner.os != 'Windows'
         run: python tests/probe_statusline_cache.py --hud-dir external-hud --observe-fields
