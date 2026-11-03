@@ -112,6 +112,15 @@ before sharing. It is not automatically saved or committed.
 
 ## Current evidence and next investigation
 
+On 2026-11-04, an explicitly enabled, one-shot local observation matched the
+existing tracked session tag during a natural status-line refresh. It recorded
+only Boolean field shapes: cache telemetry was enabled, the input contained the
+expected cache fields, and the adapter prepared the corresponding output fields.
+No prompt, raw session ID, model, path, token count or cache ratio was stored.
+The control and result were removed immediately afterward. This is not proof
+that the downstream HUD displayed the data or that its inferred TTL is valid;
+see [CACHE_AUDIT.md](CACHE_AUDIT.md#one-shot-local-field-observation).
+
 On 2026-11-03, a read-only four-hour sample of the tracked conversation and
 its children contained no new recorded model responses; it cannot establish a
 current cache hit rate. Separate shared origin and managed-backend logs each

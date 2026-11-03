@@ -302,6 +302,9 @@ prompt, transcript, path, model, token count or cache ratio. It performs no
 network request. The two fixed files remain until stopped or replaced, and a
 stop cannot retract an already in-flight callback. The filter is not a process
 identity or protection against other processes running as the same user.
+It was installed locally without restarting sessions; a one-shot observation
+was subsequently stopped and its two diagnostic files removed. A real adapter
+field-shape observation does not prove what a downstream plugin displayed.
 
 The experimental [task-stop advisory](taskstop_advisory.py) is not installed or
 enabled. It accepts bounded hook input and returns only fixed context for a

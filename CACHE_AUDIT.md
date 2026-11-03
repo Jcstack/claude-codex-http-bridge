@@ -408,7 +408,20 @@ Same-user manipulation and the local filesystem remain outside this diagnostic's
 guarantees. [Claude's status-line documentation](https://code.claude.com/docs/en/statusline)
 describes the session ID and cache fields delivered to a status-line command;
 the synthetic real-client and HUD test exercises this bridge's own filtering.
-The source change is not yet installed on the active Mac.
+The [three-platform unit gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41669020246)
+and [HUD gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41669020717)
+passed. The reviewed helper and adapter were installed dependency-first on the
+active Mac with a private rollback and no service or session restart. Copies of
+the installed sources passed 57 synthetic checks and a staged locked-client/HUD
+flow against a fake service.
+
+One natural refresh then matched the previously tracked tag. Its input cache
+object had the required Boolean, positive-request and valid-ratio field shapes;
+telemetry was enabled, and the adapter prepared a valid corresponding output
+object. The observation recorded neither values nor session contents and was
+stopped and removed afterward. This does not prove downstream HUD receipt or
+display. A short read-only sample did not find the label in the accessible tmux
+panes; the relevant terminal may be elsewhere.
 
 ## Next gates
 
