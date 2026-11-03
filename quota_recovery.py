@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -30,6 +31,124 @@ import runtime_bundle
 USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 POLL_SECONDS = 30
 USAGE_PROBE_SECONDS = 60
+PROBE_LEDGER_LIMIT = 128
+PROBE_LEDGER_BYTES = 32768
+GLOBAL_PROBE_KEY = "*"
+MONITOR_PROTOCOL = 2
+MONITOR_RESULTS = frozenset({
+    "recovered", "no_single_selected_account", "account_identity_unknown", "account_catalog_changed",
+    "no_stale_credential_quota", "probe_throttled", "usage_unavailable", "upstream_not_available",
+    "account_changed", "owner_changed", "cooldown_changed", "missing_auth_index", "check_unavailable",
+    "probe_state_unavailable",
+})
+
+
+class ProbeLedgerError(RuntimeError):
+    """Automatic recovery cannot safely establish its previous probe time."""
+
+
+def _unique_json_pairs(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate quota probe state field")
+        value[key] = item
+    return value
+
+
+def _probe_time(value):
+    if type(value) not in (int, float) or value < 0:
+        raise ValueError("Invalid quota probe clock")
+    try:
+        if not math.isfinite(value):
+            raise ValueError("Invalid quota probe clock")
+    except OverflowError:
+        raise ValueError("Invalid quota probe clock") from None
+    return value
+
+
+def _probe_ledger(root: Path) -> Path:
+    directory = root / "runtime-quota"
+    runtime_bundle.private_dir(directory)
+    return directory / "probe-ledger.json"
+
+
+def _read_probe_ledger(path: Path) -> dict[str, float]:
+    runtime_bundle.safe_file(path, limit=PROBE_LEDGER_BYTES)
+    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_pairs)
+    if (not isinstance(value, dict) or set(value) != {"version", "entries"}
+            or type(value["version"]) is not int or value["version"] != 1
+            or not isinstance(value["entries"], dict) or len(value["entries"]) > PROBE_LEDGER_LIMIT):
+        raise ValueError("Invalid quota probe state")
+    for identity, recorded in value["entries"].items():
+        if not isinstance(identity, str) or (identity != GLOBAL_PROBE_KEY and not re.fullmatch(r"[a-f0-9]{16}", identity)):
+            raise ValueError("Invalid quota probe identity")
+        _probe_time(recorded)
+    return value["entries"]
+
+
+def _write_probe_ledger(path: Path, entries: dict[str, float]) -> None:
+    runtime_bundle.write_file(path, runtime_bundle.canonical({"version": 1, "entries": entries}), 0o600)
+    if os.name == "nt":
+        import windows_acl
+        windows_acl.lock([path])
+
+
+def _ensure_probe_ledger(root: Path, observed: float) -> tuple[Path, dict[str, float]]:
+    _probe_time(observed)
+    path = _probe_ledger(root)
+    if path.is_symlink():
+        raise RuntimeError("Quota probe state must not be symlinked")
+    if path.exists():
+        return path, _read_probe_ledger(path)
+    status = path.parent / "status.json"
+    if status.is_symlink():
+        raise RuntimeError("Quota monitor status must not be symlinked")
+    entries = {GLOBAL_PROBE_KEY: observed} if status.exists() else {}
+    _write_probe_ledger(path, entries)
+    return path, entries
+
+
+def initialize_probe_ledger(root: Path, observed: float) -> Path:
+    """Create durable throttle state before a new monitor can make a probe.
+
+    The caller must hold the account switch lock. A pre-existing status with
+    no ledger may be a legacy monitor whose last probe is unknown, so its
+    successor waits one full interval before the first automatic probe.
+    """
+    return _ensure_probe_ledger(root, observed)[0]
+
+
+def reserve_automatic_probe(root: Path, identity: str, observed: float) -> bool:
+    """Persist an automatic attempt before network access; caller holds the lock."""
+    _probe_time(observed)
+    if not isinstance(identity, str) or not re.fullmatch(r"[a-f0-9]{16}", identity):
+        raise ValueError("Invalid quota probe identity")
+    path, entries = _ensure_probe_ledger(root, observed)
+    original = dict(entries)
+    for key, recorded in list(entries.items()):
+        # After reboot or a clock anomaly, wait a full interval rather than
+        # carrying a future monotonic timestamp indefinitely.
+        if recorded > observed:
+            entries[key] = observed
+        elif observed - recorded >= USAGE_PROBE_SECONDS:
+            del entries[key]
+    if GLOBAL_PROBE_KEY in entries or identity in entries:
+        if entries != original:
+            _write_probe_ledger(path, entries)
+        return False
+    if len(entries) >= PROBE_LEDGER_LIMIT:
+        raise RuntimeError("Quota probe state is at capacity")
+    entries[identity] = observed
+    _write_probe_ledger(path, entries)
+    return True
+
+
+def _reserve_monitor_probe(root: Path, identity: str, observed: float) -> bool:
+    try:
+        return reserve_automatic_probe(root, identity, observed)
+    except (OSError, RuntimeError, ValueError):
+        raise ProbeLedgerError("Quota probe state unavailable") from None
 
 
 def usage_allows_requests(value: dict) -> bool:
@@ -86,7 +205,17 @@ def recover_once(root: Path, *, attempts: dict | None = None, now: float | None 
             return {"status": "no_stale_credential_quota"}
         observed = time.monotonic() if now is None else now
         if attempts is not None:
-            if identity in attempts and observed - attempts[identity] < USAGE_PROBE_SECONDS:
+            previous = attempts.get(identity)
+            if previous is not None:
+                if observed < previous:
+                    # Persist a conservative new starting point as well as
+                    # updating memory, so a successor cannot probe early.
+                    _reserve_monitor_probe(root, identity, observed)
+                    attempts[identity] = observed
+                    return {"status": "probe_throttled"}
+                if observed - previous < USAGE_PROBE_SECONDS:
+                    return {"status": "probe_throttled"}
+            if not _reserve_monitor_probe(root, identity, observed):
                 return {"status": "probe_throttled"}
             attempts[identity] = observed
         record = selected["record"]
@@ -151,16 +280,26 @@ def watch(root: Path) -> int:
         if not acquired:
             return 0
         attempts = {}
+        ledger_ready = False
         while True:
             state = launcher.read_state(root / "runtime")
             if state is None or not launcher.state_is_live(root / "runtime", state):
                 return 0
             try:
+                if not ledger_ready:
+                    with accounts.switch_lock(root):
+                        try:
+                            initialize_probe_ledger(root, time.monotonic())
+                        except (OSError, RuntimeError, ValueError):
+                            raise ProbeLedgerError("Quota probe state unavailable") from None
+                    ledger_ready = True
                 result = recover_once(root, attempts=attempts)
+            except ProbeLedgerError:
+                result = {"status": "probe_state_unavailable"}
             except (OSError, RuntimeError, ValueError):
                 result = {"status": "check_unavailable"}
             runtime_bundle.write_file(directory / "status.json", runtime_bundle.canonical(
-                {**result, "checked_at": time.time(), "monitor_pid": os.getpid()}), 0o600)
+                {**result, "checked_at": time.time(), "monitor_pid": os.getpid(), "monitor_protocol": MONITOR_PROTOCOL}), 0o600)
             threading.Event().wait(POLL_SECONDS)
 
 
@@ -183,10 +322,42 @@ def ensure_watch(root: Path) -> None:
         env=environment, cwd=root, **options)
 
 
+def monitor_status(root: Path) -> dict:
+    """Read only allowlisted status; do not claim that the process is alive."""
+    result = {"last_status": None, "checked_at": None, "monitor_protocol": None,
+              "liveness": "unverified", "probe_ledger": "absent"}
+    directory = root / "runtime-quota"
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        return {**result, "probe_ledger": "unavailable"}
+    status = directory / "status.json"
+    try:
+        if status.exists() or status.is_symlink():
+            runtime_bundle.safe_file(status, limit=4096)
+            value = json.loads(status.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_pairs)
+            if isinstance(value, dict) and value.get("status") in MONITOR_RESULTS:
+                result["last_status"] = value["status"]
+                result["checked_at"] = _probe_time(value.get("checked_at"))
+                if type(value.get("monitor_protocol")) is int and value["monitor_protocol"] == MONITOR_PROTOCOL:
+                    result["monitor_protocol"] = MONITOR_PROTOCOL
+    except (OSError, RuntimeError, ValueError, TypeError):
+        result.update(last_status=None, checked_at=None, monitor_protocol=None)
+    ledger = directory / "probe-ledger.json"
+    try:
+        if ledger.exists() or ledger.is_symlink():
+            _read_probe_ledger(ledger)
+            result["probe_ledger"] = "valid"
+    except (OSError, RuntimeError, ValueError, TypeError):
+        result["probe_ledger"] = "unavailable"
+    return result
+
+
 def main(arguments: list[str], *, root: Path) -> int:
     parser = argparse.ArgumentParser(prog="claude-codex quota")
-    parser.add_argument("action", choices=("recover",))
-    parser.parse_args(arguments)
+    parser.add_argument("action", choices=("recover", "status"))
+    options = parser.parse_args(arguments)
+    if options.action == "status":
+        print(json.dumps(monitor_status(root)))
+        return 0
     try: result = recover_once(root)
     except (OSError, RuntimeError, ValueError): result = {"status": "check_unavailable"}
     print(json.dumps(result))

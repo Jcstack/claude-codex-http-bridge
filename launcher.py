@@ -1090,7 +1090,7 @@ def main() -> int:
         print("Partial offline MCP name check: claude-codex mcp-audit [--config FILE] [--inventory FILE] [--show-names].")
         print("Partial offline MCP definition check: claude-codex mcp-definitions --session-file FILE --inventory FILE.")
         print("Reported cache tokens: claude-codex cache telemetry enable | disable | status.")
-        print("Reconcile a stale local quota gate after an upstream reset: claude-codex quota recover.")
+        print("Quota monitor: claude-codex quota status | recover.")
         return 0
     if mode == "diagnostics":
         import diagnostics

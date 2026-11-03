@@ -19,6 +19,17 @@ It checks the local selected-account state every 30 seconds. Only an active,
 credential-wide quota gate permits an upstream usage query, at most once per
 minute per account. Healthy operation makes no extra upstream usage queries.
 
+The source now keeps automatic probe timestamps in a private, bounded ledger,
+using only a short account fingerprint and monotonic time. It writes an attempt
+before contacting the usage endpoint, so a later monitor can retain the
+one-minute limit after a process crash or replacement. A legacy status without
+a ledger causes a conservative one-minute wait before the first automatic
+probe. Malformed, oversized, inaccessible or symlinked state blocks automatic
+probing rather than resetting the limiter. A manually requested `quota recover`
+remains a separate immediate check and is not governed by this automatic ledger.
+The checks cover process termination, not an operating-system crash or power
+failure; filesystem durability and clock behavior have platform limits.
+
 Recovery requires a fresh response from the selected account's fixed verified
 HTTPS usage endpoint: `allowed=true`, `limit_reached=false`, reported windows
 below 100%, and any additional model limits also available. Missing,
@@ -53,14 +64,22 @@ ordinary `usage` and `diagnostics` commands remain read-only.
 ## On-demand check
 
 ```text
+claude-codex quota status
 claude-codex quota recover
 ```
 
-This performs the same checks once. `recovered` means the local stale gate was
+`status` reads only the last allowlisted monitor result, reported protocol and
+whether probe state is valid. It does not contact a service, report account or
+process identifiers, or establish that the monitor is still alive. A missing
+protocol can indicate an older monitor or unavailable state. `recover`
+performs the checks once. `recovered` means the local stale gate was
 released; `no_stale_credential_quota` means no matching local gate needed work.
 Other statuses preserve the gate. The command does not enable a project-API
 profile or change the current Claude conversation. A running client can retry
 its message after recovery without being closed.
+
+The durable ledger and `status` command are source changes undergoing
+validation. They do not affect an older monitor process that is already running.
 
 ## Verification
 

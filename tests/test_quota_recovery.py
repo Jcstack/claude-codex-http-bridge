@@ -42,12 +42,13 @@ class QuotaRecoveryTests(unittest.TestCase):
             self.assertEqual(options["headers"]["Authorization"], "Bearer PRIVATE_MANAGEMENT")
             return {"files": [entry]} if url.endswith("credentials") else {"status": "ok"}
 
-        with patch.object(accounts, "switch_lock", return_value=nullcontext()), \
+        with tempfile.TemporaryDirectory(prefix="quota-recovery-fixture-") as temporary, \
+             patch.object(accounts, "switch_lock", return_value=nullcontext()), \
              patch.object(accounts, "local_accounts", return_value=[row]), \
              patch.object(accounts, "Management", return_value=owner), \
              patch.object(accounts, "request_json", side_effect=request), \
              patch.object(codex_usage, "active_bridge_auth", return_value={**record, "account_id": "changed"} if changed else record):
-            result = recovery.recover_once(Path("fixture"), attempts=attempts, now=now)
+            result = recovery.recover_once(Path(temporary), attempts=attempts, now=now)
         self.assertNotIn("PRIVATE", json.dumps(result))
         return result, requests
 
