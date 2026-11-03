@@ -38,6 +38,7 @@
 !mcp_definition_audit.py
 !mcp_alias_policy.py
 !statusline_adapter.py
+!cache_observation.py
 !session_models.py
 !codex_usage.py
 !quota_recovery.py

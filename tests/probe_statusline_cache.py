@@ -23,6 +23,9 @@ from probe_parallel_stream import terminate_owned_client
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import statusline_adapter  # noqa: E402
+import cache_observation  # noqa: E402
+import api_profile  # noqa: E402
+import session_audit  # noqa: E402
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -60,9 +63,12 @@ def main() -> None:
     parser.add_argument("--hud-dir", type=Path, help="Optional reviewed HUD source for a full display check")
     parser.add_argument("--legacy-env-check", action="store_true", help="Check that Claude passes the session opt-out to the status line")
     parser.add_argument("--legacy-opt-out-check", action="store_true", help="Check the inherited opt-out against an enabled synthetic shared preference")
+    parser.add_argument("--observe-fields", action="store_true", help="Check one local tracked-session field observation")
     args = parser.parse_args()
     if args.legacy_opt_out_check and args.hud_dir is None:
         parser.error("--legacy-opt-out-check requires --hud-dir")
+    if args.observe_fields and (args.hud_dir is None or args.legacy_opt_out_check):
+        parser.error("--observe-fields requires --hud-dir and no legacy opt-out check")
     if os.name == "nt":
         print(json.dumps({"synthetic_only": True, "skipped": "Windows interactive console not covered"}))
         return
@@ -79,6 +85,12 @@ def main() -> None:
         root = Path(temporary).resolve()
         work, config = root / "work", root / "config"
         work.mkdir(); config.mkdir(mode=0o700)
+        fixture_session = "00000000-0000-4000-8000-000000000123"
+        if args.observe_fields:
+            audit = root / "runtime-audit"
+            audit.mkdir(mode=0o700)
+            api_profile.write_private(audit / "target.json", json.dumps({"format": 1,
+                                      "session_tag": session_audit.tag(fixture_session)}))
         (config / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True,
             "projects": {str(work): {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
         marker = root / "frames.jsonl"
@@ -114,13 +126,16 @@ def main() -> None:
                 preference = root / "statusline-cache-metrics.json"
                 preference.write_text('{"version":1,"enabled":true}\n', encoding="utf-8")
                 preference.chmod(0o600)
+            if args.legacy_opt_out_check or args.observe_fields:
                 bootstrap = root / "adapter-bootstrap.py"
+                preference_check = "assert adapter.cache_metrics_preference(adapter.ROOT)\n" if args.legacy_opt_out_check else ""
                 bootstrap.write_text("import sys\nfrom pathlib import Path\n"
                     "sys.path.insert(0,sys.argv[1])\nimport statusline_adapter as adapter\n"
-                    "adapter.ROOT=Path(sys.argv[2])\nassert adapter.cache_metrics_preference(adapter.ROOT)\n"
+                    "adapter.ROOT=Path(sys.argv[2])\n" + preference_check +
                     "sys.argv=['adapter',sys.argv[3]]\n"
                     "raise SystemExit(adapter.main())\n", encoding="utf-8")
                 adapter = [sys.executable, str(bootstrap), str(Path(statusline_adapter.__file__).parent), str(root), str(profile)]
+            if args.legacy_opt_out_check:
                 adapted_recorder = root / "record-adapted.py"
                 adapted_recorder.write_text("import json,sys\nfrom pathlib import Path\n"
                     "value=json.load(sys.stdin); row={'extension': 'claude_codex_bridge' in value,"
@@ -154,6 +169,8 @@ def main() -> None:
             env["CLAUDE_CODEX_STATUSLINE_CACHE_METRICS"] = "0"
         command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                    "--settings", str(settings), "--permission-mode", "dontAsk", "--model", "gpt-6.1-sol", "--tools", ""]
+        if args.observe_fields:
+            command.extend(["--session-id", fixture_session])
         wrapper = ("import fcntl,os,sys,termios;fcntl.ioctl(0,termios.TIOCSCTTY,0);"
                    "os.tcsetpgrp(0,os.getpgrp());os.execvpe(sys.argv[1],sys.argv[1:],os.environ)")
         master, slave = pty.openpty()
@@ -179,6 +196,8 @@ def main() -> None:
                 if len(server.requests) <= index:
                     raise RuntimeError("Synthetic client did not reach the fake service")
                 collect(3)
+                if args.observe_fields and index == 0:
+                    cache_observation.begin(root)
             frames = [json.loads(line) for line in marker.read_text(encoding="utf-8").splitlines()] if marker.exists() else []
             caches = [frame["cache"] for frame in frames if isinstance(frame.get("cache"), dict)]
             usages = [frame["usage"] for frame in frames if isinstance(frame.get("usage"), dict)]
@@ -199,6 +218,10 @@ def main() -> None:
                 and all(row.get("shown") is False for row in hud_rows)
                 and all(row.get("model") is True and row.get("extension") is False for row in adapted_rows))
             opt_out_inherited = bool(frames and all(frame.get("opt_out_inherited") is True for frame in frames))
+            observation = cache_observation.status(root) if args.observe_fields else None
+            observed_fields = bool(observation and observation.get("state") == "observed" and
+                                   observation.get("source_cache_object") and observation.get("telemetry_enabled") and
+                                   observation.get("output_cache_object") and observation.get("output_valid_ratio"))
             print(json.dumps({"synthetic_only": True, "fake_message_requests": len(server.requests), "frames": len(frames), "frames_with_usage": len(usages),
                 "frames_with_prompt_cache": len(caches), "cache_read_fraction_matches_reported_tokens": correct_counters,
                 "client_inferred_five_minute_ttl_without_provider_ttl": inferred_ttl,
@@ -207,6 +230,7 @@ def main() -> None:
                 "last_usage_has_all_input_counters": full_usage,
                 "hud_display_checked": args.hud_dir is not None,
                 "hud_reported_fraction_without_timer": hud_correct if args.hud_dir is not None and not args.legacy_opt_out_check else None,
+                "tracked_field_observation": observed_fields if args.observe_fields else None,
                 "legacy_opt_out_hides_hud_cache": hud_opted_out if args.legacy_opt_out_check else None,
                 "session_opt_out_inherited": opt_out_inherited if args.legacy_env_check or args.legacy_opt_out_check else None}, sort_keys=True))
             if len(server.requests) != 2 or not (full_usage and correct_counters and inferred_ttl and "prompt_cache" not in default):
@@ -215,6 +239,8 @@ def main() -> None:
                 raise RuntimeError("Synthetic HUD cache display did not complete")
             if args.legacy_opt_out_check and not hud_opted_out:
                 raise RuntimeError("Synthetic legacy opt-out did not hide the HUD cache")
+            if args.observe_fields and not observed_fields:
+                raise RuntimeError("Synthetic tracked cache-field observation did not complete")
             if (args.legacy_env_check or args.legacy_opt_out_check) and not opt_out_inherited:
                 raise RuntimeError("Synthetic session opt-out was not inherited")
         finally:

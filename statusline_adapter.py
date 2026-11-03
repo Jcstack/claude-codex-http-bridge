@@ -51,9 +51,21 @@ def cache_metrics_enabled(profile: dict, root: Path | None = None) -> bool:
 
 
 def cache_metrics_command(root: Path, arguments: list[str]) -> int:
-    if len(arguments) != 2 or arguments[0] != "telemetry" or arguments[1] not in ("enable", "disable", "status"):
-        raise ValueError("Usage: claude-codex cache telemetry enable | disable | status")
+    actions = ("enable", "disable", "status", "observe", "observation", "stop-observation")
+    if len(arguments) != 2 or arguments[0] != "telemetry" or arguments[1] not in actions:
+        raise ValueError("Usage: claude-codex cache telemetry enable | disable | status | observe | observation | stop-observation")
     action = arguments[1]
+    if action in ("observe", "observation", "stop-observation"):
+        import cache_observation
+        if action == "observe":
+            cache_observation.begin(root)
+            print("One local, tracked-session cache-field observation is enabled for five minutes.")
+        elif action == "observation":
+            print(json.dumps(cache_observation.status(root), separators=(",", ":")))
+        else:
+            cache_observation.stop(root)
+            print("Local cache-field observation stopped and its snapshot removed.")
+        return 0
     if action != "status":
         import api_profile
         api_profile.write_private(root / CACHE_PREFERENCE,
@@ -148,8 +160,15 @@ def main() -> int:
                     session_models.record(Path(__file__).resolve().parent, payload, windows, profile.get("route", "subscription"))
                 except (OSError, RuntimeError, ValueError):
                     pass
-            corrected = corrected_payload(payload, windows, limits,
-                                          expose_cache_metrics=cache_metrics_enabled(profile))
+            enabled = cache_metrics_enabled(profile)
+            corrected = corrected_payload(payload, windows, limits, expose_cache_metrics=enabled)
+            try:
+                if profile.get("route", "subscription") == "subscription" and (ROOT / "runtime-audit" / "cache-observation-control.json").exists():
+                    import cache_observation
+                    cache_observation.capture(ROOT, payload, corrected, enabled=enabled)
+            except Exception:
+                # A local, optional diagnostic must never break the status line.
+                pass
             raw = (json.dumps(corrected, separators=(",", ":")) + "\n").encode()
     except (UnicodeDecodeError, ValueError):
         pass

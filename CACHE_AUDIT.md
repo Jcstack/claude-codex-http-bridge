@@ -371,6 +371,45 @@ is present. That is a source-code observation for one version, not a survey
 of every plugin. It motivates the separate opt-in namespace rather than an
 unsupported claim that the provider cache is cold or warm.
 
+## One-shot local field observation
+
+The source includes an optional, five-minute observation for an already
+recorded private audit target:
+
+```text
+claude-codex cache telemetry observe
+claude-codex cache telemetry observation
+claude-codex cache telemetry stop-observation
+```
+
+It does not send a prompt or make an inference request. At the next matching
+subscription status-line invocation, the adapter records one set of Boolean
+field-shape categories: whether Claude supplied a cache object, whether its
+relevant fields are valid, whether bridge telemetry was enabled, whether a
+namespace was already present, and whether the adapter prepared a valid output
+object. If telemetry is disabled for that session, the observer records only
+that fact and marks the other field shapes as uninspected. The pre-existing
+12-character session tag, a random observation nonce
+and a five-minute expiry are held in a private control file; the result stores
+only the nonce and those Boolean categories. It stores no raw session ID,
+transcript, prompt, model, project path, token count or cache ratio. A
+nonblocking file lock limits the capture to one matching callback; failures are
+ignored by the status line. Inactive observations add only a local existence
+check to a status-line refresh. The fixed control and result files remain after
+expiry until the stop command removes them or another observation replaces
+them. Stopping cannot retract a callback already in flight.
+
+`observed` means the adapter prepared that shape, not that a downstream HUD
+received or displayed it. `waiting` and `expired` do not prove a failure: the
+target session may not refresh during the window, its status line may bypass
+the adapter, or the input may omit the session ID. The shortened session tag is
+an observation filter, not a process identity or authentication boundary.
+Same-user manipulation and the local filesystem remain outside this diagnostic's
+guarantees. [Claude's status-line documentation](https://code.claude.com/docs/en/statusline)
+describes the session ID and cache fields delivered to a status-line command;
+the synthetic real-client and HUD test exercises this bridge's own filtering.
+The source change is not yet installed on the active Mac.
+
 ## Next gates
 
 - Trace control fields across each hop using a fake origin, without enabling

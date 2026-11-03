@@ -294,6 +294,15 @@ new installation defaults to disabled; the current local installation was
 explicitly enabled after synthetic checks. Plugin updates can replace the patch,
 and the feature is not a claim about every plugin's data handling.
 
+The separate opt-in [one-shot cache-field observation](CACHE_AUDIT.md#one-shot-local-field-observation)
+records only fixed Boolean field-shape categories for the already tracked local
+session. Its private five-minute control copies the existing short session tag
+and includes a random nonce; its private result contains no raw session ID,
+prompt, transcript, path, model, token count or cache ratio. It performs no
+network request. The two fixed files remain until stopped or replaced, and a
+stop cannot retract an already in-flight callback. The filter is not a process
+identity or protection against other processes running as the same user.
+
 The experimental [task-stop advisory](taskstop_advisory.py) is not installed or
 enabled. It accepts bounded hook input and returns only fixed context for a
 specific error shape; it does not echo task IDs, paths, error text or other hook
