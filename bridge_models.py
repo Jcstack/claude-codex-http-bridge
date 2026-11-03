@@ -373,6 +373,9 @@ def main() -> int:
     if sys.argv[1] == "list":
         print(("OpenAI API" if os.environ.get("CODEX_BRIDGE_ROUTE") == "api" else "Codex") +
               " chat models listed by local HTTP /v1/models:")
+        if os.environ.get("CODEX_BRIDGE_ROUTE") != "api":
+            print("Subscription model IDs and limits come from the local proxy catalog; "
+                  "they are not a verified live account entitlement list.")
         for slug in sorted(chat, key=display_key):
             row = chat[slug]
             window = compact_window(row)

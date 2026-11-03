@@ -4,7 +4,7 @@ Checked 2026-10-30. Existing user sessions and the authenticated service remaine
 
 ## Context correction
 
-The earlier bridge incorrectly treated `context_window` as the maximum. Both the authenticated catalog and native Codex cache distinguish these fields:
+The earlier bridge incorrectly treated `context_window` as the maximum. Both the authenticated local proxy catalog and native Codex cache distinguish these fields:
 
 | Observed route | Default | Maximum | 90% of maximum |
 | --- | ---: | ---: | ---: |
@@ -18,6 +18,38 @@ A live Astra request accepted **280,346 input tokens**, retained both boundary m
 The generated `autoCompactWindow` is 90% of the selected context or a lower explicit native limit. Claude also reserves space internally, so 784,800 is a configured window, not an exact trigger guarantee. Claude Code 2.1.314 caps this setting at 1M; only the setting is capped, not model metadata. Running sessions retain startup settings. Isolated persistent-client tests found that editing `--settings` on disk did not update the running window, and `/autocompact 784800` could not override its higher-priority 400k setting. A later launch/resume with the corrected profile is required. Live editing of generated compaction defaults is a remaining client integration gap.
 
 OpenAI's [Codex pricing exception](https://help.openai.com/en/articles/20001415-chatgpt-rate-card-enterprise-token-based-pricing) confirms that ChatGPT-signed-in Codex has no long-context multiplier, including above 272k, and no cache-write charge. Self-supplied API keys follow API pricing. Long requests still consume usage; API dollars do not measure included subscription allowance.
+
+## Subscription model catalog provenance
+
+The bridge authenticates its loopback catalog requests and intersects the
+proxy's public and rich responses. During account changes it also checks the
+selected local authentication record and its registration in the proxy's
+management registry. This protects the local selection and snapshot workflow;
+it does not make those model IDs or metadata a live provider entitlement feed.
+In the [pinned proxy source](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/cliproxy/service_models.go),
+Codex subscription registrations select a model catalog by recorded plan
+type and use the Pro catalog when the plan is unknown. The per-auth management
+endpoint reads that local registry. The catalog can be an embedded or remote
+community-maintained source, subject to the proxy's current configuration.
+The source does not establish that any particular registered model is usable
+by an individual account or that its reported limit is current.
+
+A local read-only check found no explicit catalog-source keys in the running
+origin's config and did not observe `--local-model` in that process's command.
+That is consistent with the pinned source's default community catalog policy,
+not proof of a particular download, its contents, or delivery. The managed
+translator uses its separately generated local model rows. The Astra
+long-context observation above is independent evidence for the sampled request,
+but it does not validate the full advertised maximum or future catalog values.
+
+OpenAI's [Sign in with ChatGPT model-list guidance](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
+describes a separate, authorized ChatGPT-plan OAuth flow for obtaining the
+selected account's current model choices. Its public Responses route has
+[preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations),
+and is not the current legacy Codex backend. Do not send an existing Codex
+credential to that route or silently replace the route based on this comparison.
+Implementing and verifying an independently authorized account-specific
+catalog remains open; listed model access and metadata still require validation.
 
 ## Compaction and caching
 

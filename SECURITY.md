@@ -170,6 +170,21 @@ unused-provider traffic must be tested across credential addition, real
 Antigravity version discovery and running-session migration before activation;
 disabling the separate management-panel updater does not disable this updater.
 
+Separately, the pinned proxy's default general, Codex and Devin model catalog
+sources include files under the proxy project's GitHub organization and a
+project-operated fallback host. Outside local-catalog mode, the source
+configures these refreshers immediately and every three hours; explicit sources
+and Home-mode rules can change this behavior. The default catalog GET is built
+without a body or explicitly assigned authorization header, but default proxy
+and redirect behavior still applies and recipients can observe connection
+metadata. Catalog contents are validated structurally, not authenticated as
+OpenAI account entitlements. The active origin was observed without the
+`--local-model` flag and without explicit catalog-source keys; the observation
+does not show whether a particular request reached a remote host. The managed
+translator has a separate local-catalog configuration. Do not disable Codex
+catalog refresh indiscriminately: model freshness and account-specific discovery
+must be preserved or replaced with a separately verified source.
+
 Review updates to the pinned proxy release and its security advisories before changing the version or hashes. Do not enable LAN binding, request body logging, or the management interface without a separate security review.
 
 The separate Claude HUD plugin also needs its own security review. The former

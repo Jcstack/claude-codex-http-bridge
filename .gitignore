@@ -79,6 +79,7 @@
 !tests/native_toolset_contract_fixture.go
 !tests/native_browser_state_fixture.go
 !tests/native_antigravity_lazy_fixture.go
+!tests/native_codex_catalog_provenance_fixture.go
 !tests/tool_contract_benchmark.go
 !tests/fake_quota_codex.go
 !tests/native_gateway_names_fixture.go

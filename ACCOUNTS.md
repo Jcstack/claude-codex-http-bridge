@@ -85,8 +85,12 @@ connections, every possible encrypted native item, and every future upstream
 protocol are not certified by the handoff tests.
 
 The managed translator's model list is a snapshot taken when its backend
-generation starts. During `account use`, the launcher verifies the selected
-account against the account-specific model IDs and available model metadata.
+generation starts. During `account use`, the launcher checks that exactly one
+selected account owns the corresponding local proxy registration and compares
+its registered model IDs with the proxy's available model metadata. In the
+pinned proxy source, subscription IDs may come from a plan-based catalog rather
+than a live OpenAI entitlement query. The check does not establish account
+access to each listed model or independently verify context and effort limits.
 The installed controller compares the fingerprint of eligible model IDs,
 context windows, effort levels, input modalities, the search flag and the
 effective compact window. When that snapshot differs, it prepares and checks a
@@ -106,11 +110,11 @@ This is not an atomic switch for every request: a new request can arrive after
 the credential selection changes but before a different backend catalog is
 published. Also, a running Claude process retains the model-picker and context
 settings loaded at its startup; synchronizing the backend cannot rewrite those
-settings. Client preparation discovers the selected account's eligible
-catalog at that moment; a later switch can still occur before or during the
-client's lifetime. Model IDs without sufficient metadata are excluded, and
-account-specific capability metadata beyond what the local service reports is
-not independently certified.
+settings. Client preparation reads the eligible catalog in the selected
+account's local proxy registration at that moment; a later switch can still
+occur before or during the client's lifetime. Model IDs without sufficient
+metadata are excluded. Neither eligibility nor account-specific capability
+metadata beyond what the local service reports is independently certified.
 Claude Code's documented [gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery)
 runs at startup, and a `modelPicker` with `replaceBuiltInOptions` hides its
 discovered rows. Turning that flag on alone therefore does not refresh the

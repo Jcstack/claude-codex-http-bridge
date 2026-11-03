@@ -414,4 +414,13 @@ The [initial three-platform observation](https://github.com/Jcstack/claude-codex
 passed with an unmodified upstream baseline; Linux also passed a race-enabled
 fixture. A later version tests the selected translator patches and a synthetic
 tool/stream contract, and holds the initial refresh to check fallback behavior;
-those extensions require a separate run.
+those extensions passed on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41643622344).
+
+At [Rust commit 737ac93](https://github.com/vayungodara/cliproxy-rs/blob/737ac93b48515e16554e49476cff7ac9fff3ad6b/crates/cpa-server/src/model_updater.rs),
+the provider updater watches the credential store and starts the Antigravity
+version refresher on the first matching provider record outside Home mode. Its
+[refresher](https://github.com/vayungodara/cliproxy-rs/blob/737ac93b48515e16554e49476cff7ac9fff3ad6b/crates/cpa-exec/src/antigravity_version.rs)
+uses a once-per-process task with a periodic loop, so the inspected code does
+not stop it when that record is later removed. This is a useful prewarming
+design to evaluate, not proof of active-credential filtering, first-request
+freshness, complete provider parity, or privacy after account removal.

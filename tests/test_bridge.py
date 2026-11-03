@@ -40,6 +40,18 @@ def model(context: int, search: bool = True) -> dict:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_subscription_model_list_explains_proxy_catalog_provenance(self):
+        rows = {"gpt-6.1-sol": model(500_000)}
+        for route, expect_notice in (("subscription", True), ("api", False)):
+            with self.subTest(route=route), patch.dict(os.environ, {"CODEX_BRIDGE_ROUTE": route}, clear=True), \
+                 patch.object(bridge_models, "discover", return_value=(rows, [])), \
+                 patch.object(sys, "argv", ["bridge_models.py", "list"]):
+                output = StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(bridge_models.main(), 0)
+                self.assertEqual("not a verified live account entitlement list" in output.getvalue(), expect_notice)
+                self.assertIn("gpt-6.1-sol", output.getvalue())
+
     def test_subagent_and_alias_models_must_be_in_live_catalog(self):
         catalog = {"gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra"}
         with patch.dict(os.environ, {}, clear=True):

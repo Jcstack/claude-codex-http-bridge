@@ -479,7 +479,10 @@ def switch_lock(root: Path, *, wait_seconds: float = 0):
 
 
 def selected_catalog(root: Path, management: Management) -> dict:
-    """Read a catalog for exactly one verified selected account, without inference."""
+    """Read one selected account's local proxy registration, without inference.
+
+    Registry membership and metadata are not a live provider entitlement check.
+    """
     import bridge_models
     import launcher
     import rolling_runtime

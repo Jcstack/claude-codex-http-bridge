@@ -47,6 +47,8 @@ jobs:
           git apply ../upstream/patches/antigravity-lazy-candidate.patch
           cp ../tests/native_antigravity_lazy_fixture.go internal/misc/bridge_lazy_local_test.go
           go test -timeout 60s -run '^TestBridgeLazyAntigravityVersion$' ./internal/misc
+          cp ../tests/native_codex_catalog_provenance_fixture.go sdk/cliproxy/bridge_catalog_provenance_local_test.go
+          go test -timeout 60s -run '^TestBridgeCodexCatalogProvenance$' ./sdk/cliproxy
           if [ "$RUNNER_OS" = "Linux" ]; then
             go test -race -timeout 60s -run '^TestBridgeLazyAntigravityVersion$' ./internal/misc
           fi
