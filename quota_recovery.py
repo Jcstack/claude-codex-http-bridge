@@ -73,9 +73,17 @@ def _probe_ledger(root: Path) -> Path:
     return directory / "probe-ledger.json"
 
 
+def _private_text(path: Path, limit: int) -> str:
+    runtime_bundle.safe_file(path, limit=limit)
+    with path.open("rb") as handle:
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("Quota state exceeds its size limit")
+    return data.decode("utf-8")
+
+
 def _read_probe_ledger(path: Path) -> dict[str, float]:
-    runtime_bundle.safe_file(path, limit=PROBE_LEDGER_BYTES)
-    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_pairs)
+    value = json.loads(_private_text(path, PROBE_LEDGER_BYTES), object_pairs_hook=_unique_json_pairs)
     if (not isinstance(value, dict) or set(value) != {"version", "entries"}
             or type(value["version"]) is not int or value["version"] != 1
             or not isinstance(value["entries"], dict) or len(value["entries"]) > PROBE_LEDGER_LIMIT):
@@ -274,8 +282,10 @@ def monitor_lock(directory: Path):
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
-def watch(root: Path) -> int:
+def watch(root: Path, *, wait=None) -> int:
     directory = root / "runtime-quota"
+    if wait is None:
+        wait = threading.Event().wait
     with monitor_lock(directory) as acquired:
         if not acquired:
             return 0
@@ -300,7 +310,7 @@ def watch(root: Path) -> int:
                 result = {"status": "check_unavailable"}
             runtime_bundle.write_file(directory / "status.json", runtime_bundle.canonical(
                 {**result, "checked_at": time.time(), "monitor_pid": os.getpid(), "monitor_protocol": MONITOR_PROTOCOL}), 0o600)
-            threading.Event().wait(POLL_SECONDS)
+            wait(POLL_SECONDS)
 
 
 def ensure_watch(root: Path) -> None:
@@ -332,8 +342,7 @@ def monitor_status(root: Path) -> dict:
     status = directory / "status.json"
     try:
         if status.exists() or status.is_symlink():
-            runtime_bundle.safe_file(status, limit=4096)
-            value = json.loads(status.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_pairs)
+            value = json.loads(_private_text(status, 4096), object_pairs_hook=_unique_json_pairs)
             if isinstance(value, dict) and value.get("status") in MONITOR_RESULTS:
                 result["last_status"] = value["status"]
                 result["checked_at"] = _probe_time(value.get("checked_at"))

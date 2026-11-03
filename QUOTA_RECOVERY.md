@@ -16,19 +16,24 @@ profiles retain their own normal cooldown protection.
 Subscription launches and `bridge start`/`bridge reload` ensure one private
 monitor per installation. It does not start or restart an inference service.
 It checks the local selected-account state every 30 seconds. Only an active,
-credential-wide quota gate permits an upstream usage query, at most once per
-minute per account. Healthy operation makes no extra upstream usage queries.
+credential-wide quota gate permits an automatic upstream usage query. Healthy
+operation makes no extra upstream usage queries.
 
 The source now keeps automatic probe timestamps in a private, bounded ledger,
-using only a short account fingerprint and monotonic time. It writes an attempt
-before contacting the usage endpoint, so a later monitor can retain the
-one-minute limit after a process crash or replacement. A legacy status without
+using only a short account fingerprint and monotonic time. It writes a
+reservation before contacting the usage endpoint, so a later monitor can retain
+the one-minute reservation interval after a process crash or replacement.
+This bounds reservations, not exact provider request start times: scheduling,
+filesystem delays and an old request still in flight can change their spacing.
+A legacy status without
 a ledger causes a conservative one-minute wait before the first automatic
 probe. Malformed, oversized, inaccessible or symlinked state blocks automatic
 probing rather than resetting the limiter. A manually requested `quota recover`
 remains a separate immediate check and is not governed by this automatic ledger.
 The checks cover process termination, not an operating-system crash or power
-failure; filesystem durability and clock behavior have platform limits.
+failure; filesystem durability and clock behavior have platform limits. A
+valid-looking ledger is not cryptographically authenticated against same-user
+tampering or rollback.
 
 Recovery requires a fresh response from the selected account's fixed verified
 HTTPS usage endpoint: `allowed=true`, `limit_reached=false`, reported windows
@@ -69,8 +74,9 @@ claude-codex quota recover
 ```
 
 `status` reads only the last allowlisted monitor result, reported protocol and
-whether probe state is valid. It does not contact a service, report account or
-process identifiers, or establish that the monitor is still alive. A missing
+whether probe state passes structural and local-permission checks. It does not
+authenticate the ledger, contact a service, report account or process
+identifiers, or establish that the monitor is still alive. A missing
 protocol can indicate an older monitor or unavailable state. `recover`
 performs the checks once. `recovered` means the local stale gate was
 released; `no_stale_credential_quota` means no matching local gate needed work.

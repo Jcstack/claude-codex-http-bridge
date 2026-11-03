@@ -7,7 +7,6 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -71,9 +70,8 @@ class QuotaProbeLedgerTest(unittest.TestCase):
              patch.object(recovery.launcher, "state_is_live", return_value=True), \
              patch.object(accounts, "switch_lock", return_value=nullcontext()), \
              patch.object(recovery, "recover_once", side_effect=fake_recovery) as recover, \
-             patch.object(recovery.time, "monotonic", return_value=100), \
-             patch.object(recovery.threading, "Event", return_value=SimpleNamespace(wait=lambda _seconds: None)):
-            self.assertEqual(recovery.watch(self.root), 0)
+             patch.object(recovery.time, "monotonic", return_value=100):
+            self.assertEqual(recovery.watch(self.root, wait=lambda _seconds: None), 0)
         recover.assert_called_once()
         status = json.loads((directory / "status.json").read_text())
         self.assertEqual(status["status"], "no_stale_credential_quota")
@@ -84,9 +82,8 @@ class QuotaProbeLedgerTest(unittest.TestCase):
         with patch.object(recovery.launcher, "read_state", side_effect=[{"fixture": True}, None]), \
              patch.object(recovery.launcher, "state_is_live", return_value=True), \
              patch.object(accounts, "switch_lock", return_value=nullcontext()), \
-             patch.object(recovery, "recover_once") as recover, \
-             patch.object(recovery.threading, "Event", return_value=SimpleNamespace(wait=lambda _seconds: None)):
-            self.assertEqual(recovery.watch(self.root), 0)
+             patch.object(recovery, "recover_once") as recover:
+            self.assertEqual(recovery.watch(self.root, wait=lambda _seconds: None), 0)
         recover.assert_not_called()
         self.assertEqual(path.read_bytes(), b"invalid synthetic ledger")
         self.assertEqual(json.loads((path.parent / "status.json").read_text())["status"], "probe_state_unavailable")
@@ -115,6 +112,19 @@ class QuotaProbeLedgerTest(unittest.TestCase):
                 self.write_raw(content)
                 with self.assertRaises((ValueError, RuntimeError)):
                     recovery.reserve_automatic_probe(self.root, IDENTITY_A, 10)
+
+    def test_state_growth_after_metadata_check_remains_bounded(self):
+        path = self.write_raw(b'{"version":1,"entries":{}}')
+        real_safe_file = runtime_bundle.safe_file
+
+        def grow_after_check(candidate, **kwargs):
+            real_safe_file(candidate, **kwargs)
+            with candidate.open("ab") as handle:
+                handle.write(b"x" * (recovery.PROBE_LEDGER_BYTES + 1))
+
+        with patch.object(runtime_bundle, "safe_file", side_effect=grow_after_check):
+            with self.assertRaises(ValueError):
+                recovery._read_probe_ledger(path)
 
     @unittest.skipIf(os.name == "nt", "Creating symlinks requires Windows privileges")
     def test_symlinked_state_is_refused(self):
