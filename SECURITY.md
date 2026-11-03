@@ -96,9 +96,12 @@ passed on Linux and Windows but timed out in the macOS real-helper fixture.
 A [stage-instrumented rerun](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41647595830)
 still failed on macOS during synthetic HTTP-server construction. A local
 negative control showed that a stalled reverse lookup can reproduce that stage;
-the exact runner cause remains unknown. The fixture now explicitly rejects
-reverse lookup and uses a numeric loopback identity, pending another run.
-The change is not yet installed. HOME redirection is not an OS sandbox: same-user
+the exact runner cause remains unknown. The fixture explicitly rejects reverse
+lookup and uses a numeric loopback identity; its [revised three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41648079447)
+passed. Four synthetic checks with copies of the installed dependencies passed,
+and the controller was installed atomically with a private rollback. Read-only
+account, quota, tools, autostart and model-list checks passed; no service or
+session was restarted. HOME redirection is not an OS sandbox: same-user
 filesystem access, system credential stores, arbitrary native code and other
 proxy launch paths are not isolated by it.
 
