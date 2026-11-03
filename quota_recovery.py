@@ -296,6 +296,32 @@ def monitor_lock(directory: Path):
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
+def _watch_owned(root: Path, directory: Path, wait) -> int:
+    """Run the loop while the caller owns the monitor lock."""
+    attempts = {}
+    ledger_ready = False
+    while True:
+        state = launcher.read_state(root / "runtime")
+        if state is None or not launcher.state_is_live(root / "runtime", state):
+            return 0
+        try:
+            if not ledger_ready:
+                with accounts.switch_lock(root):
+                    try:
+                        initialize_probe_ledger(root, time.monotonic())
+                    except (OSError, RuntimeError, ValueError):
+                        raise ProbeLedgerError("Quota probe state unavailable") from None
+                ledger_ready = True
+            result = recover_once(root, attempts=attempts)
+        except ProbeLedgerError:
+            result = {"status": "probe_state_unavailable"}
+        except (OSError, RuntimeError, ValueError):
+            result = {"status": "check_unavailable"}
+        runtime_bundle.write_file(directory / "status.json", runtime_bundle.canonical(
+            {**result, "checked_at": time.time(), "monitor_pid": os.getpid(), "monitor_protocol": MONITOR_PROTOCOL}), 0o600)
+        wait(POLL_SECONDS)
+
+
 def watch(root: Path, *, wait=None) -> int:
     directory = root / "runtime-quota"
     if wait is None:
@@ -303,28 +329,24 @@ def watch(root: Path, *, wait=None) -> int:
     with monitor_lock(directory) as acquired:
         if not acquired:
             return 0
-        attempts = {}
-        ledger_ready = False
-        while True:
-            state = launcher.read_state(root / "runtime")
-            if state is None or not launcher.state_is_live(root / "runtime", state):
-                return 0
-            try:
-                if not ledger_ready:
-                    with accounts.switch_lock(root):
-                        try:
-                            initialize_probe_ledger(root, time.monotonic())
-                        except (OSError, RuntimeError, ValueError):
-                            raise ProbeLedgerError("Quota probe state unavailable") from None
-                    ledger_ready = True
-                result = recover_once(root, attempts=attempts)
-            except ProbeLedgerError:
-                result = {"status": "probe_state_unavailable"}
-            except (OSError, RuntimeError, ValueError):
-                result = {"status": "check_unavailable"}
-            runtime_bundle.write_file(directory / "status.json", runtime_bundle.canonical(
-                {**result, "checked_at": time.time(), "monitor_pid": os.getpid(), "monitor_protocol": MONITOR_PROTOCOL}), 0o600)
-            wait(POLL_SECONDS)
+        return _watch_owned(root, directory, wait)
+
+
+def watch_wait(root: Path) -> int:
+    """Wait for a handoff without reloading source or releasing the acquired lock."""
+    print("ready", flush=True)
+    if sys.stdin.readline() != "go\n":
+        return 0
+    directory = root / "runtime-quota"
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        with monitor_lock(directory) as acquired:
+            if acquired:
+                with accounts.switch_lock(root, wait_seconds=30):
+                    pass
+                return _watch_owned(root, directory, threading.Event().wait)
+        time.sleep(.1)
+    return 1
 
 
 def ensure_watch(root: Path) -> None:
@@ -423,6 +445,10 @@ def main(arguments: list[str], *, root: Path) -> int:
 
 if __name__ == "__main__":
     # -I omits the script directory; all imports must come from this private root.
-    if len(sys.argv) == 4 and sys.argv[1:3] == ["watch", "--root"]:
-        raise SystemExit(watch(Path(sys.argv[3]).resolve()))
+    if len(sys.argv) == 4 and sys.argv[2] == "--root":
+        root = Path(sys.argv[3]).resolve()
+        if sys.argv[1] == "watch":
+            raise SystemExit(watch(root))
+        if sys.argv[1] == "watch-wait":
+            raise SystemExit(watch_wait(root))
     raise SystemExit(2)

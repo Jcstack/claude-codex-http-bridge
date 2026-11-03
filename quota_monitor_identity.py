@@ -34,6 +34,7 @@ class MonitorEvidence:
     generation: int
     lock_device: int
     lock_inode: int
+    script_identity: tuple[int, int, int, int, int]
 
 
 def _require(condition: bool) -> None:
@@ -78,7 +79,7 @@ def observe(root: Path) -> MonitorEvidence:
         script = root / "quota_recovery.py"
         script_metadata = script.lstat()
         _require(stat.S_ISREG(script_metadata.st_mode) and script_metadata.st_uid == os.geteuid()
-                 and not script_metadata.st_mode & 0o077)
+                 and not script_metadata.st_mode & 0o077 and script_metadata.st_size <= 2 * 1024 * 1024)
         _require(quota_recovery.monitor_lock_observation(directory) == "conflict")
         first = _snapshot(pid)
         birth, executable = process_identity.capture(pid)
@@ -89,7 +90,8 @@ def observe(root: Path) -> MonitorEvidence:
         command = subprocess.run(["/bin/ps", "-ww", "-p", str(pid), "-o", "command="],
             env=environment, capture_output=True, text=True, timeout=5, check=True).stdout.strip()
         arguments = shlex.split(command)
-        _require(len(arguments) == 6 and arguments[1] == "-I" and arguments[3:5] == ["watch", "--root"])
+        _require(len(arguments) == 6 and arguments[1] == "-I" and arguments[3] in ("watch", "watch-wait")
+                 and arguments[4] == "--root")
         _require(os.path.samefile(arguments[0], executable))
         _require(os.path.samefile(arguments[2], script) and os.path.samefile(arguments[5], root))
         output = subprocess.run(["/usr/sbin/lsof", "-nP", "-Fp", "--", str(lock)],
@@ -98,8 +100,13 @@ def observe(root: Path) -> MonitorEvidence:
         _require(openers == {pid})
         after = lock.lstat()
         _require((metadata.st_dev, metadata.st_ino) == (after.st_dev, after.st_ino))
+        script_after = script.lstat()
+        script_identity = (script_metadata.st_dev, script_metadata.st_ino, script_metadata.st_size,
+                           script_metadata.st_mtime_ns, script_metadata.st_mode)
+        _require(script_identity == (script_after.st_dev, script_after.st_ino, script_after.st_size,
+                                     script_after.st_mtime_ns, script_after.st_mode))
         _require(quota_recovery.monitor_lock_observation(directory) == "conflict" and _snapshot(pid) == first)
-        return MonitorEvidence(pid, first[0], first[1], first[2], metadata.st_dev, metadata.st_ino)
+        return MonitorEvidence(pid, first[0], first[1], first[2], metadata.st_dev, metadata.st_ino, script_identity)
     except MonitorEvidenceUnavailable:
         raise
     except (OSError, RuntimeError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):

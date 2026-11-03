@@ -5,15 +5,19 @@ starting a successor, and recovery from handoff failures need separate work.
 """
 
 import ctypes
+from dataclasses import replace
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
 import select
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -21,6 +25,7 @@ from unittest.mock import patch
 import accounts
 import process_identity
 import quota_monitor_identity
+import quota_monitor_handoff
 import quota_recovery
 import runtime_bundle
 
@@ -83,6 +88,65 @@ with quota_recovery.monitor_lock(root/'runtime-quota') as acquired:
         self.assertEqual(self.read_line(child), "ready")
         return child
 
+    def start_synthetic_runtime(self):
+        runtime_bundle.write_file(self.root / ".quota-handoff-fixture", b"synthetic quota fixture\n", 0o600)
+        for name in ("quota_recovery.py", "runtime_bundle.py"):
+            target = self.root / name
+            shutil.copyfile(SOURCE / name, target)
+            target.chmod(0o700)
+        (self.root / "codex_usage.py").write_text("# no real account access\n", encoding="utf-8")
+        (self.root / "launcher.py").write_text(r'''
+from pathlib import Path
+def read_state(path):
+    return {'fixture':True} if (Path(path).parent/'service-live').exists() else None
+def state_is_live(_path,_state):
+    return True
+''', encoding="utf-8")
+        (self.root / "accounts.py").write_text(r'''
+from contextlib import contextmanager
+from pathlib import Path
+import fcntl,os,time
+@contextmanager
+def switch_lock(root,wait_seconds=0):
+    directory=Path(root)/'accounts'
+    directory.mkdir(mode=0o700,exist_ok=True)
+    fd=os.open(directory/'.switch.lock',os.O_CREAT|os.O_RDWR,0o600)
+    deadline=time.monotonic()+wait_seconds
+    try:
+        while True:
+            try:
+                fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic()>=deadline:
+                    raise RuntimeError('Synthetic lock busy')
+                time.sleep(.02)
+        try:
+            yield directory
+        finally:
+            fcntl.flock(fd,fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+def local_accounts(_root):
+    return []
+''', encoding="utf-8")
+        (self.root / "service-live").touch()
+        environment = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
+        environment["HOME"] = str(self.root)
+        child = subprocess.Popen([sys.executable, "-I", str(self.root / "quota_recovery.py"),
+                                  "watch", "--root", str(self.root)], cwd=self.root, env=environment,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+        self.children.append(child)
+        deadline = time.monotonic() + 10
+        status = self.root / "runtime-quota" / "status.json"
+        while time.monotonic() < deadline:
+            if status.is_file():
+                return child
+            self.assertIsNone(child.poll(), "Synthetic monitor exited before reporting")
+            time.sleep(.05)
+        self.fail("Synthetic monitor did not report")
+
     def stop_children(self):
         for child in self.children:
             if child.stdin and not child.stdin.closed:
@@ -120,6 +184,10 @@ with quota_recovery.monitor_lock(root/'runtime-quota') as acquired:
         token = (ctypes.c_uint32 * 8)()
         token[5], token[7] = child.pid, version
         return self.native(token, signal.SIGTERM)
+
+    def invoke_handoff(self):
+        expected = hashlib.sha256((SOURCE / "quota_recovery.py").read_bytes()).hexdigest()
+        return quota_monitor_handoff.handoff(self.root, expected_source_sha256=expected)
 
     def test_an_open_lock_file_alone_does_not_identify_its_exclusive_owner(self):
         import fcntl
@@ -235,6 +303,301 @@ with open(sys.argv[1],'rb'):
                 quota_monitor_identity.observe(self.root)
         self.assertIsNone(owner.poll())
 
+    def test_candidate_handoff_replaces_only_an_owned_synthetic_watcher(self):
+        old = self.start_synthetic_runtime()
+        sentinel = self.start("import sys; print('sentinel-ready',flush=True); sys.stdin.readline()")
+        self.assertEqual(self.read_line(sentinel), "sentinel-ready")
+        spawn = quota_monitor_handoff._spawn_successor
+        successors = []
+
+        def capture(root):
+            child = spawn(root)
+            self.children.append(child)
+            successors.append(child)
+            return child
+
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=capture):
+            first = self.invoke_handoff()
+            self.assertEqual(first, {"status": "replacement_reported", "monitor_protocol": 2})
+            self.assertEqual(old.wait(timeout=5), -signal.SIGTERM)
+            self.assertEqual(len(successors), 1)
+            self.assertEqual(quota_monitor_identity.observe(self.root).pid, successors[0].pid)
+            second = self.invoke_handoff()
+        self.assertEqual(second, {"status": "replacement_reported", "monitor_protocol": 2})
+        self.assertEqual(successors[0].wait(timeout=5), -signal.SIGTERM)
+        self.assertEqual(len(successors), 2)
+        successor = successors[1]
+        self.assertIsNone(successor.poll())
+        self.assertEqual(quota_monitor_identity.observe(self.root).pid, successor.pid)
+        self.assertIsNone(sentinel.poll())
+        successor.terminate()  # Only the test-owned replacement process.
+        successor.wait(timeout=5)
+
+    def test_candidate_handoff_keeps_old_watcher_when_successor_cannot_start(self):
+        old = self.start_synthetic_runtime()
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=OSError("synthetic failure")):
+            with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+                self.invoke_handoff()
+        self.assertIsNone(old.poll())
+        self.assertEqual(quota_monitor_identity.observe(self.root).pid, old.pid)
+        old.terminate()  # Only the test-owned monitor.
+        old.wait(timeout=5)
+
+    def test_candidate_handoff_refuses_changed_evidence_before_any_signal(self):
+        old = self.start_synthetic_runtime()
+        original = quota_monitor_identity.observe(self.root)
+        successors = []
+        spawn = quota_monitor_handoff._spawn_successor
+
+        def capture(root):
+            child = spawn(root)
+            self.children.append(child)
+            successors.append(child)
+            return child
+
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=capture), \
+             patch.object(quota_monitor_identity, "observe", side_effect=[original, replace(original, generation=original.generation ^ 1)]), \
+             patch.object(quota_monitor_handoff, "_signal") as send:
+            with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+                self.invoke_handoff()
+        send.assert_not_called()
+        self.assertIsNone(old.poll())
+        self.assertEqual(len(successors), 1)
+        self.assertEqual(successors[0].wait(timeout=5), 0)
+        old.terminate()  # Only the test-owned monitor.
+        old.wait(timeout=5)
+
+    def test_candidate_handoff_refuses_a_source_replaced_after_successor_is_ready(self):
+        old = self.start_synthetic_runtime()
+        ready = quota_monitor_handoff._ready
+        successors = []
+        spawn = quota_monitor_handoff._spawn_successor
+
+        def capture(root):
+            child = spawn(root)
+            self.children.append(child)
+            successors.append(child)
+            return child
+
+        def replace_source(child):
+            result = ready(child)
+            self.assertTrue(result)
+            runtime_bundle.write_file(self.root / "quota_recovery.py", b"# synthetic replacement\n", 0o700)
+            return result
+
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=capture), \
+             patch.object(quota_monitor_handoff, "_ready", side_effect=replace_source), \
+             patch.object(quota_monitor_handoff, "_signal") as send:
+            with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+                self.invoke_handoff()
+        send.assert_not_called()
+        self.assertIsNone(old.poll())
+        self.assertEqual(successors[0].wait(timeout=5), 0)
+        old.terminate()  # Only the test-owned monitor.
+        old.wait(timeout=5)
+
+    def test_candidate_handoff_refuses_unreviewed_replacement_source(self):
+        old = self.start_synthetic_runtime()
+        runtime_bundle.write_file(self.root / "quota_recovery.py", b"# synthetic replacement\n", 0o700)
+        with patch.object(quota_monitor_handoff, "_spawn_successor") as spawn, \
+             patch.object(quota_monitor_handoff, "_signal") as send:
+            with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+                self.invoke_handoff()
+        spawn.assert_not_called()
+        send.assert_not_called()
+        self.assertIsNone(old.poll())
+        old.terminate()  # Only the test-owned monitor.
+        old.wait(timeout=5)
+
+    def test_candidate_handoff_requires_a_valid_reviewed_source_hash(self):
+        with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+            quota_monitor_handoff.handoff(self.root, expected_source_sha256="not-a-hash")
+        self.assertEqual(list(self.root.iterdir()), [])
+        expected = hashlib.sha256((SOURCE / "quota_recovery.py").read_bytes()).hexdigest()
+        with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+            quota_monitor_handoff.handoff(self.root, expected_source_sha256=expected)
+        self.assertEqual(list(self.root.iterdir()), [])
+        old = self.start_synthetic_runtime()
+        with patch.object(quota_monitor_handoff, "_spawn_successor") as spawn:
+            with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+                quota_monitor_handoff.handoff(self.root, expected_source_sha256="a" * 64)
+        spawn.assert_not_called()
+        self.assertIsNone(old.poll())
+        old.terminate()  # Only the test-owned monitor.
+        old.wait(timeout=5)
+
+    def test_candidate_can_arm_unreviewed_child_after_an_aba_source_swap(self):
+        """Retain this negative observation until publication is made atomic."""
+        old = self.start_synthetic_runtime()
+        entry = self.root / "quota_recovery.py"
+        saved = self.root / "saved-reviewed-source.py"
+        loaded, armed = self.root / "synthetic-loaded", self.root / "synthetic-armed"
+        program = r'''
+import sys,time
+from pathlib import Path
+root=Path(sys.argv[3])
+(root/'synthetic-loaded').touch()
+print('ready',flush=True)
+if sys.stdin.readline()=='go\n':
+    (root/'synthetic-armed').touch()
+time.sleep(.3)
+'''.encode()
+        spawn = quota_monitor_handoff._spawn_successor
+        children = []
+
+        def swap_during_spawn(root):
+            os.replace(entry, saved)
+            try:
+                runtime_bundle.write_file(entry, program, 0o700)
+                child = spawn(root)
+                self.children.append(child)
+                children.append(child)
+                deadline = time.monotonic() + 5
+                while not loaded.exists() and time.monotonic() < deadline:
+                    time.sleep(.02)
+                self.assertTrue(loaded.exists(), "Synthetic child did not load replacement source")
+            finally:
+                os.replace(saved, entry)
+            return child
+
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=swap_during_spawn), \
+             patch.object(quota_monitor_handoff, "_signal", return_value=errno.EPERM):
+            result = self.invoke_handoff()
+        self.assertEqual(result, {"status": "replacement_unverified"})
+        self.assertEqual(children[0].wait(timeout=5), 0)
+        self.assertTrue(armed.exists(), "Synthetic negative control did not reproduce")
+        self.assertIsNone(old.poll())
+        old.terminate()  # Only the test-owned monitor.
+        old.wait(timeout=5)
+
+    def test_candidate_handoff_waits_for_an_inflight_account_operation(self):
+        old = self.start_synthetic_runtime()
+        holder_code = r'''
+import sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import accounts
+with accounts.switch_lock(Path(sys.argv[2]),wait_seconds=5):
+    print('in-flight',flush=True)
+    sys.stdin.readline()
+'''
+        holder = self.start(holder_code, SOURCE, self.root)
+        self.assertEqual(self.read_line(holder), "in-flight")
+        entered = threading.Event()
+        result = []
+        successors = []
+        spawn = quota_monitor_handoff._spawn_successor
+        actual_switch_lock = accounts.switch_lock
+
+        def capture(root):
+            child = spawn(root)
+            self.children.append(child)
+            successors.append(child)
+            return child
+
+        def observed_lock(root, **options):
+            entered.set()
+            return actual_switch_lock(root, **options)
+
+        def run():
+            try:
+                result.append(self.invoke_handoff())
+            except Exception as error:
+                result.append(error)
+
+        worker = threading.Thread(target=run)
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=capture), \
+             patch.object(accounts, "switch_lock", side_effect=observed_lock):
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(timeout=5))
+                time.sleep(.2)
+                self.assertTrue(worker.is_alive())
+                self.assertIsNone(old.poll())
+            finally:
+                holder.stdin.write(b"complete\n")
+                holder.stdin.flush()
+                holder.wait(timeout=5)
+                worker.join(timeout=20)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(result, [{"status": "replacement_reported", "monitor_protocol": 2}])
+        self.assertEqual(old.wait(timeout=5), -signal.SIGTERM)
+        self.assertEqual(len(successors), 1)
+        successors[0].terminate()  # Only the test-owned replacement.
+        successors[0].wait(timeout=5)
+
+    def test_candidate_reports_unverified_and_requests_fallback_if_successor_exits(self):
+        old = self.start_synthetic_runtime()
+        program = r'''
+import sys,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import quota_recovery
+root=Path(sys.argv[2])
+print('ready',flush=True)
+if sys.stdin.readline()!='go\n':
+    raise SystemExit(0)
+deadline=time.monotonic()+5
+while time.monotonic()<deadline:
+    if quota_recovery.monitor_lock_observation(root/'runtime-quota')=='no_conflict':
+        raise SystemExit(0)
+    time.sleep(.02)
+raise SystemExit(1)
+'''
+        successors = []
+
+        def failing_successor(_root):
+            child = self.start(program, SOURCE, self.root)
+            successors.append(child)
+            return child
+
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=failing_successor), \
+             patch.object(quota_recovery, "ensure_watch") as fallback:
+            result = self.invoke_handoff()
+        self.assertEqual(result, {"status": "replacement_unverified"})
+        fallback.assert_called_once_with(self.root.absolute())
+        self.assertEqual(old.wait(timeout=5), -signal.SIGTERM)
+        self.assertEqual(successors[0].wait(timeout=5), 0)
+
+    def test_candidate_preserves_old_watcher_if_generation_bound_signal_is_refused(self):
+        old = self.start_synthetic_runtime()
+        successors = []
+        spawn = quota_monitor_handoff._spawn_successor
+
+        def capture(root):
+            child = spawn(root)
+            self.children.append(child)
+            successors.append(child)
+            return child
+
+        with patch.object(quota_monitor_handoff, "_spawn_successor", side_effect=capture), \
+             patch.object(quota_monitor_handoff, "_signal", return_value=errno.EPERM):
+            self.assertEqual(self.invoke_handoff(), {"status": "replacement_unverified"})
+        self.assertIsNone(old.poll())
+        self.assertEqual(len(successors), 1)
+        successors[0].terminate()  # Only the test-owned waiting child.
+        successors[0].wait(timeout=5)
+        old.terminate()  # Only the test-owned monitor.
+        old.wait(timeout=5)
+
+    def test_successor_readiness_has_a_bounded_partial_line(self):
+        child = self.start("import sys; sys.stdout.write('ready'); sys.stdout.flush(); sys.stdin.readline()")
+        started = time.monotonic()
+        self.assertFalse(quota_monitor_handoff._ready(child, timeout=.2))
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertIsNone(child.poll())
+
+    def test_fixture_successor_environment_excludes_unrelated_credentials_and_proxies(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "SYNTHETIC_PRIVATE", "ANTHROPIC_AUTH_TOKEN": "SYNTHETIC_PRIVATE",
+                                     "HTTP_PROXY": "http://synthetic.invalid"}), \
+             patch.object(quota_monitor_handoff.subprocess, "Popen") as spawn:
+            quota_monitor_handoff._spawn_successor(self.root)
+        environment = spawn.call_args.kwargs["env"]
+        self.assertEqual(environment["HOME"], str(self.root))
+        self.assertEqual(environment["CODEX_HOME"], str(self.root / "codex-fixture"))
+        for key in ("OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "HTTP_PROXY"):
+            self.assertNotIn(key, environment)
+
     def test_query_drains_before_owned_monitor_is_signaled_and_successor_acquires_locks(self):
         old_code = r'''
 import sys
@@ -334,6 +697,8 @@ class UnsupportedMonitorIdentityTest(unittest.TestCase):
             root = Path(directory)
             with self.assertRaises(quota_monitor_identity.MonitorEvidenceUnavailable):
                 quota_monitor_identity.observe(root)
+            with self.assertRaises(quota_monitor_handoff.HandoffUnavailable):
+                quota_monitor_handoff.handoff(root, expected_source_sha256="a" * 64)
             self.assertEqual(list(root.iterdir()), [])
 
 

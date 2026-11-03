@@ -342,3 +342,16 @@ fixtures cover ambiguity and malformed expectations, and one read-only check
 matched the existing monitor. The evidence is not atomic, `lsof` visibility is
 not an exclusive-ownership proof, and the candidate sends no signals. It is not
 installed or used automatically; no live handoff follows from this result.
+
+The separate [fixture-only handoff experiment](quota_monitor_handoff.py) uses
+the account lock, prepares a successor, rechecks evidence, and uses an
+audit-token-bound signal in a credential-free temporary runtime. It refuses
+non-fixture roots and processes that are not direct children of the caller. A
+synthetic adversarial control replaced the source just while the successor
+loaded it, then restored the original inode before the second observation. The
+unreviewed child was armed despite the original source hash and matching
+metadata; the signal was mocked and the original test monitor remained alive.
+This blocks live use. Atomic versioned controller publication and consistent
+dependency imports remain prerequisites, along with handoff and rollback tests.
+The fixture redirects its child home and uses synthetic source; it is not an OS
+sandbox for arbitrary untrusted programs.
