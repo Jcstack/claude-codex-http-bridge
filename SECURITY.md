@@ -127,16 +127,20 @@ instead of passing bare command names to `CreateProcess`. This narrows exposure
 to executable search from a workspace or PATH; it is not an audit of other
 launch paths or a boundary against a compromised system directory. Python's
 [subprocess documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)
-recommends an explicit executable path on Windows. Real Windows account and
+recommends an explicit executable path on Windows. On a Windows CI runner,
+three disposable executables in the working directory were selected by the
+bare-name controls, while the system-path implementation completed synthetic
+identity, private ACL, and local-listener checks. Real Windows account and
 login environments still need separate verification.
 
-The source for new frozen native-capability bundles includes the shared helper
-module. Older bundles remain eligible when their integrity-checked launcher has
-no direct import of that module; a legacy-shaped bundle with the direct
-dependency is rejected. This targeted check is not a complete analysis of
-dynamic imports or future dependency changes. The updated capability
-controller is not installed on the active Mac; its existing frozen code was
-verified read-only and was not rewritten.
+New frozen native-capability bundles include the shared helper module. Older
+bundles remain eligible when their integrity-checked launcher has no direct
+import of that module; a legacy-shaped bundle with the direct dependency is
+rejected. This targeted check is not a complete analysis of dynamic imports or
+future dependency changes. The updated capability controller was installed
+atomically on the active Mac with a private rollback; the existing frozen code
+was verified read-only and was not rewritten. Copies of the installed source
+also passed a synthetic frozen-server stdio MCP/PDF check in a temporary root.
 
 The macOS login policy stores only selected proxy schemes and bypass rules in
 the private runtime directory; proxy addresses and credentials are read from
