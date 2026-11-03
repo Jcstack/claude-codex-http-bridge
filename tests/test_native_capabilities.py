@@ -62,6 +62,27 @@ class LocalScopeTests(unittest.TestCase):
             runtime_bundle.write_file(selected, b"# tampered\n", 0o700)
             with self.assertRaisesRegex(RuntimeError, "modified"): capabilities.selected_server(root)
 
+    def test_legacy_snapshot_is_accepted_only_without_new_helper_dependency(self):
+        for launcher_source, accepted in ((b"# old standalone launcher\n", True),
+                                          (b"from model_helper import model_helper_command\n", False),
+                                          (b"import model_helper\n", False),
+                                          (b"from model_helper.future import command\n", False)):
+            with self.subTest(accepted=accepted, source=launcher_source), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                runtime_bundle.private_dir(root)
+                for name in capabilities.LEGACY_SERVER_SOURCES:
+                    runtime_bundle.write_file(root / name, launcher_source if name == "launcher.py" else b"# fixture\n", 0o700)
+                lock = "a" * 64
+                with patch.object(capabilities, "SERVER_SOURCES", capabilities.LEGACY_SERVER_SOURCES):
+                    identity = capabilities.freeze_server(root, lock)
+                runtime_bundle.write_file(root / "capabilities.json", runtime_bundle.canonical(
+                    {"format": 1, "enabled": True, "lock": lock, "server": identity}), 0o600)
+                if accepted:
+                    self.assertTrue(capabilities.selected_server(root).is_file())
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "missing a required model helper"):
+                        capabilities.selected_server(root)
+
     def test_native_mcp_respects_strict_profile_opt_out_and_api_separation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); ui = root / "ui"; ui.mkdir()

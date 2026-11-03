@@ -12,7 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -49,6 +49,7 @@ class AutostartTests(unittest.TestCase):
 
     def test_dead_service_verified_and_started_once(self):
         with patch.object(autostart, "healthy", side_effect=[RuntimeError("dead ingress"), True]), \
+             patch.object(autostart, "startup_network_environment", return_value=nullcontext()), \
              patch.object(launcher, "helper_output") as verify, \
              patch.object(launcher, "bridge_start", return_value=0) as start:
             self.assertEqual(autostart.run_once(self.root), 0)
@@ -68,6 +69,7 @@ class AutostartTests(unittest.TestCase):
     def test_failed_recovery_does_not_log_exception_text(self):
         sentinel = "PRIVATE_FIXTURE_SENTINEL"
         with patch.object(autostart, "healthy", return_value=False), \
+             patch.object(autostart, "startup_network_environment", return_value=nullcontext()), \
              patch.object(launcher, "helper_output", side_effect=RuntimeError(sentinel)):
             self.assertEqual(autostart.run_once(self.root), 1)
         self.assertEqual(self.result()["result"], "failed")

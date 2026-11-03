@@ -140,3 +140,4 @@
 !.github/workflows/tool-contract-observation.yml
 !.github/workflows/toolset-sdk-inventory.yml
 !.github/workflows/usage-environment-gate.yml
+!.github/workflows/capability-snapshot-gate.yml

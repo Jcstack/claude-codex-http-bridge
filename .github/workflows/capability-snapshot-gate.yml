@@ -1,0 +1,26 @@
+name: isolated-capability-snapshot-gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capability-snapshot:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install the pinned capability dependencies
+        run: python -m pip --isolated install --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r requirements-capabilities.lock
+      - name: Test frozen sources and login recovery with synthetic providers
+        run: python -m unittest tests.test_native_capabilities tests.test_autostart -v

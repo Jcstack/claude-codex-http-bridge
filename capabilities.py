@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -13,9 +14,10 @@ import venv
 
 import runtime_bundle
 
-SERVER_SOURCES = ("native_client.py", "native_services.py", "native_tools.py", "runtime_bundle.py",
-                  "rolling_runtime.py", "launcher.py", "api_profile.py", "bridge_models.py", "windows_acl.py",
-                  "desktop_adapter.py", "desktop_scope.py", "desktop_windows.py")
+LEGACY_SERVER_SOURCES = ("native_client.py", "native_services.py", "native_tools.py", "runtime_bundle.py",
+                         "rolling_runtime.py", "launcher.py", "api_profile.py", "bridge_models.py", "windows_acl.py",
+                         "desktop_adapter.py", "desktop_scope.py", "desktop_windows.py")
+SERVER_SOURCES = (*LEGACY_SERVER_SOURCES, "model_helper.py")
 
 
 def environment_python(directory: Path) -> Path:
@@ -60,7 +62,8 @@ def selected_server(root: Path) -> Path:
     data = json.loads(manifest.read_text())
     if (not isinstance(data, dict) or not isinstance(data.get("files"), dict) or
         hashlib.sha256(runtime_bundle.canonical(data)).hexdigest() != value["server"] or
-        data.get("lock") != value["lock"] or set(data.get("files", {})) != set(SERVER_SOURCES)):
+        data.get("lock") != value["lock"] or
+        set(data.get("files", {})) not in (set(SERVER_SOURCES), set(LEGACY_SERVER_SOURCES))):
         raise RuntimeError("The selected capability source identity is invalid")
     for name, digest in data["files"].items():
         if not isinstance(digest, str) or len(digest) != 64:
@@ -68,6 +71,22 @@ def selected_server(root: Path) -> Path:
         runtime_bundle.safe_file(directory / name)
         if runtime_bundle.file_hash(directory / name) != digest:
             raise RuntimeError("The selected capability source was modified")
+    if "model_helper.py" not in data["files"]:
+        # Existing immutable snapshots remain usable when their launcher does
+        # not import the new module. Do not adopt an incomplete new snapshot.
+        entry = directory / "launcher.py"
+        runtime_bundle.safe_file(entry, limit=2 * 1024 * 1024)
+        try:
+            tree = ast.parse(entry.read_text(encoding="utf-8"))
+            missing = any((isinstance(node, ast.ImportFrom) and isinstance(node.module, str) and
+                           node.module.split(".", 1)[0] == "model_helper") or
+                          (isinstance(node, ast.Import) and any(alias.name.split(".", 1)[0] == "model_helper"
+                                                                for alias in node.names))
+                          for node in ast.walk(tree))
+        except (OSError, SyntaxError, UnicodeError, ValueError, RecursionError):
+            raise RuntimeError("The legacy capability dependency cannot be verified") from None
+        if missing:
+            raise RuntimeError("The capability snapshot is missing a required model helper")
     return directory / "native_tools.py"
 
 

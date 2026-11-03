@@ -101,6 +101,12 @@ atomic replacement, with a private rollback copy and read-only help, model-list
 and quota-status checks. The already-running services were not restarted. The
 account-controller change has not yet been installed locally.
 
+New frozen native-capability bundles include the shared helper module. Older
+bundles remain eligible when their integrity-checked launcher has no direct
+import of that module; a legacy-shaped bundle with the direct dependency is
+rejected. This targeted check is not a complete analysis of dynamic imports or
+future dependency changes. Existing frozen code is not rewritten.
+
 The macOS login policy stores only selected proxy schemes and bypass rules in
 the private runtime directory; proxy addresses and credentials are read from
 system settings in memory. When the saved policy expects a system proxy that is
