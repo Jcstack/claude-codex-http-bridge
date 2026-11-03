@@ -88,9 +88,10 @@ HTTP proxy and does not follow redirects. This policy also applies to the
 on-demand recovery command. Transparent operating-system or network routing
 is outside this application's control. If the origin can infer through a proxy
 but direct HTTPS to the usage endpoint is blocked, the local quota gate cannot
-be safely reconciled by this check. The updated source returns the existing
+be safely reconciled by this check. The current source returns the existing
 `usage_unavailable` status when a usage request fails, as well as when the
-selected record lacks required request data. This does not identify the cause:
+selected record lacks required request data. This change was installed locally
+without restarting the monitor or inference services. This does not identify the cause:
 HTTP errors, TLS, DNS, malformed responses and other failures are possible.
 Other check failures still use `check_unavailable`. An older running monitor
 does not gain this classification until it is safely replaced.
