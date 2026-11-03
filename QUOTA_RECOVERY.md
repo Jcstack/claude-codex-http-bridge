@@ -19,6 +19,16 @@ It checks the local selected-account state every 30 seconds. Only an active,
 credential-wide quota gate permits an automatic upstream usage query. Healthy
 operation makes no extra upstream usage queries.
 
+On macOS, the source login-recovery check also attempts to start a watcher
+when the inference service is healthy and a read-only observation finds no
+conflicting monitor lock. The watcher takes its own exclusive lock, so a
+concurrent start cannot create two active watchers. An unavailable, unsupported
+or conflicting observation does not trigger a start. This is best-effort
+recovery after a monitor exits, not proof of its liveness or a live replacement
+of an older monitor. The check targets a 120-second cadence and the new watcher
+still observes its startup quiet period; scheduling and sleep can add delay.
+This source change is not yet installed locally.
+
 The source now keeps automatic probe timestamps in a private, bounded ledger,
 using only a short account fingerprint and monotonic time. It writes a
 reservation before contacting the usage endpoint, so a later monitor can retain

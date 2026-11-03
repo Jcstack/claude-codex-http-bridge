@@ -282,6 +282,21 @@ def record(root: Path, result: str, reason: str | None = None) -> None:
                               json.dumps(state) + "\n")
 
 
+def ensure_missing_quota_monitor(root: Path) -> None:
+    """Best-effort local recovery only when the monitor lock has no conflict."""
+    try:
+        import quota_recovery
+        observation = quota_recovery.monitor_lock_observation(root / "runtime-quota")
+        if observation in ("absent", "no_conflict"):
+            # A concurrent monitor may start after the observation; its own
+            # exclusive lock prevents more than one watcher from running.
+            quota_recovery.ensure_watch(root)
+    except (OSError, RuntimeError, ValueError, ImportError, AttributeError, TypeError):
+        # Failure to restore quota monitoring must not mark a healthy inference
+        # service as failed or expose credentials in the autostart receipt.
+        return
+
+
 def run_once(root: Path, *, enabled=None) -> int:
     """A quiet bounded login/health check; no raw errors or payloads are logged."""
     try:
@@ -302,6 +317,7 @@ def run_once(root: Path, *, enabled=None) -> int:
             except (OSError, RuntimeError, ValueError, KeyError):
                 ready = False
             if ready:
+                ensure_missing_quota_monitor(root)
                 record(root, "healthy")
                 return 0
             with startup_network_environment(root), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):

@@ -6,11 +6,13 @@ import io
 import os
 from pathlib import Path
 import plistlib
+import select
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import nullcontext, redirect_stdout
 from types import SimpleNamespace
@@ -40,12 +42,124 @@ class AutostartTests(unittest.TestCase):
     def result(self):
         return json.loads((self.root / "runtime" / "autostart-status.json").read_text())
 
-    def test_healthy_check_never_starts_or_calls_network(self):
+    def test_healthy_check_does_not_restart_inference_service(self):
         with patch.object(autostart, "healthy", return_value=True), \
+             patch.object(autostart, "ensure_missing_quota_monitor") as monitor, \
              patch.object(launcher, "bridge_start", side_effect=AssertionError("unexpected start")), \
              patch.object(launcher, "helper_output", side_effect=AssertionError("unexpected verification")):
             self.assertEqual(autostart.run_once(self.root), 0)
+        monitor.assert_called_once_with(self.root)
         self.assertEqual(self.result()["result"], "healthy")
+
+    def test_healthy_service_tries_recovery_when_no_lock_conflict_is_observed(self):
+        import quota_recovery
+        for observation in ("absent", "no_conflict", "conflict", "unavailable", "unsupported"):
+            with self.subTest(observation=observation), \
+                 patch.object(autostart, "healthy", return_value=True), \
+                 patch.object(quota_recovery, "monitor_lock_observation", return_value=observation) as inspect, \
+                 patch.object(quota_recovery, "ensure_watch") as start, \
+                 patch.object(launcher, "bridge_start", side_effect=AssertionError("unexpected service start")):
+                self.assertEqual(autostart.run_once(self.root), 0)
+                inspect.assert_called_once_with(self.root / "runtime-quota")
+                self.assertEqual(start.call_count, int(observation in ("absent", "no_conflict")))
+                if start.call_count:
+                    start.assert_called_once_with(self.root)
+                self.assertEqual(self.result()["result"], "healthy")
+
+    def test_quota_monitor_start_failure_does_not_mark_healthy_service_failed(self):
+        import quota_recovery
+        with patch.object(autostart, "healthy", return_value=True), \
+             patch.object(quota_recovery, "monitor_lock_observation", return_value="no_conflict"), \
+             patch.object(quota_recovery, "ensure_watch", side_effect=OSError("PRIVATE_FIXTURE_SENTINEL")):
+            self.assertEqual(autostart.run_once(self.root), 0)
+        self.assertEqual(self.result()["result"], "healthy")
+        self.assertNotIn("PRIVATE_FIXTURE_SENTINEL", (self.root / "runtime" / "autostart-status.json").read_text())
+
+    @unittest.skipUnless(sys.platform == "darwin", "Requires macOS read-only lock observation")
+    def test_quota_monitor_recovery_waits_for_a_real_owned_lock(self):
+        import quota_recovery
+        directory = self.root / "runtime-quota"
+        directory.mkdir(mode=0o700)
+        program = '''import fcntl,os,sys
+fd=os.open(sys.argv[1],os.O_CREAT|os.O_RDWR,0o600)
+fcntl.flock(fd,fcntl.LOCK_EX)
+print("ready",flush=True)
+sys.stdin.read(1)
+os.close(fd)
+'''
+        child = subprocess.Popen([sys.executable, "-I", "-c", program, str(directory / "monitor.lock")],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 text=True, cwd=self.root)
+        try:
+            ready, _, _ = select.select([child.stdout], [], [], 5)
+            self.assertTrue(ready, "Synthetic lock owner did not start")
+            self.assertEqual(child.stdout.readline().strip(), "ready")
+            with patch.object(quota_recovery, "ensure_watch") as start:
+                autostart.ensure_missing_quota_monitor(self.root)
+                start.assert_not_called()
+                child.stdin.write("x")
+                child.stdin.flush()
+                self.assertEqual(child.wait(timeout=5), 0)
+                autostart.ensure_missing_quota_monitor(self.root)
+                start.assert_called_once_with(self.root)
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=5)
+            child.stdin.close()
+            child.stdout.close()
+
+    @unittest.skipUnless(sys.platform == "darwin", "Requires macOS read-only lock observation")
+    def test_quota_monitor_recovery_restarts_only_a_lost_synthetic_watcher(self):
+        import accounts
+        import codex_usage
+        import quota_recovery
+        directory = self.root / "runtime-quota"
+        directory.mkdir(mode=0o700)
+        entry = self.root / "quota_recovery.py"
+        entry.write_text('''import fcntl,os,sys,time
+from pathlib import Path
+root=Path(sys.argv[3])
+fd=os.open(root/"runtime-quota"/"monitor.lock",os.O_CREAT|os.O_RDWR,0o600)
+fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+(root/"synthetic-watcher-ready").write_text("ready")
+while True: time.sleep(1)
+''', encoding="utf-8")
+        entry.chmod(0o700)
+        marker = self.root / "synthetic-watcher-ready"
+        real_popen = subprocess.Popen
+        children = []
+
+        def spawn(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        def wait_ready():
+            deadline = time.monotonic() + 5
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(.02)
+            self.assertTrue(marker.exists(), "Synthetic watcher did not acquire its lock")
+
+        try:
+            with patch.object(codex_usage, "active_bridge_auth", return_value={"account_id": "fixture"}), \
+                 patch.object(accounts, "Management", return_value=object()), \
+                 patch.object(quota_recovery.subprocess, "Popen", side_effect=spawn):
+                autostart.ensure_missing_quota_monitor(self.root)
+                wait_ready()
+                autostart.ensure_missing_quota_monitor(self.root)
+                self.assertEqual(len(children), 1)
+                children[0].terminate()  # The fixture owns this process.
+                children[0].wait(timeout=5)
+                marker.unlink()
+                autostart.ensure_missing_quota_monitor(self.root)
+                wait_ready()
+                self.assertEqual(len(children), 2)
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.terminate()
+                    child.wait(timeout=5)
 
     def test_dead_service_verified_and_started_once(self):
         with patch.object(autostart, "healthy", side_effect=[RuntimeError("dead ingress"), True]), \
