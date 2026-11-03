@@ -294,8 +294,11 @@ def previous_quota_monitor_gone(root: Path, quota_recovery) -> bool:
         value = json.loads(quota_recovery._private_text(path, 4096),
                            object_pairs_hook=quota_recovery._unique_json_pairs)
         pid = value.get("monitor_pid") if isinstance(value, dict) else None
-        if type(pid) is not int or not 1 < pid < 2**31:
+        status = value.get("status") if isinstance(value, dict) else None
+        if (type(pid) is not int or not 1 < pid < 2**31 or not isinstance(status, str)
+                or status not in quota_recovery.MONITOR_RESULTS):
             return False
+        quota_recovery._probe_time(value.get("checked_at"))
         try:
             os.kill(pid, 0)
         except ProcessLookupError:

@@ -86,12 +86,14 @@ class AutostartTests(unittest.TestCase):
         status = directory / "status.json"
         self.assertFalse(autostart.previous_quota_monitor_gone(self.root, quota_recovery))
         for payload in ('{}', '{"monitor_pid":true}', '{"monitor_pid":0}',
-                        '{"monitor_pid":2147483648}', '{"monitor_pid":3,"monitor_pid":4}', 'invalid'):
+                        '{"monitor_pid":2147483648}', '{"monitor_pid":3,"monitor_pid":4}',
+                        '{"monitor_pid":12345}', '{"monitor_pid":12345,"status":"no_stale_credential_quota"}',
+                        '{"monitor_pid":12345,"status":"unknown","checked_at":1}', 'invalid'):
             runtime_bundle.write_file(status, payload.encode(), 0o600)
             with self.subTest(payload=payload), patch.object(autostart.os, "kill") as probe:
                 self.assertFalse(autostart.previous_quota_monitor_gone(self.root, quota_recovery))
                 probe.assert_not_called()
-        runtime_bundle.write_file(status, b'{"monitor_pid":12345}', 0o600)
+        runtime_bundle.write_file(status, b'{"monitor_pid":12345,"status":"no_stale_credential_quota","checked_at":1}', 0o600)
         for effect, expected in ((None, False), (ProcessLookupError(), True), (PermissionError(), False)):
             with self.subTest(effect=type(effect).__name__), patch.object(autostart.os, "kill", side_effect=effect) as probe:
                 self.assertEqual(autostart.previous_quota_monitor_gone(self.root, quota_recovery), expected)
@@ -106,13 +108,13 @@ class AutostartTests(unittest.TestCase):
         import quota_recovery
         directory = self.root / "runtime-quota"
         directory.mkdir(mode=0o700)
-        program = '''import fcntl,json,os,sys
+        program = '''import fcntl,json,os,sys,time
 from pathlib import Path
 fd=os.open(sys.argv[1],os.O_CREAT|os.O_RDWR,0o600)
 fcntl.flock(fd,fcntl.LOCK_EX)
 status=Path(sys.argv[1]).parent/"status.json"
 out=os.open(status,os.O_CREAT|os.O_WRONLY|os.O_TRUNC,0o600)
-os.write(out,json.dumps({"monitor_pid":os.getpid()}).encode()); os.close(out)
+os.write(out,json.dumps({"monitor_pid":os.getpid(),"status":"no_stale_credential_quota","checked_at":time.time()}).encode()); os.close(out)
 print("ready",flush=True)
 sys.stdin.read(1)
 os.close(fd)
@@ -159,7 +161,7 @@ root=Path(sys.argv[3])
 fd=os.open(root/"runtime-quota"/"monitor.lock",os.O_CREAT|os.O_RDWR,0o600)
 fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
 status=os.open(root/"runtime-quota"/"status.json",os.O_CREAT|os.O_WRONLY|os.O_TRUNC,0o600)
-os.write(status,json.dumps({"monitor_pid":os.getpid()}).encode()); os.close(status)
+os.write(status,json.dumps({"monitor_pid":os.getpid(),"status":"no_stale_credential_quota","checked_at":time.time()}).encode()); os.close(status)
 (root/"synthetic-watcher-ready").write_text("ready")
 while True: time.sleep(1)
 ''', encoding="utf-8")
