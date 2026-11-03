@@ -85,6 +85,19 @@ its original environment until it exits; the current origin was not restarted
 to apply it. A local check found none of the known storage or management
 override variable names in that existing process, without reporting values.
 
+The source now restricts separate model-catalog helper processes to selected
+operating-system and routing variables, retaining the requested PDF-hook and
+Windows ACL-debug settings. It also starts those Python children without
+environment-based Python configuration or site initialization, and uses UTF-8
+for captured output. A synthetic control showed that the earlier child could
+inherit an unrelated token-shaped variable and execute a `sitecustomize.py`
+from an injected `PYTHONPATH`; it does not show a real credential exposure.
+A loopback-only catalog fixture exercises dynamic model and compact-window
+selection, a separate synthetic API catalog, and a Unicode installation path.
+The parent launcher, other subprocesses, user HOME, filesystem, and same-user
+programs remain outside this child-level restriction. This is not an OS
+sandbox. The change has not been installed into the active local controller.
+
 The macOS login policy stores only selected proxy schemes and bypass rules in
 the private runtime directory; proxy addresses and credentials are read from
 system settings in memory. When the saved policy expects a system proxy that is

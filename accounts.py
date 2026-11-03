@@ -315,8 +315,8 @@ def isolated_account(root: Path, record: dict):
     private_directory(directory)
     windows = platform.system() == "Windows"
     proxy = root / "bin" / ("cli-proxy-api.exe" if windows else "cli-proxy-api")
-    subprocess.run([sys.executable, str(root / "bridge_models.py"), "verify"],
-                   check=True, capture_output=True, timeout=20)
+    subprocess.run(launcher.model_helper_command(root / "bridge_models.py", "verify"),
+                   env=launcher.model_helper_environment(), check=True, capture_output=True, timeout=20)
     with tempfile.TemporaryDirectory(prefix="check-", dir=directory) as temporary:
         home = Path(temporary)
         private_directory(home)
@@ -350,8 +350,9 @@ def isolated_account(root: Path, record: dict):
             environment.update(CODEX_BRIDGE_PORT=str(port), CODEX_BRIDGE_KEY_FILE=str(key_path))
             environment.pop("CODEX_BRIDGE_ROUTE", None)
             launcher.wait_for_catalog(process, environment, True)
-            completed = subprocess.run([sys.executable, str(root / "bridge_models.py"), "snapshot"],
-                                       env=environment, capture_output=True, text=True, check=True, timeout=15)
+            completed = subprocess.run(launcher.model_helper_command(root / "bridge_models.py", "snapshot"),
+                                       env=launcher.model_helper_environment(environment),
+                                       capture_output=True, text=True, encoding="utf-8", check=True, timeout=15)
             models = json.loads(completed.stdout)
             yield {"url": f"http://127.0.0.1:{port}", "key": key, "models": models}
         finally:
@@ -508,8 +509,9 @@ def selected_catalog(root: Path, management: Management) -> dict:
                 and not slug.startswith("gpt-image-") and isinstance(row.get("input_modalities"), list)
                 and "text" in row["input_modalities"] and bridge_models.eligible(bridge_models.context_metadata(row))}
     try:
-        completed = subprocess.run([sys.executable, str(root / "bridge_models.py"), "snapshot"],
-            env=launcher.service_environment(management.state, runtime), capture_output=True, text=True,
+        completed = subprocess.run(launcher.model_helper_command(root / "bridge_models.py", "snapshot"),
+            env=launcher.model_helper_environment(launcher.service_environment(management.state, runtime)),
+            capture_output=True, text=True, encoding="utf-8",
             check=True, timeout=20)
         if len(completed.stdout) > 4 * 1024 * 1024:
             raise RuntimeError("Account model catalog exceeds its metadata limit")
@@ -600,8 +602,9 @@ def validation_route(root: Path, record: dict):
     state = management.state
     runtime = root / "runtime"
     environment = launcher.service_environment(state, runtime)
-    result = subprocess.run([sys.executable, str(root / "bridge_models.py"), "snapshot"],
-                            env=environment, capture_output=True, text=True, check=True, timeout=15)
+    result = subprocess.run(launcher.model_helper_command(root / "bridge_models.py", "snapshot"),
+                            env=launcher.model_helper_environment(environment),
+                            capture_output=True, text=True, encoding="utf-8", check=True, timeout=15)
     key = launcher.state_paths(runtime, state)[2].read_text().strip()
     yield {"url": f"http://127.0.0.1:{state['port']}", "key": key, "models": json.loads(result.stdout)}
     after = [row for row in local_accounts(root) if not row["record"].get("disabled")]

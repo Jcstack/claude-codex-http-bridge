@@ -86,11 +86,31 @@ def parse_args(arguments: list[str]) -> tuple[str, str, list[str]]:
     return "claude", selected, claude_args
 
 
+MODEL_HELPER_ENVIRONMENT = (
+    "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
+    "APPDATA", "LOCALAPPDATA", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "CODEX_BRIDGE_PORT", "CODEX_BRIDGE_KEY_FILE", "CODEX_BRIDGE_ROUTE",
+    "CODEX_BRIDGE_API_METADATA_FILE", "CLAUDE_CODEX_PDF_GUARD", "CLAUDE_CODEX_DEBUG_ACL",
+)
+
+
+def model_helper_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
+    """Give the catalog helper only its OS and explicit routing settings."""
+    source = os.environ if environment is None else environment
+    return {name: source[name] for name in MODEL_HELPER_ENVIRONMENT if name in source}
+
+
+def model_helper_command(script: Path, *arguments: str) -> list[str]:
+    # The helper needs its trusted script directory for sibling modules on
+    # Windows. -E ignores PYTHON* settings and -S avoids site customization.
+    return [sys.executable, "-E", "-S", "-X", "utf8", str(script), *arguments]
+
+
 def helper_output(*arguments: str, environment: dict[str, str] | None = None) -> str:
     return subprocess.check_output(
-        [sys.executable, str(HELPER), *arguments],
-        env=environment,
-        text=True,
+        model_helper_command(HELPER, *arguments),
+        env=model_helper_environment(environment),
+        text=True, encoding="utf-8",
     ).strip()
 
 
@@ -142,8 +162,8 @@ def wait_for_catalog(proxy: subprocess.Popen, environment: dict[str, str], requi
         if proxy.poll() is not None:
             raise RuntimeError("Local model proxy exited before its model catalog was ready")
         result = subprocess.run(
-            [sys.executable, str(HELPER), "catalog"], env=environment,
-            capture_output=True, text=True, timeout=8,
+            model_helper_command(HELPER, "catalog"), env=model_helper_environment(environment),
+            capture_output=True, text=True, encoding="utf-8", timeout=8,
         )
         if result.returncode == 0:
             counts = json.loads(result.stdout)
@@ -953,7 +973,7 @@ def run_session(mode: str, selected: str, claude_args: list[str], claude: str,
     runtime, state, created = ensure_service(route=route)
     environment = service_environment(state, runtime, route)
     if mode == "models":
-        return subprocess.call([sys.executable, str(HELPER), "list"], env=environment)
+        return subprocess.call(model_helper_command(HELPER, "list"), env=model_helper_environment(environment))
     resume_without_model = False
     if not explicit_model:
         import session_models

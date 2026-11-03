@@ -40,7 +40,7 @@ class AccountTests(unittest.TestCase):
                        "https_proxy": "http://127.0.0.1:8001"}
         with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, environment), \
              patch.object(windows_acl, "lock"), patch.object(windows_acl, "verify"), \
-             patch.object(accounts.subprocess, "run", return_value=SimpleNamespace(stdout="{}")), \
+             patch.object(accounts.subprocess, "run", return_value=SimpleNamespace(stdout="{}")) as helper, \
              patch.object(accounts.subprocess, "Popen") as spawn, \
              patch.object(launcher, "wait_for_private_listener"), patch.object(launcher, "wait_for_catalog"), \
              patch.object(launcher, "stop_process"):
@@ -48,6 +48,10 @@ class AccountTests(unittest.TestCase):
             with accounts.isolated_account(Path(temporary), record):
                 child = spawn.call_args.kwargs["env"]
                 for name in environment: self.assertNotIn(name, child)
+                self.assertEqual(helper.call_count, 2)
+                for call in helper.call_args_list:
+                    self.assertEqual(call.args[0][1:3], ["-E", "-S"])
+                    for name in environment: self.assertNotIn(name, call.kwargs["env"])
 
     def test_installed_inactive_validation_cannot_become_a_second_refresh_owner(self):
         with tempfile.TemporaryDirectory() as temporary:
