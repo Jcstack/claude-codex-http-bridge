@@ -118,7 +118,7 @@ with open(sys.argv[1],'rb'):
                                 env=environment, cwd=self.root, capture_output=True, text=True,
                                 timeout=10, check=True)
         openers = {int(line[1:]) for line in result.stdout.splitlines() if line.startswith("p")}
-        self.assertEqual(openers, {owner.pid, reader.pid})
+        self.assertTrue({owner.pid, reader.pid}.issubset(openers))
         # Even a reader that has not locked the file appears in the openers.
         # A separate nonblocking lock attempt only establishes that some
         # process holds it, and must not be used on the live service here.

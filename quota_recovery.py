@@ -175,7 +175,7 @@ def usage_allows_requests(value: dict) -> bool:
         if not windows:
             return False
         return all(isinstance(window, dict) and type(window.get("used_percent")) in (int, float)
-                   and math.isfinite(window["used_percent"]) and 0 <= window["used_percent"] < 100 for window in windows)
+                   and 0 <= window["used_percent"] < 100 and math.isfinite(window["used_percent"]) for window in windows)
     if not isinstance(value, dict) or not available(value.get("rate_limit")):
         return False
     additional = value.get("additional_rate_limits")

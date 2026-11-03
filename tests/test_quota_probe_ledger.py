@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -105,6 +106,45 @@ class QuotaProbeLedgerTest(unittest.TestCase):
         recover.assert_not_called()
         self.assertEqual(path.read_bytes(), b"invalid synthetic ledger")
         self.assertEqual(json.loads((path.parent / "status.json").read_text())["status"], "probe_state_unavailable")
+
+    def test_real_watcher_reconciles_a_synthetic_gate_after_startup_grace(self):
+        record = {"account_id": "fixture", "email": "fixture@example.invalid", "access_token": "synthetic"}
+        selected = {"name": "fixture.json", "record": record, "fingerprint": accounts.fingerprint(record)}
+        row = {"name": "fixture.json", "provider": "codex", "auth_index": "synthetic-index",
+               "cooldowns": [{"scope": "credential", "reason": "credential_quota"}]}
+        owner = type("Owner", (), {"state": {"pid": 10, "port": 12345}, "key": "synthetic-management"})()
+        clock = {"monotonic": 0}
+        observed_statuses, calls = [], []
+
+        def request(url, **_options):
+            if url.endswith("/credentials"):
+                return {"files": [row]}
+            if url == recovery.USAGE_URL:
+                calls.append("usage")
+                return {"rate_limit": {"allowed": True, "limit_reached": False,
+                                       "primary_window": {"used_percent": 1}}}
+            if url.endswith("/routing/cooldown/reset"):
+                calls.append("reset")
+                return {"status": "ok"}
+            raise AssertionError("Unexpected synthetic endpoint")
+
+        def wait(seconds):
+            path = self.root / "runtime-quota" / "status.json"
+            observed_statuses.append(json.loads(path.read_text())["status"])
+            clock["monotonic"] += seconds
+
+        fake_time = SimpleNamespace(monotonic=lambda: clock["monotonic"], time=lambda: 1000 + clock["monotonic"])
+        with patch.object(recovery.launcher, "read_state", side_effect=[{"fixture": True}] * 3 + [None]), \
+             patch.object(recovery.launcher, "state_is_live", return_value=True), \
+             patch.object(recovery, "time", fake_time), \
+             patch.object(accounts, "switch_lock", return_value=nullcontext()), \
+             patch.object(accounts, "local_accounts", return_value=[selected]), \
+             patch.object(accounts, "Management", return_value=owner), \
+             patch.object(accounts, "request_json", side_effect=request), \
+             patch.object(recovery.codex_usage, "active_bridge_auth", return_value=record):
+            self.assertEqual(recovery.watch(self.root, wait=wait), 0)
+        self.assertEqual(observed_statuses, ["probe_throttled", "probe_throttled", "recovered"])
+        self.assertEqual(calls, ["usage", "reset"])
 
     def test_future_monotonic_clock_is_clamped_and_cannot_block_forever(self):
         path = recovery.initialize_probe_ledger(self.root, 0)

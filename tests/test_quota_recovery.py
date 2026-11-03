@@ -67,7 +67,8 @@ class QuotaRecoveryTests(unittest.TestCase):
         cases = [usage(100), {}, {"rate_limit": {"allowed": True, "limit_reached": False}},
                  {**usage(), "additional_rate_limits": [{"rate_limit": usage(100)["rate_limit"]}]},
                  {**usage(), "additional_rate_limits": "unknown"},
-                 {"rate_limit": {**usage()["rate_limit"], "secondary_window": {"used_percent": float("nan")}}}]
+                 *[{"rate_limit": {**usage()["rate_limit"], "secondary_window": {"used_percent": value}}}
+                   for value in (float("nan"), float("inf"), -1, 101, True, 10**400)]]
         for value in cases:
             with self.subTest(value=value):
                 result, requests = self.scenario(available=value)
