@@ -25,11 +25,13 @@ reservation before contacting the usage endpoint, so a later monitor can retain
 the one-minute reservation interval after a process crash or replacement.
 This bounds reservations, not exact provider request start times: scheduling,
 filesystem delays and an old request still in flight can change their spacing.
-A legacy status without
-a ledger causes a conservative one-minute wait before the first automatic
-probe. Malformed, oversized, inaccessible or symlinked state blocks automatic
-probing rather than resetting the limiter. A manually requested `quota recover`
-remains a separate immediate check and is not governed by this automatic ledger.
+Each monitor start begins a conservative one-minute global quiet period before
+its first automatic probe. This covers a legacy monitor that exited before
+writing any status and avoids comparing monotonic values across system boots.
+The 30-second polling cadence can add delay after the quiet period. Malformed,
+oversized, inaccessible or symlinked state blocks automatic probing rather than
+resetting the limiter. A manually requested `quota recover` remains a separate
+immediate check and is not governed by this automatic ledger.
 The checks cover process termination, not an operating-system crash or power
 failure; filesystem durability and clock behavior have platform limits. A
 valid-looking ledger is not cryptographically authenticated against same-user

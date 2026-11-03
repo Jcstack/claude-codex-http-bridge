@@ -48,6 +48,9 @@ class QuotaRecoveryTests(unittest.TestCase):
              patch.object(accounts, "Management", return_value=owner), \
              patch.object(accounts, "request_json", side_effect=request), \
              patch.object(codex_usage, "active_bridge_auth", return_value={**record, "account_id": "changed"} if changed else record):
+            if attempts is not None:
+                # Exercise the running-monitor path after its startup grace.
+                recovery._write_probe_ledger(recovery._probe_ledger(Path(temporary)), {})
             result = recovery.recover_once(Path(temporary), attempts=attempts, now=now)
         self.assertNotIn("PRIVATE", json.dumps(result))
         return result, requests

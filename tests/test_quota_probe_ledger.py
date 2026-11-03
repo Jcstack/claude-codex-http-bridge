@@ -37,10 +37,12 @@ class QuotaProbeLedgerTest(unittest.TestCase):
 
     def test_fresh_ledger_survives_new_process_maps_and_is_per_identity(self):
         recovery.initialize_probe_ledger(self.root, 0)
-        self.assertTrue(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 0))
-        self.assertTrue(recovery.reserve_automatic_probe(self.root, IDENTITY_B, 1))
-        self.assertFalse(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 30))
+        self.assertFalse(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 0))
+        self.assertFalse(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 59))
         self.assertTrue(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 60))
+        self.assertTrue(recovery.reserve_automatic_probe(self.root, IDENTITY_B, 61))
+        self.assertFalse(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 90))
+        self.assertTrue(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 120))
         path = self.root / "runtime-quota" / "probe-ledger.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(data["version"], 1)
@@ -55,6 +57,22 @@ class QuotaProbeLedgerTest(unittest.TestCase):
         recovery.initialize_probe_ledger(self.root, 100)
         self.assertFalse(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 159))
         self.assertTrue(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 160))
+
+    def test_missing_report_may_be_a_legacy_monitor_that_exited_during_its_first_probe(self):
+        # Both files are absent if the predecessor died before its first report.
+        self.assertFalse(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 100))
+        self.assertFalse(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 159))
+        self.assertTrue(recovery.reserve_automatic_probe(self.root, IDENTITY_A, 160))
+
+    def test_each_watcher_start_gets_global_grace_across_unknown_clock_origins(self):
+        path = recovery.initialize_probe_ledger(self.root, 0)
+        for prior in (0, 1000):
+            with self.subTest(prior=prior):
+                recovery._write_probe_ledger(path, {IDENTITY_A: prior})
+                recovery.initialize_probe_ledger(self.root, 100)
+                self.assertEqual(recovery._read_probe_ledger(path), {"*": 100})
+                self.assertFalse(recovery.reserve_automatic_probe(self.root, IDENTITY_B, 159))
+                self.assertTrue(recovery.reserve_automatic_probe(self.root, IDENTITY_B, 160))
 
     def test_watcher_records_legacy_grace_before_replacing_old_status(self):
         directory = self.root / "runtime-quota"
@@ -152,7 +170,7 @@ class QuotaProbeLedgerTest(unittest.TestCase):
         program = ("import sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); "
                    "import accounts,quota_recovery; root=Path(sys.argv[2]); "
                    "exec('with accounts.switch_lock(root, wait_seconds=20):\\n "
-                   "print(\\\"yes\\\" if quota_recovery.reserve_automatic_probe(root, \\\"aaaaaaaaaaaaaaaa\\\", 100) else \\\"no\\\")')")
+                   "print(\\\"yes\\\" if quota_recovery.reserve_automatic_probe(root, \\\"aaaaaaaaaaaaaaaa\\\", 160) else \\\"no\\\")')")
         allowed = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR", "LANG")
         environment = {name: os.environ[name] for name in allowed if name in os.environ}
         environment.update(HOME=str(self.root), USERPROFILE=str(self.root))
@@ -174,6 +192,8 @@ class QuotaProbeLedgerTest(unittest.TestCase):
         self.assertCountEqual(outputs, ["yes", "no"])
 
     def test_crash_during_fake_usage_request_does_not_erase_reservation(self):
+        # Start after the monitor's initial quiet period in this fixture.
+        recovery._write_probe_ledger(recovery._probe_ledger(self.root), {})
         source = Path(recovery.__file__).resolve().parent
         program = r'''
 import os,sys
@@ -211,6 +231,7 @@ raise AssertionError("Synthetic crash did not occur")
             self.assertTrue(recovery.reserve_automatic_probe(self.root, identity, 60))
 
     def test_failed_network_attempt_is_saved_before_retry_with_a_fresh_map(self):
+        recovery._write_probe_ledger(recovery._probe_ledger(self.root), {})
         record = {"account_id": "fixture", "email": "fixture@example.invalid", "access_token": "synthetic"}
         identity = accounts.fingerprint(record)
         selected = {"name": "fixture.json", "record": record, "fingerprint": identity}

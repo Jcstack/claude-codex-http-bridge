@@ -112,7 +112,9 @@ def _ensure_probe_ledger(root: Path, observed: float) -> tuple[Path, dict[str, f
     status = path.parent / "status.json"
     if status.is_symlink():
         raise RuntimeError("Quota monitor status must not be symlinked")
-    entries = {GLOBAL_PROBE_KEY: observed} if status.exists() else {}
+    # Absence of a report does not prove that a previous monitor made no
+    # request: it could have exited before writing its first report.
+    entries = {GLOBAL_PROBE_KEY: observed}
     _write_probe_ledger(path, entries)
     return path, entries
 
@@ -120,11 +122,16 @@ def _ensure_probe_ledger(root: Path, observed: float) -> tuple[Path, dict[str, f
 def initialize_probe_ledger(root: Path, observed: float) -> Path:
     """Create durable throttle state before a new monitor can make a probe.
 
-    The caller must hold the account switch lock. A pre-existing status with
-    no ledger may be a legacy monitor whose last probe is unknown, so its
-    successor waits one full interval before the first automatic probe.
+    The caller must hold both the monitor and account switch locks. On every
+    start, wait a full interval globally: a legacy process may have left no
+    report, and monotonic clock values are not portable across system boots.
+    The global interval makes older per-account timestamps unnecessary.
     """
-    return _ensure_probe_ledger(root, observed)[0]
+    path, entries = _ensure_probe_ledger(root, observed)
+    initial = {GLOBAL_PROBE_KEY: observed}
+    if entries != initial:
+        _write_probe_ledger(path, initial)
+    return path
 
 
 def reserve_automatic_probe(root: Path, identity: str, observed: float) -> bool:
