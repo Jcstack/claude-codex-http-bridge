@@ -93,8 +93,10 @@ environment boundaries in the [three-platform initial gate](https://github.com/J
 A later test also paired a former-HOME control with a real model helper
 against a fake loopback proxy. Its [expanded gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41646534202)
 passed on Linux and Windows but timed out in the macOS real-helper fixture.
-That fixture had mocked listener readiness; adding a real loopback readiness
-check is a candidate test correction, not an established root cause.
+A [readiness-controlled rerun](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41647022005)
+still failed on macOS because the synthetic child remained alive without a
+listener. The exact cause remains unknown and the fixture now records fixed
+startup-stage labels for the next run.
 The change is not yet installed. HOME redirection is not an OS sandbox: same-user
 filesystem access, system credential stores, arbitrary native code and other
 proxy launch paths are not isolated by it.

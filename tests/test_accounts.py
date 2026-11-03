@@ -116,7 +116,7 @@ class AccountTests(unittest.TestCase):
         from types import SimpleNamespace
         import launcher
         import windows_acl
-        fake_proxy = '''import json,os,re,sys\nfrom http.server import BaseHTTPRequestHandler,HTTPServer\nfrom pathlib import Path\nconfig=Path(sys.argv[-1]).read_text(encoding="utf-8")\nport=int(re.search(r"(?m)^  port: (\\d+)$",config).group(1))\nhome=Path(os.environ["HOME"])\n(Path.cwd()/"home-check").write_text(str(home.resolve()==Path.cwd().resolve()),encoding="utf-8")\nrow={"slug":"gpt-9.2-sol","context_window":272000,"max_context_window":872000,"input_modalities":["text"],"supports_search_tool":True,"supported_reasoning_levels":[{"effort":v} for v in ("low","medium","high","xhigh","max")]}\nclass Handler(BaseHTTPRequestHandler):\n def log_message(self,*args): pass\n def do_GET(self):\n  data={"data":[{"id":row["slug"]}]} if self.path=="/v1/models" else {"models":[row]}\n  body=json.dumps(data).encode(); self.send_response(200); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body)\nHTTPServer(("127.0.0.1",port),Handler).serve_forever()\n'''
+        fake_proxy = '''from pathlib import Path\ndef mark(value): (Path.cwd()/"startup-stage").write_text(value,encoding="utf-8")\nmark("entered")\nimport json,os,re,sys\nmark("stdlib")\nfrom http.server import BaseHTTPRequestHandler,HTTPServer\nmark("http-imported")\nconfig=Path(sys.argv[-1]).read_text(encoding="utf-8")\nport=int(re.search(r"(?m)^  port: (\\d+)$",config).group(1))\nmark("config-read")\nhome=Path(os.environ["HOME"])\n(Path.cwd()/"home-check").write_text(str(home.resolve()==Path.cwd().resolve()),encoding="utf-8")\nrow={"slug":"gpt-9.2-sol","context_window":272000,"max_context_window":872000,"input_modalities":["text"],"supports_search_tool":True,"supported_reasoning_levels":[{"effort":v} for v in ("low","medium","high","xhigh","max")]}\nclass Handler(BaseHTTPRequestHandler):\n def log_message(self,*args): pass\n def do_GET(self):\n  data={"data":[{"id":row["slug"]}]} if self.path=="/v1/models" else {"models":[row]}\n  body=json.dumps(data).encode(); self.send_response(200); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body)\nmark("before-bind")\nserver=HTTPServer(("127.0.0.1",port),Handler)\nmark("bound")\nserver.serve_forever()\n'''
         real_run, real_popen = subprocess.run, subprocess.Popen
         with tempfile.TemporaryDirectory(prefix="validator-helper-") as temporary:
             root = Path(temporary) / "模型-fixture"
@@ -148,7 +148,11 @@ class AccountTests(unittest.TestCase):
                             return
                     except OSError:
                         time.sleep(.1)
-                raise RuntimeError("Synthetic validation proxy did not become ready")
+                stage_file = child_roots[0] / "startup-stage"
+                stage = stage_file.read_text(encoding="utf-8") if stage_file.is_file() else "not-entered"
+                if stage not in ("not-entered", "entered", "stdlib", "http-imported", "config-read", "before-bind", "bound"):
+                    stage = "unknown"
+                raise RuntimeError("Synthetic validation proxy did not become ready; stage=" + stage)
 
             with patch.object(windows_acl, "lock"), patch.object(windows_acl, "verify"), \
                  patch.object(accounts.subprocess, "Popen", side_effect=launch), \
