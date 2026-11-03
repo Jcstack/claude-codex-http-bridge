@@ -105,20 +105,30 @@ The already-running services were not restarted, and in-memory processes keep
 the versions they already loaded. The installed launcher retains the equivalent
 standalone policy until a later source update.
 
-The installed parent launch path still starts Python with normal site
-initialization. A temporary fake launcher demonstrated that an injected
-`PYTHONPATH` can run synthetic startup code before the launcher; this is not
-evidence of an actual credential exposure. The source wrapper uses `-E -s -X
-utf8`, which ignores Python environment configuration for this interpreter,
-disables the user site, and selects UTF-8 while keeping the environment
+The earlier parent launch path started Python with normal site initialization.
+A temporary fake launcher demonstrated that an injected `PYTHONPATH` could run
+synthetic startup code before the launcher; this is not evidence of an actual
+credential exposure. The wrapper uses `-E -s -X utf8`, which ignores Python
+environment configuration for this interpreter, disables the user site, and
+selects UTF-8 while keeping the environment
 available to Claude and plugins. The selected interpreter's site and its
 `.pth` files still run; the selected interpreter remains a trust boundary. A
 separate Python 3.11 virtual environment showed that the stronger `-S` option
 changes `sys.prefix` even though creating a child environment with pip worked in
 that sample.
 [Python's documentation](https://docs.python.org/3.14/library/sys_path_init.html)
-describes the changed virtual-environment behavior in 3.14. The wrapper source
-change is not yet installed on the active Mac.
+describes the changed virtual-environment behavior in 3.14. The POSIX wrapper
+was atomically installed on the active Mac with a private rollback copy and
+read-only CLI checks. Existing processes were not restarted.
+
+The Windows source resolves the `whoami`, `icacls`, and `netstat` executables
+under the directory returned by [GetSystemDirectoryW](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw),
+instead of passing bare command names to `CreateProcess`. This narrows exposure
+to executable search from a workspace or PATH; it is not an audit of other
+launch paths or a boundary against a compromised system directory. Python's
+[subprocess documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)
+recommends an explicit executable path on Windows. Real Windows account and
+login environments still need separate verification.
 
 The source for new frozen native-capability bundles includes the shared helper
 module. Older bundles remain eligible when their integrity-checked launcher has

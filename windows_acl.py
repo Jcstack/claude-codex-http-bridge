@@ -12,6 +12,28 @@ import tempfile
 SID_PATTERN = re.compile(r"S-1-\d+(?:-\d+)+")
 
 
+def system_tool(name: str) -> str:
+    """Resolve selected Windows utilities via the OS, never the working directory."""
+    if name not in ("whoami", "icacls", "netstat"):
+        raise ValueError("Unsupported Windows system utility")
+    if os.name != "nt":
+        raise RuntimeError("Windows system utilities are unavailable")
+    import ctypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    function = kernel.GetSystemDirectoryW
+    function.argtypes = (ctypes.c_wchar_p, ctypes.c_uint)
+    function.restype = ctypes.c_uint
+    size = 32768
+    buffer = ctypes.create_unicode_buffer(size)
+    length = function(buffer, size)
+    if length == 0 or length >= size:
+        raise RuntimeError("Could not resolve the Windows system directory")
+    directory = Path(buffer.value)
+    if not directory.is_absolute():
+        raise RuntimeError("Windows system directory is not absolute")
+    return str(directory / (name + ".exe"))
+
+
 def same_identity(ace_sid: str, user_sid: str) -> bool:
     # Windows SDDL shortens the built-in local Administrator account's -500 SID.
     return ace_sid == user_sid or (ace_sid == "LA" and user_sid.endswith("-500"))
@@ -19,7 +41,7 @@ def same_identity(ace_sid: str, user_sid: str) -> bool:
 
 def current_user_sid() -> str:
     try:
-        result = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"],
+        result = subprocess.run([system_tool("whoami"), "/user", "/fo", "csv", "/nh"],
                                 capture_output=True, check=True)
     except (OSError, subprocess.SubprocessError) as error:
         raise RuntimeError("Could not identify the current Windows user") from error
@@ -31,7 +53,7 @@ def current_user_sid() -> str:
 
 def run_icacls(*arguments: str) -> None:
     try:
-        subprocess.run(["icacls", *arguments], capture_output=True, check=True, timeout=30)
+        subprocess.run([system_tool("icacls"), *arguments], capture_output=True, check=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as error:
         detail = ""
         if os.environ.get("CLAUDE_CODEX_DEBUG_ACL") == "1" and isinstance(error, subprocess.CalledProcessError):

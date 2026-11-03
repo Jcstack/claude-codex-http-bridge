@@ -109,7 +109,9 @@ def windows_listener_pids(output: str, port: int) -> set[int]:
 
 def listener_pids(port: int) -> set[int]:
     if platform.system() == "Windows":
-        output = subprocess.check_output(["netstat", "-ano", "-p", "tcp"], text=True, errors="replace")
+        import windows_acl
+        output = subprocess.check_output([windows_acl.system_tool("netstat"), "-ano", "-p", "tcp"],
+                                         text=True, errors="replace")
         return windows_listener_pids(output, port)
     if shutil.which("lsof") is None:
         raise RuntimeError("lsof is required to verify the local proxy listener")
