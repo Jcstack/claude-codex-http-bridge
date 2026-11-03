@@ -110,6 +110,28 @@ older monitor already in memory does not gain the ledger or identity checks
 until it is safely replaced. An absent ledger or missing protocol in `status`
 therefore does not prove that the running monitor uses the new behavior.
 
+## In-memory source experiment
+
+The separate [memory bootstrap fixture](quota_memory_fixture.py) explores one
+part of a future handoff. It checks a caller-supplied source manifest, copies
+the reviewed bytes into a bounded frame, and passes that frame through an
+inherited unlinked file descriptor to a temporary owned child. The isolated
+child checks the frame digest and individual file hashes and loads the listed
+Python modules from memory. Synthetic local tests replace source files and a
+published snapshot after capture, corrupt a frame, and try an unlisted local
+import. A separate synthetic case runs the actual recovery function against
+fake account, usage and reset services, with a shortened polling/quiet interval
+and a stub account lock. It demonstrates a recovery path in the fixture, not
+real upstream behavior or concurrent lock correctness. The tests do not use
+account credentials or signal an existing watcher.
+
+This is not a production launcher or OS sandbox. It trusts the manifest, parent
+code, interpreter and standard library; it does not prove protection against
+same-user manipulation of the parent or child process, complete dependency
+coverage, signal-safe identity, actual quota recovery, or Windows handoff.
+The experiment remains separate from the fixture-only handoff coordinator and
+is not installed or used by the running service.
+
 ## Verification
 
 The installed Astra route initially returned a local cooldown of about 5.8 days
