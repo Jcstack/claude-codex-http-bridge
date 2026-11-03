@@ -33,7 +33,7 @@ jobs:
       - name: Check synthetic quota RPC, private helpers and account controls
         env:
           BRIDGE_REQUIRE_QUOTA_TLS_FIXTURE: '1'
-        run: python -m unittest tests.test_usage_environment tests.test_model_helper_environment tests.test_launcher_python_environment tests.test_windows_system_tools tests.test_usage_account_identity tests.test_quota_probe_ledger tests.test_macos_quota_handoff tests.test_quota_snapshot_fixture tests.test_quota_memory_fixture tests.test_quota_exec_lock_fixture tests.test_account_transport tests.test_quota_manual_proxy tests.test_cache_observation tests.test_accounts tests.test_quota_recovery tests.test_bridge -v
+        run: python -m unittest tests.test_usage_environment tests.test_usage_cache tests.test_model_helper_environment tests.test_launcher_python_environment tests.test_windows_system_tools tests.test_usage_account_identity tests.test_quota_probe_ledger tests.test_macos_quota_handoff tests.test_quota_snapshot_fixture tests.test_quota_memory_fixture tests.test_quota_exec_lock_fixture tests.test_account_transport tests.test_quota_manual_proxy tests.test_cache_observation tests.test_accounts tests.test_quota_recovery tests.test_bridge -v
       - name: Check the synthetic OpenSSL fallback
         if: runner.os == 'macOS'
         env:

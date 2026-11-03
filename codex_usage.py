@@ -284,11 +284,27 @@ def read_cache(path: Path, root: Path = ROOT) -> dict | None:
     if value is None:
         return None
     fetched = value.get("fetched_at")
-    if (type(fetched) not in (int, float) or not 0 <= time.time() - fetched < CACHE_SECONDS or
+    now = time.time()
+    if (type(fetched) not in (int, float) or not 0 <= now - fetched < CACHE_SECONDS or
             value.get("account_fingerprint") != identity):
         return None
     windows = value.get("windows")
-    return windows if isinstance(windows, dict) else None
+    if not isinstance(windows, dict):
+        return None
+    # A snapshot can remain fresh after an individual window has reset. Never
+    # display that window's old usage as current; retain other valid windows.
+    # Keep the snapshot's normal refresh schedule to avoid repeated network
+    # requests if a provider continues reporting an already-expired reset.
+    usable = {}
+    for name in WINDOW_NAMES.values():
+        row = windows.get(name)
+        if not isinstance(row, dict):
+            continue
+        percent, reset = row.get("used_percentage"), row.get("resets_at")
+        if (type(percent) in (int, float) and 0 <= percent <= 100 and
+                type(reset) is int and reset > now):
+            usable[name] = {"used_percentage": percent, "resets_at": reset}
+    return usable
 
 
 def refresh_cache(path: Path, root: Path = ROOT) -> bool:
