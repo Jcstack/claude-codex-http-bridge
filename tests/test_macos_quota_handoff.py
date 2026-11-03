@@ -6,6 +6,7 @@ starting a successor, and recovery from handoff failures need separate work.
 
 import ctypes
 import errno
+import json
 import os
 from pathlib import Path
 import select
@@ -160,13 +161,18 @@ while time.monotonic()<deadline:
     with quota_recovery.monitor_lock(root/'runtime-quota') as acquired:
         if acquired:
             print('monitor-acquired',flush=True)
-            with accounts.switch_lock(root,wait_seconds=5):
-                print('account-acquired',flush=True)
-            sys.stdin.readline()
             break
     time.sleep(.05)
 else:
     raise RuntimeError('Synthetic monitor lock timeout')
+with accounts.switch_lock(root,wait_seconds=5):
+    print('account-acquired',flush=True)
+states=iter([{'fixture':True},None])
+quota_recovery.launcher.read_state=lambda _root:next(states)
+quota_recovery.launcher.state_is_live=lambda _root,_state:True
+quota_recovery.recover_once=lambda _root,attempts:{'status':'no_stale_credential_quota'}
+assert quota_recovery.watch(root,wait=lambda _seconds:None)==0
+print('watch-finished',flush=True)
 '''
         old = self.start(old_code, SOURCE, self.root)
         self.assertEqual(self.read_line(old), "usage-in-flight")
@@ -190,10 +196,12 @@ else:
             self.assertEqual(self.read_line(successor), "monitor-acquired")
             self.assertIsNone(sentinel.poll())
         self.assertEqual(self.read_line(successor), "account-acquired")
-        successor.stdin.write(b"done\n")
-        successor.stdin.flush()
+        self.assertEqual(self.read_line(successor), "watch-finished")
         self.assertEqual(successor.wait(timeout=5), 0)
         self.assertIsNone(sentinel.poll())
+        status = json.loads((self.root / "runtime-quota" / "status.json").read_text())
+        self.assertEqual((status["status"], status["monitor_protocol"]), ("no_stale_credential_quota", 2))
+        self.assertTrue((self.root / "runtime-quota" / "probe-ledger.json").is_file())
 
     def test_exec_changes_generation_and_old_audit_token_cannot_signal_new_image(self):
         code = r'''

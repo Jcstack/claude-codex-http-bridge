@@ -310,7 +310,9 @@ observed a wrong generation rejected, including after same-PID `exec`, and a
 matching signal reaching only the owned target. It also held the account lock
 during a fake usage operation, then released it before signaling the owned
 monitor and allowing a synthetic successor to acquire its locks. The sentinel
-survived. This is not proof of actual PID reuse or a safe live migration. Before
+survived. The successor then initialized the actual watcher against a fake
+runtime and recovery result, producing a protocol-2 report and a ledger. This
+is not proof of actual PID reuse or a safe live migration. Before
 any real handoff we must independently establish that the intended monitor owns
 the lock, bind all identity checks to its generation, ensure a successor is
 ready, and test failure and rollback paths. The private metadata ABI and other
