@@ -82,6 +82,23 @@ Workspace proxy settings and API keys are not inherited by the helper. It uses
 the existing origin refresh owner; no second refresh owner is created. The
 ordinary `usage` and `diagnostics` commands remain read-only.
 
+The installed recovery implementation requests the fixed usage endpoint over
+direct, certificate-verified HTTPS; it does not use an environment or system
+HTTP proxy and does not follow redirects. This policy also applies to the
+on-demand recovery command. Transparent operating-system or network routing
+is outside this application's control. If the origin can infer through a proxy
+but direct HTTPS to the usage endpoint is blocked, the local quota gate cannot
+be safely reconciled by this check. `check_unavailable` does not establish
+that this is the cause: local state, TLS, DNS and other failures are possible.
+A [local transport fixture](tests/test_account_transport.py) uses only fake
+HTTP servers and a synthetic credential: an environment-aware control uses a
+fake proxy, while the account helper goes directly to the fake target, refuses
+a redirect and does not fall back to that proxy after a fake DNS failure. It
+does not test actual TLS, real network policy or the older running monitor.
+Adding an explicitly selected proxy requires separate credential, trust and
+loopback-isolation review; the helper must not silently forward a local
+management key or change from direct to proxied routing.
+
 ## On-demand check
 
 ```text
@@ -148,6 +165,13 @@ the owned signal and handoff test runs only on macOS.
 This does not authorize signaling the real monitor or establish safety for an
 in-flight real quota request.
 
+This is not a production launcher or OS sandbox. It trusts the manifest, parent
+code, interpreter and standard library; it does not prove protection against
+same-user manipulation of the parent or child process, complete dependency
+coverage, signal-safe identity, actual quota recovery, or Windows handoff.
+The experiment remains separate from the fixture-only handoff coordinator and
+is not installed or used by the running service.
+
 ## Cooperative exec observation
 
 The isolated [exec-lock fixture](tests/test_quota_exec_lock_fixture.py) explores
@@ -170,19 +194,14 @@ Two further local controls distinguish failure modes: when a synthetic
 holding its lock; when the replacement crashes after a successful exec, the
 contender acquires the released lock. Recovery from a crash therefore still
 needs a separate verified monitor and durable probe-throttling policy.
+The controls passed on macOS and Linux in the [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41653951055);
+the POSIX fixture was skipped on Windows.
 
 This fixture does not implement an updater, authenticate a source manifest,
 drain an in-flight account operation, handle process crashes, or preserve a
 lock on Windows. It cannot upgrade the current legacy watcher, which has no
 cooperative self-exec protocol. It is not installed or connected to the
 running service.
-
-This is not a production launcher or OS sandbox. It trusts the manifest, parent
-code, interpreter and standard library; it does not prove protection against
-same-user manipulation of the parent or child process, complete dependency
-coverage, signal-safe identity, actual quota recovery, or Windows handoff.
-The experiment remains separate from the fixture-only handoff coordinator and
-is not installed or used by the running service.
 
 ## Verification
 
