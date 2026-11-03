@@ -78,6 +78,7 @@
 !tests/native_caller_policy_fixture.go
 !tests/native_toolset_contract_fixture.go
 !tests/native_browser_state_fixture.go
+!tests/native_antigravity_lazy_fixture.go
 !tests/tool_contract_benchmark.go
 !tests/fake_quota_codex.go
 !tests/native_gateway_names_fixture.go
@@ -117,6 +118,7 @@
 !upstream/patches/tool-contract-guard-candidate.patch
 !upstream/patches/caller-policy-guard-candidate.patch
 !upstream/patches/browser-state-candidate.patch
+!upstream/patches/antigravity-lazy-candidate.patch
 !upstream/patches/claude-hud-v0.15-git-safety.patch
 !upstream/patches/claude-hud-v0.15-bun-node-fallback.patch
 !upstream/patches/claude-hud-v0.15-windows-fixture.patch
@@ -133,6 +135,7 @@
 !.github/workflows/mcp-dynamic-observation.yml
 !.github/workflows/mcp-definition-gate.yml
 !.github/workflows/session-metadata-gate.yml
+!.github/workflows/antigravity-lazy-observation.yml
 !.github/workflows/ws-keepalive-observation.yml
 !.github/workflows/controller-layout-observation.yml
 !.github/workflows/cache-resume-observation.yml

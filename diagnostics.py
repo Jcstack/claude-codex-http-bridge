@@ -140,6 +140,7 @@ def incomplete_stream_shape(line: str) -> str:
 
 def proxy_summary(path: Path, since: datetime) -> dict:
     counts, errors = Counter(), Counter()
+    background_events, background_last = Counter(), {}
     preconnect = Counter()
     preconnect_hosts = {}
     preconnect_requests = {}
@@ -171,6 +172,16 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                                  "seconds": round(seconds, 3), "endpoint": endpoint})
         else:
             lower = line.lower()
+            if "failed to refresh antigravity version" in lower:
+                # This exact upstream log marker is distinct from an inference
+                # request; it still only establishes a log mention. Do not
+                # export the error, URL, request tags, or proxy credentials.
+                timed_out = any(fragment in lower for fragment in
+                                ("timeout", "timed out", "deadline exceeded"))
+                category = ("antigravity_version_refresh_timeout" if timed_out
+                            else "antigravity_version_refresh_other")
+                background_events[category] += 1
+                background_last[category] = at.isoformat()
             if "stream disconnected before completion" in lower or "stream closed before response.completed" in lower:
                 category = "incomplete_native_stream"
                 inband[category] += 1
@@ -243,6 +254,8 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "seconds_after_failure": round(rows[0]["delay"], 3) if unique else None})
     ordered = sorted(latencies)
     return {"completed_http_statuses": dict(counts), "transport_error_mentions": dict(errors),
+            "background_event_mentions": {category: {"mentions": count, "last_at": background_last[category]}
+                                          for category, count in background_events.items()},
             "upstream_preconnection_failures": {category: {
                 "attempt_mentions": count, "tagged_requests": len(preconnect_requests.get(category, set())),
                 "last_at": preconnect_last[category],
@@ -262,7 +275,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "slow_requests": slow[-12:],
             "failed_requests": failed[-12:],
             "coverage": coverage,
-            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error mentions are not retry counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them."}
+            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error and background-event mentions are not retry or inference-failure counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them."}
 
 
 def session_summary(path: Path, since: datetime) -> dict:
@@ -374,7 +387,7 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
                     # its sentinel need not contain any transport-error keyword.
                     # Oversized lines also limit what can be concluded, even if
                     # no recognizable in-window records were seen.
-                    if (any(summary[key] for key in ("completed_http_statuses", "transport_error_mentions",
+                    if (any(summary[key] for key in ("completed_http_statuses", "transport_error_mentions", "background_event_mentions",
                                                      "upstream_preconnection_failures", "stream_failure_mentions"))
                             or summary["coverage"]["oversized_lines"]):
                         detail["backends"].append({"generation_tag": hashlib.sha256(log.parent.name.encode()).hexdigest()[:12],

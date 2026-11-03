@@ -154,6 +154,22 @@ metadata routes, not upstream Internet connectivity or model inference.
 
 The read-only diagnostic report never opens key files or contacts an endpoint. It emits only allowlisted counters, timing, hashed tags and compaction metadata. Origin and translator observations may describe the same request and are not additive. It does not export raw transcripts, error bodies or project paths.
 
+The pinned upstream source starts an Antigravity client-version updater in the
+server's normal startup paths, including without an Antigravity inference
+request. It immediately requests a public version manifest and repeats every
+three hours. The request is constructed without a body or explicitly assigned
+Codex token, prompt, `Authorization` or `Cookie` header; it uses Go's default
+transport and can be affected by proxies, redirects, and network configuration.
+A recipient or intermediary can observe connection metadata. These source
+properties do not prove what a particular failed log record transmitted or
+whether a connection reached its destination. See the exact pinned
+[updater](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/misc/antigravity_version.go)
+and [startup calls](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/cmd/server/main.go).
+The running binaries have not been changed by this investigation. Restricting
+unused-provider traffic must be tested across credential addition, real
+Antigravity version discovery and running-session migration before activation;
+disabling the separate management-panel updater does not disable this updater.
+
 Review updates to the pinned proxy release and its security advisories before changing the version or hashes. Do not enable LAN binding, request body logging, or the management interface without a separate security review.
 
 The separate Claude HUD plugin also needs its own security review. The former

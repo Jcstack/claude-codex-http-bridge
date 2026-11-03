@@ -1,0 +1,29 @@
+--- a/cmd/server/main.go
++++ b/cmd/server/main.go
+@@ -755,7 +755,6 @@
+ 			if standalone {
+ 				// Standalone mode: start an embedded local server and connect TUI client to it.
+ 				managementasset.StartAutoUpdater(context.Background(), configFilePath)
+-				misc.StartAntigravityVersionUpdater(context.Background())
+ 				registry.SetLocalModelCatalogs(localModel)
+ 				hook := tui.NewLogHook(2000)
+ 				hook.SetFormatter(&logging.LogFormatter{})
+@@ -830,7 +829,6 @@
+ 		} else {
+ 			// Start the main proxy service
+ 			managementasset.StartAutoUpdater(context.Background(), configFilePath)
+-			misc.StartAntigravityVersionUpdater(context.Background())
+ 			registry.SetLocalModelCatalogs(localModel)
+ 			cmd.StartServiceWithPluginHost(cfg, configFilePath, password, pluginHost, serverOptions...)
+ 		}
+--- a/internal/misc/antigravity_version.go
++++ b/internal/misc/antigravity_version.go
+@@ -110,6 +110,8 @@
+ // AntigravityLatestVersion returns the cached antigravity version refreshed by StartAntigravityVersionUpdater.
+ // It falls back to antigravityFallbackVersion if the cache is empty or stale.
+ func AntigravityLatestVersion() string {
++	// Start only when Antigravity version information is actually used.
++	StartAntigravityVersionUpdater(context.Background())
+ 	antigravityVersionMu.RLock()
+ 	if cachedAntigravityVersion != "" && time.Now().Before(antigravityVersionExpiry) {
+ 		v := cachedAntigravityVersion

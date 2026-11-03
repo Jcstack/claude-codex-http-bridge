@@ -376,3 +376,37 @@ handoff now uses this publisher, but a controlled same-user test changed the
 snapshot itself during launch and reproduced the unsafe load. This is not a
 complete dependency audit, a power-loss guarantee, same-user tamper resistance,
 or a live migration. The fixture-only restriction remains in place.
+
+## Rust proxy follow-up and background refresh, 2026-11-03
+
+[cliproxy-rs](https://github.com/vayungodara/cliproxy-rs) is an actively
+updated MIT-licensed alternative. On this review date GitHub reported 55 stars,
+two open issues, and a recent v0.4.1 release. Its own
+[catalog issue](https://github.com/vayungodara/cliproxy-rs/issues/252) reports
+missing Codex model metadata including context and service tiers; it describes
+a particular configuration and is not an independent compatibility test of
+this bridge. Its parity and provider behavior need direct, version-pinned
+testing. Neither activity nor star count establishes privacy or makes it a
+drop-in replacement for the current Claude client, plugin, session and account
+workflows. No replacement was installed.
+
+The pinned Go upstream currently starts its Antigravity manifest refresh even
+when the server is used for another provider. The upstream
+[version issue](https://github.com/router-for-me/CLIProxyAPI/issues/6184)
+illustrates why a correct current user agent can matter for an actual
+Antigravity account; it does not validate a particular fix. A lazy or scoped
+refresh is worth testing, but a first request made before an asynchronous
+refresh completes may still use the fallback version. Dynamic account addition,
+removal, redirects and service migration also need tests. See [SECURITY.md](SECURITY.md)
+for the network boundary; no production behavior was changed.
+
+A separate [experimental patch](upstream/patches/antigravity-lazy-candidate.patch)
+starts the existing asynchronous updater on the first call for Antigravity
+version information instead of starting it unconditionally at server startup.
+It is excluded from the selected runtime bundle and is not installed. Its
+isolated observation compares an unchanged binary and candidate in empty homes
+with an HTTP proxy that blocks and counts the manifest connection; a separate
+in-memory Go transport tests concurrent calls and request construction. These
+checks do not sandbox all possible outbound traffic. The candidate can return
+the fallback during its first refresh and does not stop its periodic goroutine
+after provider removal, so it does not yet meet the release goal.

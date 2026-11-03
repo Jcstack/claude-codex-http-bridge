@@ -13,6 +13,28 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_background_refresh_events_are_separate_bounded_and_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            path.write_text(
+                '[2025-12-31T23:59:59Z] [12345678] failed to refresh antigravity version: timeout\n'
+                '[2026-01-02T12:00:00Z] [12345678] failed to refresh antigravity version: timeout https://user:PRIVATE_SECRET@example.invalid/PRIVATE_PATH\n'
+                '[2026-01-02T12:00:01Z] [12345678] failed to refresh antigravity version: context deadline exceeded PRIVATE_SECRET\n'
+                '[2026-01-02T12:00:02Z] [87654321] failed to refresh antigravity version: connection refused PRIVATE_SECRET\n'
+                '[2026-01-02T12:00:03Z] [aabbccdd] upstream execution failed: timeout PRIVATE_SECRET\n'
+                '[2026-01-02T12:00:04Z] [aabbccdd] [info] [gin.go:1] 503 | 2s | 127.0.0.1 | POST "/v1/messages"\n'
+                '[2026-01-02T12:00:05Z] [aabbccdd] [info] [gin.go:1] 200 | 2ms | 127.0.0.1 | GET "/failed to refresh antigravity version?token=PRIVATE_SECRET"\n',
+                encoding="utf-8")
+            report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            self.assertEqual(report["background_event_mentions"], {
+                "antigravity_version_refresh_timeout": {"mentions": 2, "last_at": "2026-01-02T12:00:01+00:00"},
+                "antigravity_version_refresh_other": {"mentions": 1, "last_at": "2026-01-02T12:00:02+00:00"}})
+            self.assertEqual(report["transport_error_mentions"]["timeout"], 2)
+            self.assertEqual(report["completed_http_statuses"], {"503": 1, "200": 1})
+            self.assertEqual([row["endpoint"] for row in report["failed_requests"]], ["/v1/messages"])
+            for private in ("PRIVATE_SECRET", "PRIVATE_PATH", "example.invalid", "12345678", "87654321", str(path)):
+                self.assertNotIn(private, json.dumps(report))
+
     def test_stream_failure_error_shapes_are_allowlisted_and_not_a_cause_claim(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "proxy.log"
@@ -256,6 +278,25 @@ class DiagnosticsTests(unittest.TestCase):
             skipped, = (row for row in backends if not row["current"])
             self.assertEqual(skipped["coverage"]["oversized_lines"], 1)
             for private in ("PRIVATE_SECRET", "aabbccdd", current, oversized, str(root)):
+                self.assertNotIn(private, json.dumps(report))
+
+    def test_managed_background_only_log_is_not_omitted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            generation = "g-" + "a" * 24
+            directory = root / "runtime-managed" / generation
+            directory.mkdir(parents=True)
+            (directory / "proxy.log").write_text(
+                '[2026-01-02T12:00:00Z] failed to refresh antigravity version: connection refused PRIVATE_SECRET\n',
+                encoding="utf-8")
+            with patch.object(rolling_runtime, "state", return_value={"pid": 123, "port": 12345, "current": generation}), \
+                 patch.object(rolling_runtime, "private_key", side_effect=AssertionError("must not read keys")), \
+                 patch.object(launcher, "listener_pids", return_value={123}):
+                report = diagnostics.collect(root, "subscription", [], datetime(2026, 1, 1, tzinfo=timezone.utc))
+            backend, = report["managed"]["backends"]
+            self.assertEqual(backend["transport_error_mentions"], {})
+            self.assertEqual(backend["background_event_mentions"]["antigravity_version_refresh_other"]["mentions"], 1)
+            for private in ("PRIVATE_SECRET", generation, str(root)):
                 self.assertNotIn(private, json.dumps(report))
 
     def test_large_blob_does_not_hide_next_metadata_record(self):

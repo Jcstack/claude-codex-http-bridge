@@ -92,6 +92,13 @@ before sharing. It is not automatically saved or committed.
   are not additive. An HTTP 200 can precede an SSE failure; both stream-failure
   mentions in proxy logs and API-error categories in transcripts are retained.
   Neither is automatically a count of distinct failed inference requests.
+- `background_event_mentions` separately recognizes the pinned upstream's
+  Antigravity version-refresh failure marker and groups timeout-shaped and
+  other mentions. It exports only fixed categories, counts and last timestamps;
+  a backend containing only such a marker remains visible. These are log-text
+  observations, not inference-failure counts, proof of a network connection,
+  or a cross-process correlation. General transport mentions can include the
+  same lines, so do not add the categories together.
 - The managed-log filter must retain an incomplete-stream sentinel even when
   no HTTP access record or general transport keyword exists. Oversized lines
   also need visible coverage because their timestamps and content are unknown.
@@ -101,6 +108,16 @@ before sharing. It is not automatically saved or committed.
   Other jobs in that run may still be in progress.
 
 ## Current evidence and next investigation
+
+On 2026-11-03, a read-only four-hour sample of the tracked conversation and
+its children contained no new recorded model responses; it cannot establish a
+current cache hit rate. Separate shared origin and managed-backend logs each
+contained an Antigravity version-refresh timeout marker, at different times.
+Those markers alone do not link either event to the tracked conversation or
+establish two distinct upstream attempts. The pinned source starts that refresh
+independently of inference; its construction and privacy limits are documented
+in [SECURITY.md](SECURITY.md). Avoid using generic timeout counts as model-error
+counts. Existing logs and in-flight requests remain incomplete evidence.
 
 The first complete scan found working cache reads, slow classic compactions
 and separate connection/stream failures. See [CACHE_AUDIT.md](CACHE_AUDIT.md)
