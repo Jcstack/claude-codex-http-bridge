@@ -46,6 +46,16 @@ class UsageCacheTests(unittest.TestCase):
         self.assertIsNone(self.read(None))
         self.assertEqual(self.read(row), row)
 
+    def test_account_change_during_snapshot_read_discards_windows(self):
+        windows = {"five_hour": {"used_percentage": 10, "resets_at": 2000}}
+        snapshot = {"fetched_at": 1000, "account_fingerprint": "before", "windows": windows}
+        for after in ("after", None):
+            with self.subTest(after=after), \
+                 patch.object(codex_usage, "selected_fingerprint", side_effect=["before", after]), \
+                 patch.object(codex_usage, "_private_json", return_value=snapshot), \
+                 patch.object(codex_usage.time, "time", return_value=1010):
+                self.assertIsNone(codex_usage.read_cache(Path("fixture")))
+
     def test_adapter_hides_expired_window_but_retains_fresh_weekly_window(self):
         with tempfile.TemporaryDirectory(prefix="usage-cache-test-") as temporary:
             root = Path(temporary)

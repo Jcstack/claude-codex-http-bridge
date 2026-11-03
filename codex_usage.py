@@ -304,6 +304,11 @@ def read_cache(path: Path, root: Path = ROOT) -> dict | None:
         if (type(percent) in (int, float) and 0 <= percent <= 100 and
                 type(reset) is int and reset > now):
             usable[name] = {"used_percentage": percent, "resets_at": reset}
+    # A switch during the snapshot read must not return the previous account's
+    # windows. This check does not make the subsequent display atomic with a
+    # further account change.
+    if selected_fingerprint(root) != identity:
+        return None
     return usable
 
 
