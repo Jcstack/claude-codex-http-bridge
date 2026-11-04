@@ -93,3 +93,12 @@ IPC are not comprehensively constrained. It is a preparatory fixture, not an
 approved live benchmark, and has no native Windows isolation equivalent yet.
 Run the representative model comparison only after its privacy boundary,
 independent acceptance and effect on active requests are verified.
+
+A separate small subscription-route text check on 2026-11-05 requested
+`gpt-6.1-terra` at `low` through the installed managed endpoint. The synthetic
+stream completed in 2.969 seconds, returned the expected short answer, and the
+translated response carried the requested model label. That label is not
+independent served-model attestation. This single short request used no Claude
+tools and does not establish coding quality, long-context behavior, general
+latency, or access for a different account or future session. Existing sessions
+and services were not restarted.
