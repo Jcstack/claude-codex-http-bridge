@@ -437,3 +437,19 @@ one actual button effect. OSV then identified the initial Pillow pin as affected
 by upstream advisories; the capability lock was upgraded to 13.0.0 and a public-
 lockfile advisory gate added. All 33 pins returned no matching advisories after
 the update. Old immutable environments are not rewritten under live processes.
+
+## Windows configuration observation, 2026-11-04
+
+An isolated Claude 2.1.316 settings-handoff fixture once observed the new TLS
+route after a `ConfigChange` notification while the expected updated
+`UserPromptSubmit` marker was absent. The
+[failing run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41857040571)
+used fake gateways and no account. The prior marker was overwritten by the old
+fixture, so that run cannot distinguish a stale hook from a missing invocation.
+
+The fixture now records only a sequence of synthetic `A`/`B` hook markers.
+[Four repeated handoffs and the full fixture passed](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41858121633),
+as did a full Windows candidate rerun. This does not establish a fix, the
+cause, or whether a real Windows session is affected. Continue testing config
+changes and plugin hooks against future client versions; do not assume that a
+configuration-change notification is a proven atomic hot-update barrier.
