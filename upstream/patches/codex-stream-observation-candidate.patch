@@ -170,7 +170,7 @@ index 00000000..867a99bf
 +	case "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done",
 +		"response.output_text.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_part.added",
 +		"response.function_call_arguments.delta", "response.completed", "response.incomplete", "response.failed",
-+		"error", "codex.rate_limits", "codex.response.metadata", "keepalive", "ping":
++		"error", "codex.rate_limits", "codex.response.metadata", "response.metadata", "keepalive", "ping":
 +		d.last = value.String()
 +	default:
 +		d.last = "other"
@@ -252,7 +252,7 @@ new file mode 100644
 index 00000000..b7f7458a
 --- /dev/null
 +++ b/internal/runtime/executor/codex_stream_observation_test.go
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,244 @@
 +package executor
 +
 +import (
@@ -346,6 +346,7 @@ index 00000000..b7f7458a
 +	}{
 +		{"eof", `data: {"type":"response.created","response":{"id":"fixture"}}` + "\n\n" +
 +			`data: {"type":"response.output_text.delta","delta":"` + observationSecret + `"}` + "\n\n", "eof", "response.output_text.delta", true},
++		{"metadata-eof", `data: {"type":"response.metadata","metadata":{"private":"` + observationSecret + `"}}` + "\n\n", "eof", "response.metadata", true},
 +		{"terminal", `data: {"type":"response.created","response":{"id":"fixture"}}` + "\n\n" +
 +			`data: {"type":"error","error":{"type":"server_error","code":"request_timeout","message":"` + observationSecret + `"}}` + "\n\n", "terminal_event", "error", true},
 +		{"complete", `data: {"type":"response.completed","response":{"id":"fixture","status":"completed","output":[]}}` + "\n\n", "", "", false},
@@ -427,7 +428,7 @@ index 00000000..b7f7458a
 +	logger.AddHook(hook)
 +	d := newCodexStreamObservation()
 +	d.noteRead()
-+	d.observe([]byte(`data: {"type":"response.output_text.delta","delta":"` + observationSecret + `"}`))
++	d.observe([]byte(`data: {"type":"response.metadata","metadata":{"private":"` + observationSecret + `"}}`))
 +	d.lastRead = time.Now().Add(-4 * time.Second)
 +	d.lastEventAt = time.Now().Add(-3 * time.Second)
 +	d.noteRead()
@@ -435,7 +436,7 @@ index 00000000..b7f7458a
 +	d.emit(context.Background(), "stream", "terminal_event", nil)
 +	entries := hook.snapshot()
 +	if len(entries) != 1 || strings.Contains(entries[0].Message, observationSecret) ||
-+		!strings.Contains(entries[0].Message, "last_event=error prior_event=response.output_text.delta") {
++		!strings.Contains(entries[0].Message, "last_event=error prior_event=response.metadata") {
 +		t.Fatal("event history was not limited to fixed categories")
 +	}
 +	if d.eventGapMillis < 2900 || d.eventGapMillis > (24*time.Hour).Milliseconds() ||

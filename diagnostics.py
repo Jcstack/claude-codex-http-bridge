@@ -32,7 +32,7 @@ STREAM_OBSERVATION_EVENTS = frozenset({"none", "other", "response.created", "res
     "response.output_item.added", "response.output_item.done", "response.output_text.delta",
     "response.reasoning_summary_text.delta", "response.reasoning_summary_part.added",
     "response.function_call_arguments.delta", "response.completed", "response.incomplete", "response.failed",
-    "error", "codex.rate_limits", "codex.response.metadata", "keepalive", "ping"})
+    "error", "codex.rate_limits", "codex.response.metadata", "response.metadata", "keepalive", "ping"})
 STREAM_OBSERVATION = re.compile(
     r"codex stream observation: phase=(bootstrap|stream|other) "
     r"outcome=(terminal_event|incomplete_event|read_error|eof|other) "

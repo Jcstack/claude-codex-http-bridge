@@ -25,6 +25,8 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIsNone(old['max_read_gap_ms'])
         self.assertEqual(new['prior_event'], 'response.created')
         self.assertEqual(new['event_gap_ms'], 500)
+        metadata = diagnostics.stream_observation(current.replace('prior_event=response.created', 'prior_event=response.metadata'))
+        self.assertEqual(metadata['prior_event'], 'response.metadata')
         self.assertIsNone(diagnostics.stream_observation(legacy.replace('data_items=', 'prior_event=none data_items=')))
         self.assertIsNone(diagnostics.stream_observation(current.replace('prior_event=response.created ', '')))
         self.assertIsNone(diagnostics.stream_observation(current.replace('prior_event=response.created', 'prior_event=PRIVATE_SECRET')))

@@ -128,6 +128,11 @@ not establish that this specific failure or an overload caused the observed
 incomplete streams. Do not enable buffering or replay partial tool calls on
 that assumption.
 
+The disabled observer candidate recognizes `response.metadata` as an event
+category, while retaining none of its fields or moderation data. A synthetic
+privacy check injects a private marker into that event. Recognition does not
+establish whether this event occurred in any real interrupted request.
+
 ### Response resume is a separate provider capability
 
 The official OpenAI API documents [background response streaming and resuming
