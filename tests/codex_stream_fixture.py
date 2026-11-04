@@ -20,9 +20,11 @@ import launcher
 
 @contextmanager
 def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_prefix: str = "",
-                               upstream_key: str = "fixture-upstream"):
+                               upstream_key: str = "fixture-upstream", managed_policy: bool = False,
+                               local_key: str = "fixture-local"):
     if (type(upstream_port) is not int or not 1 <= upstream_port <= 65535 or not binary.is_file()
-            or upstream_prefix not in ("", "/v1") or upstream_key not in ("fixture-upstream", "fixture-local")):
+            or upstream_prefix not in ("", "/v1") or upstream_key not in ("fixture-upstream", "fixture-local", "a" * 64)
+            or local_key not in ("fixture-local", "a" * 64) or type(managed_policy) is not bool):
         raise ValueError("Invalid synthetic translator fixture")
     with tempfile.TemporaryDirectory(prefix="bridge-codex-stream-fixture-") as temporary:
         root = Path(temporary)
@@ -32,11 +34,14 @@ def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_pre
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         config = root / "config.yaml"
+        policy = ("routing:\n  retry:\n    request-retry: 0\n  cooldown:\n    disable-cooling: true\n"
+                  "    transient-error-cooldown-seconds: -1\n") if managed_policy else ""
         config.write_text(f'''config-version: 8
 server: {{host: "127.0.0.1", port: {port}}}
-access: {{api-keys: ["fixture-local"]}}
+access: {{api-keys: ["{local_key}"]}}
 management: {{allow-remote: false, disable-control-panel: true, disable-auto-update-panel: true}}
 oauth: {{auth-dir: {json.dumps(str(auth))}}}
+{policy}\
 api-keys:
   codex:
     - name: fixture
@@ -60,7 +65,7 @@ api-keys:
                 launcher.wait_for_private_listener(process, port)
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
                 request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/models",
-                                                 headers={"Authorization": "Bearer fixture-local"})
+                                                 headers={"Authorization": "Bearer " + local_key})
                 deadline = time.monotonic() + 12
                 while True:
                     try:
@@ -73,7 +78,7 @@ api-keys:
                     if process.poll() is not None or time.monotonic() >= deadline:
                         raise RuntimeError("Synthetic Codex model did not become ready")
                     time.sleep(.1)
-                yield port, "fixture-local", logfile
+                yield port, local_key, logfile
             finally:
                 if process.poll() is None:
                     process.terminate()

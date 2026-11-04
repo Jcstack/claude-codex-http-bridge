@@ -191,6 +191,7 @@ def main():
     parser.add_argument("--codex-executor", action="store_true", help="Exercise the Codex executor against a fake Responses upstream")
     parser.add_argument("--codex-observation", action="store_true", help="Exercise the opt-in Codex-executor observer")
     parser.add_argument("--codex-origin-binary", type=Path, help="Insert a second owned proxy before the fake upstream")
+    parser.add_argument("--codex-managed-policy", action="store_true", help="Use the actual managed-backend cooldown/retry settings")
     parser.add_argument("--forwarded-incomplete", action="store_true", help="Emit the exact synthetic forwarded incomplete-stream error")
     parser.add_argument("--case", action="append", help="Run only the named synthetic case; may be repeated")
     parser.add_argument("--client-timeout", type=float, default=45, help="Maximum seconds for the disposable client")
@@ -203,6 +204,8 @@ def main():
         parser.error("--forwarded-incomplete requires the Codex executor")
     if args.codex_origin_binary and not (args.codex_observation or args.codex_executor):
         parser.error("--codex-origin-binary requires the Codex executor")
+    if args.codex_managed_policy and not (args.codex_observation or args.codex_executor):
+        parser.error("--codex-managed-policy requires the Codex executor")
     if not 0 < args.client_timeout <= 120:
         parser.error("--client-timeout must be greater than zero and at most 120")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
@@ -285,9 +288,11 @@ else:
                             inner_port, inner_key, _inner_log = stack.enter_context(
                                 temporary_codex_translator(args.codex_origin_binary.resolve(), server.server_port))
                             port, key, proxy_log = stack.enter_context(temporary_codex_translator(
-                                args.proxy_binary.resolve(), inner_port, upstream_prefix="/v1", upstream_key=inner_key))
+                                args.proxy_binary.resolve(), inner_port, upstream_prefix="/v1", upstream_key=inner_key,
+                                managed_policy=args.codex_managed_policy))
                         else:
-                            port, key, proxy_log = stack.enter_context(temporary_codex_translator(args.proxy_binary.resolve(), server.server_port))
+                            port, key, proxy_log = stack.enter_context(temporary_codex_translator(
+                                args.proxy_binary.resolve(), server.server_port, managed_policy=args.codex_managed_policy))
                     else:
                         port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, "gpt-6.1-sol"))
                     env.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_AUTH_TOKEN=key)
@@ -375,7 +380,8 @@ else:
                 server.server_close()
                 thread.join(timeout=2)
     print(json.dumps({"mock_only": True, "through_translator": bool(args.proxy_binary),
-                      "codex_observation": args.codex_observation, "cases": metrics}))
+                      "codex_observation": args.codex_observation, "managed_policy": args.codex_managed_policy,
+                      "two_layers": bool(args.codex_origin_binary), "cases": metrics}))
 
 
 if __name__ == "__main__":

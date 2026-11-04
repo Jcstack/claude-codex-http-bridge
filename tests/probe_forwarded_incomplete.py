@@ -75,7 +75,7 @@ def check(binary, name, mode, error, expected_second, expected_upstream):
             thread.join(timeout=2)
 
 
-def check_two_layers(inner, outer, expect_old, *, stream):
+def check_two_layers(inner, outer, expect_old, *, stream, managed_policy=False):
     with tempfile.TemporaryDirectory(prefix="bridge-two-layer-stream-") as root:
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.requests = []
@@ -89,24 +89,27 @@ def check_two_layers(inner, outer, expect_old, *, stream):
         thread.start()
         try:
             with temporary_codex_translator(inner, server.server_port) as (inner_port, inner_key, _log):
-                with temporary_codex_translator(outer, inner_port, upstream_prefix="/v1", upstream_key=inner_key) as (port, key, _outer_log):
+                with temporary_codex_translator(outer, inner_port, upstream_prefix="/v1", upstream_key=inner_key,
+                                                managed_policy=managed_policy) as (port, key, _outer_log):
                     first, second = send_twice(port, key, server, stream=stream)
             if (first[0] != (200 if stream else 502) or
                     (stream and b"event: error" not in first[1]) or SENTINEL.encode() not in first[1] or first[2] != 1):
                 raise AssertionError("The two-layer fixture did not forward its incomplete stream")
-            if expect_old:
+            should_cool = expect_old and not managed_policy
+            if should_cool:
                 if second[0] != 503 or second[2] != 1:
                     raise AssertionError("The baseline two-layer cooldown did not reproduce")
             elif (second[0] != 200 or (stream and b"event: message_stop" not in second[1]) or
                   (not stream and json.loads(second[1]).get("type") != "message") or second[2] != 2):
                 raise AssertionError("The two-layer candidate did not admit the follow-up")
-            if not expect_old:
+            if not should_cool:
                 if len(server.contracts) != 2 or server.contracts[0] != server.contracts[1]:
                     raise AssertionError("Synthetic request fields changed across the follow-up")
                 if any(server.contracts[0][field] is None for field in ("model", "input", "tools", "prompt_cache_key")):
                     raise AssertionError("The two-layer cache fixture lacked a required field")
-            return {"case": "two-layer-eof" if stream else "two-layer-nonstream", "first_status": first[0], "followup_status": second[0],
-                    "upstream_attempts": second[2], "same_request_fields_preserved": None if expect_old else True}
+            case = ("managed-policy-" if managed_policy else "two-layer-") + ("eof" if stream else "nonstream")
+            return {"case": case, "first_status": first[0], "followup_status": second[0],
+                    "upstream_attempts": second[2], "same_request_fields_preserved": None if should_cool else True}
         finally:
             server.shutdown()
             server.server_close()
@@ -135,8 +138,10 @@ def main():
     ]
     rows = [check(args.proxy_binary.resolve(), *case) for case in cases]
     if args.origin_binary:
-        for stream in (True, False):
-            rows.append(check_two_layers(args.origin_binary.resolve(), args.proxy_binary.resolve(), args.expect_old, stream=stream))
+        for managed_policy in (False, True):
+            for stream in (True, False):
+                rows.append(check_two_layers(args.origin_binary.resolve(), args.proxy_binary.resolve(), args.expect_old,
+                                             stream=stream, managed_policy=managed_policy))
     print(json.dumps({"mock_only": True, "comparison": "baseline" if args.expect_old else "candidate", "cases": rows}))
 
 

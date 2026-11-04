@@ -32,8 +32,17 @@ terminal event, or whether other clients were affected. A logged HTTP 200 is
 not a completed stream. OpenAI documents `response.completed` as the terminal
 completion event in its [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
 
-A separate credential-free reproduction shows a distinct recovery defect in the
-pinned two-layer translator. When the fake origin closes early, the executor's
+A later recurrence had a main-session error and a managed in-stream sentinel
+at the same second. The managed access record and an origin `/v1/responses`
+record ended in that second after approximately 744 and 743 seconds,
+respectively. The preceding recorded session request time was consistent with
+that duration. These are strong timing associations, not shared request IDs or
+proof of which network hop ended the stream. A recorded 301-second origin
+request in the same sample does not establish a universal timeout. The logs do
+not measure the longest period without upstream bytes or model events.
+
+A separate credential-free reproduction shows a distinct recovery defect when
+the pinned two-layer translator uses its default cooldown policy. When the fake origin closes early, the executor's
 locally synthesized failure is request-scoped and a later request can reach the
 origin. When that exact failure is forwarded as a `server_error` /
 `request_timeout` terminal event, the receiving translator loses its scope and
@@ -44,6 +53,15 @@ it preserves the error body and prevents credential cooldown and implicit
 cross-account failover for that failure. It does not resume or replay the
 interrupted stream. Synthetic controls retain quota, authentication, unrelated
 timeout and explicit conflicting-status behavior.
+
+The existing managed backend explicitly disables cooling and sets request
+retry to zero. With those settings, the old binary already allows a follow-up
+after the same synthetic EOF. A further local fixture used the actual generated
+managed configuration, a private TLS ingress, and two owned proxy processes;
+the unmodified backend again admitted the next request. Therefore the earlier
+503 reproduction is **not evidence of a 503 in the user's current managed
+configuration**, and this candidate is not a demonstrated fix for the original
+disconnection. No candidate rollout is being performed for that assumption.
 
 On macOS, a pinned real Claude Code client using only a fake origin completed
 the partial-argument and forwarded `response.failed` cases with one synthetic

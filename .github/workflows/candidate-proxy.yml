@@ -115,6 +115,8 @@ jobs:
           python tests/probe_incomplete_cache_handoff.py "forwarded-baseline-${{ matrix.binary }}" "${{ matrix.binary }}"
           python tests/probe_forwarded_incomplete.py "forwarded-baseline-${{ matrix.binary }}" --expect-old --origin-binary "forwarded-baseline-${{ matrix.binary }}"
           python tests/probe_forwarded_incomplete.py "${{ matrix.binary }}" --origin-binary "forwarded-baseline-${{ matrix.binary }}"
+          python tests/probe_managed_stream_policy.py "forwarded-baseline-${{ matrix.binary }}" "forwarded-baseline-${{ matrix.binary }}" bridge-ingress
+          python tests/probe_managed_stream_policy.py "forwarded-baseline-${{ matrix.binary }}" "${{ matrix.binary }}" bridge-ingress
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
           python tests/probe_toolsearch_cache_batch.py "${{ matrix.binary }}"
           python tests/probe_mcp_alias_gateway.py "${{ matrix.binary }}"
