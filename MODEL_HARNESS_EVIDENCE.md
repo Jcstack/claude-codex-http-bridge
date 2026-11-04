@@ -85,8 +85,10 @@ directory. Seatbelt denies user-home, mounted-volume and common temp reads,
 outside writes and other network ports; Claude is limited to Read/Edit with
 workspace-scoped permissions. Local synthetic checks passed for in-workspace
 Read/Edit, rejected outside Read/Edit, a rejected outside symlink, and a blocked
-second loopback port. No account, actual model inference, production project,
-or running session was used.
+second loopback port. A local unrestricted control also reached the owned
+outside fixture paths and listener, confirming those checks can detect access
+without the tested policy. No account, actual model inference, production
+project, or running session was used.
 
 This is not a complete adversarial sandbox: system-wide paths and non-network
 IPC are not comprehensively constrained. It is a preparatory fixture, not an
@@ -102,8 +104,10 @@ failure. A [diagnostic rerun](https://github.com/Jcstack/claude-codex-http-bridg
 reported exit code 72 and developer-tool categories for both preflights, with
 no observations. The system Python shim therefore failed to start inside the
 policy. The fixture now compiles a minimal preflight before entering Seatbelt;
-the new approach still needs hosted validation. Neither result establishes that
-this boundary is suitable for real model access.
+the [subsequent hosted run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41871305758)
+passed the synthetic client, file and network checks. That hosted run preceded
+the unrestricted negative control, which has passed locally only. These results
+do not establish that the boundary is suitable for real model access.
 
 A separate small subscription-route text check on 2026-11-05 requested
 `gpt-6.1-terra` at `low` through the installed managed endpoint. The synthetic

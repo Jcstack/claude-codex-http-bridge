@@ -148,11 +148,22 @@ def main():
             if compiled.returncode != 0:
                 print(json.dumps({"synthetic_only": True, "preflight_compile_exit_code": compiled.returncode}))
                 raise RuntimeError("Synthetic preflight compilation failed")
+            helper_args = [str(inside), str(outside), str(home_fixture), str(link),
+                           str(home_fixture.parent / "outside-created.txt"), str(blocked.getsockname()[1])]
+            control = subprocess.run([str(helper), *helper_args], cwd=work, env=env,
+                                     capture_output=True, text=True, timeout=10)
             preflight_check = subprocess.run(
-                ["/usr/bin/sandbox-exec", "-p", policy(root, server.server_port, home), str(helper),
-                 str(inside), str(outside), str(home_fixture), str(link),
-                 str(home_fixture.parent / "outside-created.txt"), str(blocked.getsockname()[1])],
+                ["/usr/bin/sandbox-exec", "-p", policy(root, server.server_port, home), str(helper), *helper_args],
                 cwd=work, env=env, capture_output=True, text=True, timeout=10)
+            try:
+                control_observation = json.loads(control.stdout)
+                control_ok = (control.returncode == 0 and isinstance(control_observation, dict) and
+                              type(control_observation.get("other_port_connected")) is bool and
+                              isinstance(control_observation.get("files"), list) and
+                              all(type(value) is bool for value in control_observation["files"]) and control_observation ==
+                              {"files": [True, True, True, True, True], "other_port_connected": True})
+            except (ValueError, TypeError):
+                control_ok = False
             try:
                 observation = json.loads(preflight_check.stdout)
                 if not isinstance(observation, dict) or type(observation.get("other_port_connected")) is not bool:
@@ -180,7 +191,7 @@ def main():
                 success = completed.returncode == 0 and answer.get("is_error") is False
             except (ValueError, AttributeError):
                 success = False
-            checks = {"client_completed": success, "other_port_blocked": denied,
+            checks = {"client_completed": success, "unrestricted_control": control_ok, "other_port_blocked": denied,
                       "file_read_boundary": file_boundary,
                       "outside_read_blocked": server.results.get("outside_read") is True,
                       "outside_edit_blocked": server.results.get("outside_edit") is True,
@@ -200,6 +211,7 @@ def main():
             print(json.dumps({"synthetic_only": True, "checks": checks, "client_exit_code": completed.returncode,
                               "model_requests": server.step,
                               "preflight_exit_code": preflight_check.returncode,
+                              "control_exit_code": control.returncode,
                               "preflight_observations": {"network": network_observation, "files": file_observation},
                               "preflight_error_categories": preflight_categories,
                               "client_error_categories": categories if not all(checks.values()) else []}, sort_keys=True))
