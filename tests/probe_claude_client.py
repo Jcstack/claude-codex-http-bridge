@@ -94,8 +94,8 @@ def main():
         marker = root / "hook-marker"
         settings = root / "settings.json"
         settings.write_text(json.dumps({"modelPicker": {"options": [
-            {"model": model, "label": "Fixture", "behavesAs": "claude-sonnet-5-5"}
-            for model in ("gpt-6.1-sol", "gpt-6.1-terra")], "replaceBuiltInOptions": True},
+            {"model": model, "label": "Fixture", "behavesAs": "claude-opus-5-5" if model.endswith("-astra") else "claude-sonnet-5-5"}
+            for model in ("gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra")], "replaceBuiltInOptions": True},
             "hooks": {"PostToolUse": [{"matcher": "Read", "hooks": [{"type": "command",
                 "command": sys.executable, "args": [str(hook), str(marker)], "timeout": 5}]}]}}), encoding="utf-8")
         server = FixtureServer(("127.0.0.1", 0), Handler)
@@ -131,6 +131,14 @@ def main():
             assert compact and all(r.get("output_config", {}).get("effort") == "max" for r in compact)
             assert all(r["_fixture_headers"]["x-claude-code-request-class"] == "compaction" and
                        r["_fixture_headers"]["x-claude-code-compaction"] == "manual" for r in compact)
+            astra_sid = str(uuid.uuid4())
+            astra_args = ["--model", "gpt-6-astra", "--effort", "xhigh", "--tools", ""]
+            astra_seed = run("Remember FIXTURE_KEY=violet-73.", ["--session-id", astra_sid, *astra_args])
+            astra_compact = run("/compact Preserve the fixture key.", ["--resume", astra_sid, *astra_args])
+            assert astra_seed and astra_compact and all(
+                r.get("model") == "gpt-6-astra" and r.get("output_config", {}).get("effort") == "xhigh" and
+                r["_fixture_headers"]["x-claude-code-request-class"] == "compaction" and
+                r["_fixture_headers"]["x-claude-code-compaction"] == "manual" for r in astra_compact)
             transcripts = list((config / "projects").glob(f"*/{sid}.jsonl"))
             assert len(transcripts) == 1 and '"compact_boundary"' in transcripts[0].read_text(encoding="utf-8")
             resumed = run("Report the fixture key.", ["--resume", sid, "--model", "gpt-6.1-terra", "--effort", "high", "--tools", ""])
@@ -158,7 +166,8 @@ def main():
                               "mock_only": True, "resume_after_compact": "pass", "model_effort_after_resume": "pass",
                               "explicit_read_hook": "pass", "disallowed_write": "pass",
                               "compaction_hint_headers": "pass", "attribution_omitted": "pass",
-                              "compaction_requested_effort": "max", "compaction_requests": len(compact)}))
+                              "compaction_requested_effort": "max", "compaction_requests": len(compact),
+                              "astra_manual_compaction_effort": "xhigh"}))
         finally:
             server.shutdown(); server.server_close(); thread.join(timeout=2)
 

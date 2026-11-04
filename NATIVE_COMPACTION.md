@@ -146,6 +146,12 @@ path does not establish a speedup for an in-window request, and changing summary
 effort needs a representative quality evaluation. The bridge does not silently
 change the normal request or summary effort to follow that policy.
 
+The [credential-free client probe](tests/probe_claude_client.py) also observed
+that Claude Code 2.1.316 sent `xhigh` for a manually requested Astra compaction
+when launched with `--effort xhigh`. This isolates the client's request, not
+provider latency or summary quality, and does not establish the effective
+effort used by a separately running automatic compaction.
+
 The installed translator rollout also preserved a 50.599-second synthetic
 stream (1,608 events) that remained active after cutover. Origin, TLS endpoint,
 local signing key and native Codex login stayed unchanged. Any retired
