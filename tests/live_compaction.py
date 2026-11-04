@@ -29,15 +29,17 @@ UPDATES = {"output_dir": "build/violet", "retry_budget": "4", "schema": "v4", "c
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path); parser.add_argument("--root", required=True, type=Path)
-    parser.add_argument("--efforts", nargs="+", choices=("high", "max"), default=["max", "high"])
+    parser.add_argument("--efforts", nargs="+", choices=("low", "medium", "high", "xhigh", "max"), default=["max", "high"])
     parser.add_argument("--native", action="store_true", help="Test the opt-in native V2 compact adapter")
     parser.add_argument("--model", default="sol")
     parser.add_argument("--recall-model", help="Optionally switch models after each compaction")
     parser.add_argument("--samples", type=int, default=600)
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--stage-timeout", type=int, default=240,
+                        help="Per-stage timeout in seconds; increase explicitly for long contexts")
     args = parser.parse_args()
-    if not 1 <= args.samples <= 18000 or not 1 <= args.repeat <= 3:
-        raise ValueError("Use 1–18000 synthetic samples and 1–3 compact/recall rounds")
+    if not 1 <= args.samples <= 100000 or not 1 <= args.repeat <= 3 or not 1 <= args.stage_timeout <= 86400:
+        raise ValueError("Use 1–100000 synthetic samples, 1–3 rounds and a 1–86400 second stage timeout")
     claude = shutil.which("claude")
     if not claude:
         raise RuntimeError("Claude Code is required")
@@ -47,6 +49,11 @@ def main():
     recall_model = aliases.get(args.recall_model, args.recall_model) if args.recall_model else model
     if any(value not in upstream["models"] or not bridge_models.eligible(upstream["models"][value]) for value in (model, recall_model)):
         raise RuntimeError("Requested models are not eligible in the authenticated catalog")
+    for value in (model, recall_model):
+        supported = {level.get("effort") for level in upstream["models"][value]["supported_reasoning_levels"]
+                     if isinstance(level, dict)}
+        if not set(args.efforts).issubset(supported):
+            raise RuntimeError("An effort is not supported by the requested model's catalog entry")
     observations = "\n".join(f"Historical sample {i:04d}: parser fixture {i % 37} completed; latency bucket {i % 13}; no configuration change."
                              for i in range(args.samples))
     prompt = ("We are maintaining a synthetic offline data-format tool. Remember this authoritative configuration: "
@@ -57,12 +64,18 @@ def main():
     catalog = {value: upstream["models"][value] for value in (model, recall_model)}
     with temporary_translator(args.binary.resolve(), upstream, model, models=catalog) as (port, key):
         for effort in args.efforts:
+            print(json.dumps({"synthetic_fixture": True, "native_requested": args.native,
+                              "model": model, "effort": effort, "samples": args.samples,
+                              "stage_timeout_seconds": args.stage_timeout,
+                              "catalog_auto_compact_window": bridge_models.compact_window(catalog[model])}), flush=True)
             with tempfile.TemporaryDirectory(prefix="bridge-compact-state-") as temporary:
                 root = Path(temporary); work = root / "work"; work.mkdir()
                 cfg = root / "claude-config"; cfg.mkdir(mode=0o700)
                 settings = root / "settings.json"
                 settings.write_text(json.dumps({"modelPicker": {"options": [{"model": value,
-                    "label": "Compaction fixture", "behavesAs": "claude-sonnet-5-5"} for value in catalog], "replaceBuiltInOptions": True}}))
+                    "label": "Compaction fixture", "behavesAs": bridge_models.behaves_as(value)} for value in catalog],
+                    "replaceBuiltInOptions": True}, "modelSettings": {value: {
+                        "autoCompactWindow": bridge_models.compact_window(row)} for value, row in catalog.items()}}))
                 env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "TEMP", "TMP") if k in os.environ}
                 env.update({"CLAUDE_CONFIG_DIR": str(cfg), "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
                             "ANTHROPIC_AUTH_TOKEN": key, "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
@@ -89,9 +102,9 @@ def main():
                     # stdin avoids Windows' command-line length limit for the fixture.
                     command = [*common, "--model", selected, "--session-id" if stage == "seed" else "--resume", sid, "-p"]
                     try:
-                        process = subprocess.run(command, input=text, cwd=work, env=env, capture_output=True, text=True, timeout=240)
+                        process = subprocess.run(command, input=text, cwd=work, env=env, capture_output=True, text=True, timeout=args.stage_timeout)
                     except subprocess.TimeoutExpired:
-                        raise RuntimeError("Synthetic compaction stage exceeded 240 seconds; current user sessions were not touched") from None
+                        raise RuntimeError("Synthetic compaction stage exceeded its timeout; current user sessions were not touched") from None
                     if process.returncode:
                         raise RuntimeError("Synthetic compaction client failed; raw output withheld")
                     result = json.loads(process.stdout)
@@ -112,12 +125,13 @@ def main():
                 compactions = []
                 native_carrier = False
                 for path in (cfg / "projects").glob(f"*/{sid}.jsonl"):
-                    for line in path.open(encoding="utf-8"):
-                        native_carrier |= "codex-native-context-v1:" in line
-                        record = json.loads(line)
-                        if record.get("subtype") == "compact_boundary":
-                            meta = record.get("compactMetadata", {})
-                            compactions.append({k: meta.get(k) for k in ("trigger", "preTokens", "postTokens", "durationMs")})
+                    with path.open(encoding="utf-8") as transcript:
+                        for line in transcript:
+                            native_carrier |= "codex-native-context-v1:" in line
+                            record = json.loads(line)
+                            if record.get("subtype") == "compact_boundary":
+                                meta = record.get("compactMetadata", {})
+                                compactions.append({k: meta.get(k) for k in ("trigger", "preTokens", "postTokens", "durationMs")})
                 correct = sum(isinstance(answer, dict) and answer.get(k) == v for k, v in expected.items())
                 passed = all_recalls_passed and correct == len(expected) and len(compactions) == args.repeat and (not args.native or native_carrier)
                 failed |= not passed

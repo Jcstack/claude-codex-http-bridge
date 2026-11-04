@@ -127,6 +127,25 @@ python tests/live_coding_compaction.py --root /private/installation --model sol 
 These tests do not establish equivalent quality on a 367k-token investigation
 or bounded upstream latency. No current user session was compacted or restarted.
 
+For a later controlled comparison, `tests/live_compaction.py` accepts
+`--model`, `--efforts`, `--samples`, and `--stage-timeout`. Run the same fixture
+with and without `--native`, using the same discovered model and effort. The
+reported provider input and compaction metadata determine the actual size;
+sample counts are not tokens. The fixture's sample cap limits test resource use,
+not a model's context window. Its settings use the current local catalog's
+per-model compaction window, and it fails if an unplanned compact changes the
+expected number of boundaries. A single large synthetic prompt and 12-field
+recall check do not establish fidelity for a long real coding session, images,
+plugins, tool histories, or predictable latency. Each run uses subscription
+quota and may compete with other active tasks; schedule it accordingly.
+
+[Clodex](https://github.com/DeanDiasti/clodex) documents a low-effort policy
+for proxy-generated summaries and optional hierarchical compaction for inputs
+that exceed the routed ceiling. Those are different tradeoffs: its hierarchical
+path does not establish a speedup for an in-window request, and changing summary
+effort needs a representative quality evaluation. The bridge does not silently
+change the normal request or summary effort to follow that policy.
+
 The installed translator rollout also preserved a 50.599-second synthetic
 stream (1,608 events) that remained active after cutover. Origin, TLS endpoint,
 local signing key and native Codex login stayed unchanged. Any retired
