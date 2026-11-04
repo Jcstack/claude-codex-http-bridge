@@ -68,11 +68,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python tests/probe_forwarded_incomplete.py "baseline-${{ matrix.binary }}" --expect-old
-          python tests/probe_forwarded_incomplete.py "fixed-${{ matrix.binary }}"
+          python tests/probe_forwarded_incomplete.py "baseline-${{ matrix.binary }}" --expect-old --origin-binary "baseline-${{ matrix.binary }}"
+          python tests/probe_forwarded_incomplete.py "fixed-${{ matrix.binary }}" --origin-binary "baseline-${{ matrix.binary }}"
       - name: Check real Claude client against a fake Codex upstream
         shell: bash
         run: |
           set -euo pipefail
           python tests/probe_claude_stream_safety.py --proxy-binary "fixed-${{ matrix.binary }}" --codex-executor --forwarded-incomplete --case healthy --case partial_arguments --case failed_partial_arguments --case arguments_done --case tool_item_done --case failed_tool_item_done --client-timeout 45 --file-output
+          python tests/probe_claude_stream_safety.py --proxy-binary "fixed-${{ matrix.binary }}" --codex-executor --codex-origin-binary "baseline-${{ matrix.binary }}" --case eof_partial_arguments --case eof_arguments_done --case eof_tool_item_done --client-timeout 45 --file-output
           python tests/probe_claude_stream_safety.py --proxy-binary "observed-${{ matrix.binary }}" --codex-observation --forwarded-incomplete --case eof_partial_arguments --case failed_partial_arguments --client-timeout 45 --file-output

@@ -16,8 +16,10 @@ import launcher
 
 
 @contextmanager
-def temporary_codex_translator(binary: Path, upstream_port: int):
-    if type(upstream_port) is not int or not 1 <= upstream_port <= 65535 or not binary.is_file():
+def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_prefix: str = "",
+                               upstream_key: str = "fixture-upstream"):
+    if (type(upstream_port) is not int or not 1 <= upstream_port <= 65535 or not binary.is_file()
+            or upstream_prefix not in ("", "/v1") or upstream_key not in ("fixture-upstream", "fixture-local")):
         raise ValueError("Invalid synthetic translator fixture")
     with tempfile.TemporaryDirectory(prefix="bridge-codex-stream-fixture-") as temporary:
         root = Path(temporary)
@@ -35,12 +37,12 @@ oauth: {{auth-dir: {json.dumps(str(auth))}}}
 api-keys:
   codex:
     - name: fixture
-      base-url: "http://127.0.0.1:{upstream_port}"
+      base-url: "http://127.0.0.1:{upstream_port}{upstream_prefix}"
       models:
         - name: "gpt-6.1-sol"
           alias: "gpt-6.1-sol"
       keys:
-        - api-key: "fixture-upstream"
+        - api-key: "{upstream_key}"
 ''', encoding="utf-8")
         config.chmod(0o600)
         environment = isolated_environment(root)

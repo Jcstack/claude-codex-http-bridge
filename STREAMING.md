@@ -48,7 +48,12 @@ timeout and explicit conflicting-status behavior.
 On macOS, a pinned real Claude Code client using only a fake origin completed
 the partial-argument and forwarded `response.failed` cases with one synthetic
 write and a retained tool result. Completed-argument and completed-item cases
-also wrote at most once. This is not an exactly-once guarantee for real tools,
+also wrote at most once. A second fixture connects two separate owned proxy
+processes to a fake origin: the inner proxy synthesizes the missing-completion
+error itself, and the outer baseline reproduces the 503 while the candidate
+admits the next request. The pinned Claude client also completed partial- and
+completed-tool cases through both processes with one synthetic write. This is
+not an exactly-once guarantee for real tools,
 parallel calls, every client version, or Windows. The unmodified and fixed
 proxy are compared by [a standalone fixture](tests/probe_forwarded_incomplete.py).
 The candidate and a separate [metadata-only observer](upstream/patches/codex-stream-observation-candidate.patch)
