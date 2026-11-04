@@ -118,6 +118,13 @@ tools and does not establish coding quality, long-context behavior, general
 latency, or access for a different account or future session. Existing sessions
 and services were not restarted.
 
+Another short synthetic request on the same date requested `gpt-6.1-sol`
+with `xhigh` through the existing managed subscription endpoint. It completed
+with the expected short text and requested model label in 2.999 seconds,
+reporting 306 input and 17 output tokens. It used no Claude tools. The response
+does not independently attest served identity or actual reasoning compute;
+this small request is not comparable to a long-context coding task.
+
 Separately, a synthetic real-client/translator round trip on macOS checked all
 five effort levels for Terra in both CLI and interactive `/effort` use. The
 fake upstream saw the requested level and model; the observed synthetic cache
