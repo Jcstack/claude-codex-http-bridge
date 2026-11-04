@@ -204,6 +204,12 @@ claude-codex diagnostics --hours 24 --session SESSION_UUID
 
 This command makes no network/model call, never reads a key, and never starts/stops a service. It reads local logs and recent main-session metadata, then emits an allowlisted JSON report. No prompts, credentials, project paths or raw session IDs are printed; tags are hashes. Cache counters deduplicate repeated assistant stream blocks by response ID and separate fresh input, reads and writes. The report includes recent failed requests without raw error bodies. Origin and managed backend logs are reported separately; the same inference can appear in both and their counts must not be added. At most the 32 most recent managed backend logs are inspected. Error mentions are not retry counts, in-flight requests are absent, and the last main turn's effort does not establish compaction effort. Commands, subagents and oversized skipped records may not appear in cache totals.
 
+The `tool_unavailable_session_disabled` category recognizes a fixed client
+error shape in paired tool-error results, using at most the configured text
+prefix. It emits neither the tool name nor the error text. It is a text-pattern
+observation rather than proof of cause, tool inventory or current availability;
+unknown formats, unpaired results and truncated text can be missed.
+
 Native media creation, primary/sideband connections and hangup failures now have
 separate endpoint labels. Opaque call/session identifiers and query values are
 replaced or removed. A failed voice-cleanup request is therefore distinguishable

@@ -301,8 +301,8 @@ def error_labels(text: str) -> list[str]:
     return labels or ["unclassified"]
 
 
-def task_stop_error_category(content: object) -> tuple[str, bool]:
-    """Classify only a bounded error shape; never return the error text."""
+def bounded_tool_error_text(content: object) -> tuple[str, bool]:
+    """Keep only a bounded in-memory prefix; callers must not return the text."""
     if isinstance(content, str):
         chunks = [content]
     elif isinstance(content, list):
@@ -319,8 +319,18 @@ def task_stop_error_category(content: object) -> tuple[str, bool]:
             remaining -= min(len(chunk), remaining)
         if truncated:
             break
-    matched = re.search(r"\bowned\b.{0,256}\bagent\b.{0,256}\bcannot stop\b", "".join(text), re.I | re.S)
-    return ("task_stop_ownership_denial" if matched else "task_stop_other_or_unclassified"), truncated
+    return "".join(text), truncated
+
+
+def task_stop_error_category(text: str) -> str:
+    matched = re.search(r"\bowned\b.{0,256}\bagent\b.{0,256}\bcannot stop\b", text, re.I | re.S)
+    return "task_stop_ownership_denial" if matched else "task_stop_other_or_unclassified"
+
+
+def unavailable_session_tool_error(text: str) -> bool:
+    """Match the fixed client error shape without returning the tool name."""
+    return bool(re.search(r"\bNo such tool available:\s*([A-Za-z0-9_.-]{1,128})\.\s+\1 "
+                          r"is still listed for this conversation but is switched off in this session right now\b", text))
 
 
 def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
@@ -433,10 +443,12 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
                         results[label] += 1
                         if part.get("is_error") is True:
                             errors[label] += 1
+                            text, truncated = bounded_tool_error_text(part.get("content"))
+                            if unavailable_session_tool_error(text):
+                                tool_error_categories["tool_unavailable_session_disabled"] += 1
                             if label == "TaskStop":
-                                category, truncated = task_stop_error_category(part.get("content"))
-                                tool_error_categories[category] += 1
-                                coverage["tool_error_text_truncated"] += int(truncated)
+                                tool_error_categories[task_stop_error_category(text)] += 1
+                            coverage["tool_error_text_truncated"] += int(truncated)
     except (OSError, ValueError, OverflowError):
         coverage["read_failed"] = True
     seconds = [item["seconds"] for item in compactions if item["seconds"] is not None]

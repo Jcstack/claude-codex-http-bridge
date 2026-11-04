@@ -58,6 +58,19 @@ The objective is to make the **same Codex model** perform better in Claude Code 
 
 Claude Code's “Bug report drafted” notices are local feedback drafts, not evidence that Anthropic received a report or that the bridge caused the issue. On this machine, the PDF draft named `WebFetch PDF extraction`; a different draft named `test fixtures` and recorded invalid synthetic data that the model later corrected. Keep these failure classes separate when improving the bridge.
 
+An existing session also returned the client-shaped `SendFeedback` unavailable
+error immediately after a tool request, then continued. Anthropic's open
+[issue #105624](https://github.com/anthropics/claude-code/issues/105624)
+reports the same wording in a desktop session on a different client version;
+it does not establish the cause of this terminal session. In a fresh,
+restricted Claude 2.1.316 session against a fake Messages endpoint,
+`SendFeedback` was absent from the top-level tool list; no tool call was made.
+That isolated observation does not reveal what the model saw in the older
+session or prove whether feedback is enabled elsewhere. No feedback is sent,
+and the bridge neither forces the tool on nor removes it globally. Continue
+the task after the error and investigate any repeated tool availability issues
+without rewriting the active transcript.
+
 ## Browser and desktop computer use
 
 Claude Code's own [Chrome extension](https://code.claude.com/docs/en/chrome#prerequisites) requires a direct Anthropic plan and `/login`; its [built-in computer use preview](https://code.claude.com/docs/en/computer-use) requires macOS and a Pro/Max subscription. The local Codex route does not unlock either feature. The [public SIWC flow](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) excludes native Responses computer use. This installation uses a different Codex backend; its native computer tool has not been wired into Claude Code or execution-tested. Do not turn a route-specific restriction into a claim about model intelligence.

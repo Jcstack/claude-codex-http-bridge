@@ -166,6 +166,30 @@ class SessionAuditTests(unittest.TestCase):
             self.assertEqual(report["coverage"]["tool_error_text_truncated"], 1)
             self.assertNotIn("PRIVATE", json.dumps(report))
 
+    def test_disabled_session_tool_error_is_bounded_deduplicated_and_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "PRIVATE_SESSION.jsonl"
+            records = []
+            def pair(tool_id, name, content):
+                records.append({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": tool_id, "name": name, "input": {"PRIVATE": "PRIVATE_SECRET"}}]}})
+                result = {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": tool_id, "is_error": True, "content": content}]}}
+                records.append(result)
+                return result
+            phrase = ("Error: No such tool available: PRIVATE_TOOL. PRIVATE_TOOL is still listed for this conversation "
+                      "but is switched off in this session right now, so it cannot run. PRIVATE_SECRET")
+            duplicate = pair("one", "PRIVATE_TOOL", phrase)
+            records.append(duplicate)
+            pair("two", "Read", [{"type": "text", "text": phrase}])
+            pair("three", "PRIVATE_TOOL", phrase.replace("PRIVATE_TOOL is still", "OTHER_TOOL is still"))
+            pair("four", "PRIVATE_TOOL", "x" * (audit.TOOL_ERROR_TEXT_LIMIT + 1) + phrase)
+            write_records(path, records)
+            report = audit.scan(path, None, audit.Usage())
+            self.assertEqual(report["tool_error_categories"], {"tool_unavailable_session_disabled": 2})
+            self.assertEqual(report["coverage"]["tool_error_text_truncated"], 1)
+            self.assertNotIn("PRIVATE", json.dumps(report))
+
     def test_oversized_corrupt_and_partial_records_have_explicit_coverage(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "log.jsonl"
