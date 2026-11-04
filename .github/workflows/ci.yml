@@ -98,7 +98,9 @@ jobs:
       - name: Check per-model subagent compaction with synthetic usage
         run: python tests/probe_subagent_compaction.py
       - name: Observe main-session automatic compaction effort without an account
+        shell: bash
         run: |
+          set -euo pipefail
           python tests/probe_main_compaction_effort.py --effort xhigh
           python tests/probe_main_compaction_effort.py --effort low
       - name: Verify per-model effort limits with a synthetic gateway

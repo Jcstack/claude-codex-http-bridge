@@ -1,7 +1,7 @@
 """Observe automatic compact effort using an isolated Claude and fake server.
 
-No model inference, user config, account, prompt, or session is used. The
-server advertises synthetic token usage to trigger the client's own compaction.
+No real model inference, user config, account, conversation, or session is
+used. The server advertises synthetic token usage to trigger client compaction.
 """
 
 import argparse
