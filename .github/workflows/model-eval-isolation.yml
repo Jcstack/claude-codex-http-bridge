@@ -1,0 +1,27 @@
+name: model-eval-isolation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the integrity-locked synthetic client
+        run: |
+          npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+          python tests/claude_fixture.py
+      - name: Verify the synthetic model-evaluation boundary
+        run: python tests/probe_model_eval_isolation.py
