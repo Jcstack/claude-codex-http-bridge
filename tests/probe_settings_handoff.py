@@ -4,6 +4,7 @@ No real account, user config, external gateway or installed service is used.
 This is a client-version-specific contract probe, not a live-session migration.
 """
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -268,13 +269,16 @@ def run_case(claude, ingress, mode):
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise RuntimeError("Specify the private fixture bundle")
+    available = ("user_env", "in_flight", "missing_ca", "launch_priority", "launch_file_edit", "restricted")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("bundle", type=Path)
+    parser.add_argument("--case", choices=available, help="Run one synthetic handoff case")
+    args = parser.parse_args()
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
         raise RuntimeError("The locked Claude client is required")
-    ingress = Path(sys.argv[1]) / ("bridge-ingress.exe" if os.name == "nt" else "bridge-ingress")
-    cases = ("user_env", "in_flight", "missing_ca", "launch_priority", "launch_file_edit", "restricted")
+    ingress = args.bundle / ("bridge-ingress.exe" if os.name == "nt" else "bridge-ingress")
+    cases = (args.case,) if args.case else available
     results = []
     for case in cases:
         try:

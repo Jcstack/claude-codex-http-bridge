@@ -48,4 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          for attempt in 1 2 3 4; do
+            python tests/probe_settings_handoff.py runtime-bundle --case user_env
+          done
           python tests/probe_settings_handoff.py runtime-bundle
