@@ -116,6 +116,8 @@ def interactive(claude, settings, work, config, environment, server, model):
         requests_at_start = len(server.bodies)
         for level in LEVELS:
             if process.poll() is not None:
+                print(json.dumps({"synthetic_only": True, "failure_phase": "interactive_client_exited",
+                                  "completed_effort_checks": len(results)}))
                 raise RuntimeError("Synthetic interactive client exited")
             os.write(master, ("/effort " + level + "\r").encode())
             collect(2)
@@ -125,16 +127,19 @@ def interactive(claude, settings, work, config, environment, server, model):
             sent = server.requests[before:]
             results[level] = len(sent) == 1 and sent[0] == {"model": model, "effort": level}
         bodies = server.bodies[requests_at_start:]
-        if len(bodies) != len(LEVELS):
-            raise RuntimeError("Synthetic interactive request count was unexpected")
+        results["request_count_matches"] = len(bodies) == len(LEVELS)
+        if not results["request_count_matches"]:
+            print(json.dumps({"synthetic_only": True, "failure_phase": "interactive_request_count",
+                              "request_count": len(bodies), "expected_count": len(LEVELS),
+                              "effort_checks": dict(results)}))
         keys = [body.get("prompt_cache_key") for body in bodies]
         pairs = list(zip(bodies, bodies[1:]))
         results["cache_key_present_and_stable"] = all(isinstance(key, str) and key for key in keys) and len(set(keys)) == 1
         results["tool_definitions_present_and_stable"] = (
-            isinstance(bodies[0].get("tools"), list) and bool(bodies[0]["tools"])
+            bool(bodies) and isinstance(bodies[0].get("tools"), list) and bool(bodies[0]["tools"])
             and all(before.get("tools") == after.get("tools") for before, after in pairs))
         results["input_items_preserve_structural_prefix"] = (
-            isinstance(bodies[0].get("input"), list) and bool(bodies[0]["input"])
+            bool(bodies) and isinstance(bodies[0].get("input"), list) and bool(bodies[0]["input"])
             and all(isinstance(before.get("input"), list) and isinstance(after.get("input"), list)
                     and after["input"][:len(before["input"])] == before["input"] for before, after in pairs))
         return results
@@ -187,9 +192,13 @@ def main():
                 cli = {}
                 for level in LEVELS:
                     before = len(server.requests)
-                    result = subprocess.run([*client_arguments(claude, settings, model), "--output-format", "json",
-                                             "--effort", level, "-p", "Return the fixture response."],
-                                            cwd=work, env=environment, capture_output=True, text=True, timeout=45)
+                    try:
+                        result = subprocess.run([*client_arguments(claude, settings, model), "--output-format", "json",
+                                                 "--effort", level, "-p", "Return the fixture response."],
+                                                cwd=work, env=environment, capture_output=True, text=True, timeout=45)
+                    except subprocess.TimeoutExpired:
+                        print(json.dumps({"synthetic_only": True, "failure_phase": "cli_timeout", "effort": level}))
+                        raise
                     try:
                         message = json.loads(result.stdout)
                         successful = result.returncode == 0 and not message.get("is_error") and "DONE" in message.get("result", "")

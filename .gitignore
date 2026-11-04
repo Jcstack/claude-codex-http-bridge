@@ -67,6 +67,7 @@
 !windows_acl.py
 !tests/
 !tests/*.py
+!tests/model_eval_preflight.c
 !tests/auth_handoff_fixture.go
 !tests/effort_guard_fixture.go
 !tests/midconversation_effort_fixture.go

@@ -1,6 +1,6 @@
 # Claude Code × Codex capability and reliability plan
 
-Updated 2026-11-04 (Asia/Shanghai). Work is guided by the long-running session and its child-session records. Update the evidence, open problems, and next steps after each phase.
+Updated 2026-11-05 (Asia/Shanghai). Work is guided by the long-running session and its child-session records. Update the evidence, open problems, and next steps after each phase.
 
 ## Goals and boundaries
 
@@ -227,7 +227,7 @@ Acceptance: the model receives actual input, executes authorized tools, and retu
 ## P4: Coding quality and model/harness differences
 
 - [ ] Expand reproducible offline coding tasks to cover multifile changes, debugging, dependency understanding, test repair, long-task continuation, vision, and tool selection.
-- [ ] Investigate the model-evaluation boundary fixture's hosted macOS file and network preflight failures; it passed locally but the initial [hosted run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41867934739) did not expose enough bounded detail to distinguish preflight startup from a boundary failure. Do not use the fixture for real models on that basis.
+- [ ] Validate the model-evaluation boundary fixture's hosted macOS file and network preflight. The initial [hosted run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41867934739) failed; a [diagnostic rerun](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41870101094) showed the system Python shim exited 72 inside Seatbelt before either preflight produced an observation. A compiled helper is pending hosted checks. Do not use the fixture for real models on that basis.
 - [ ] Measure model, harness, adaptation, and caching effects separately using independent acceptance, the same starting point, budgets and tools, and repeated samples. Record the difference between requested model and verifiable actual identity.
 - [ ] Retain the current experiments: small samples passed with both native Codex and Claude Code but do not prove Claude Code is generally superior; code repair after native compaction is also only one passing case.
 - [ ] Add comparisons of GPT, Claude, and other candidates using official and reproducible community results, examining methods, versions, maintenance, and issues. With no authorized access, assess documentation only.

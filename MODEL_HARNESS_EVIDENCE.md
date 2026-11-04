@@ -98,8 +98,12 @@ The first [hosted macOS run](https://github.com/Jcstack/claude-codex-http-bridge
 failed both its network and file preflight checks although the client completed
 the synthetic tool sequence. The local Mac run passed. The initial hosted
 output did not distinguish a preflight startup failure from a boundary
-failure; additional bounded diagnostics are required. Neither result establishes
-that this boundary is suitable for real model access.
+failure. A [diagnostic rerun](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41870101094)
+reported exit code 72 and developer-tool categories for both preflights, with
+no observations. The system Python shim therefore failed to start inside the
+policy. The fixture now compiles a minimal preflight before entering Seatbelt;
+the new approach still needs hosted validation. Neither result establishes that
+this boundary is suitable for real model access.
 
 A separate small subscription-route text check on 2026-11-05 requested
 `gpt-6.1-terra` at `low` through the installed managed endpoint. The synthetic
