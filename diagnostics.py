@@ -28,6 +28,17 @@ ENDPOINTS = {"/v1/messages", "/v1/responses", "/v1/models", "/v1/messages/count_
              "/v1/responses/compact", "/v1/images/generations", "/v1/images/edits",
              "/v1/live", "/v1/live/sessions", "/v1/realtime", "/v1/realtime/calls",
              "/v1/realtime/client_secrets"}
+STREAM_OBSERVATION_EVENTS = frozenset({"none", "other", "response.created", "response.in_progress",
+    "response.output_item.added", "response.output_item.done", "response.output_text.delta",
+    "response.reasoning_summary_text.delta", "response.reasoning_summary_part.added",
+    "response.function_call_arguments.delta", "response.completed", "response.incomplete", "response.failed",
+    "error", "codex.rate_limits", "codex.response.metadata", "keepalive", "ping"})
+STREAM_OBSERVATION = re.compile(
+    r"codex stream observation: phase=(bootstrap|stream|other) "
+    r"outcome=(terminal_event|incomplete_event|read_error|eof|other) "
+    r"last_event=([a-z0-9_.-]{1,64}) data_items=(\d{1,7}) "
+    r"elapsed_ms=(\d{1,8}) since_read_ms=(\d{1,8}) "
+    r"read_error=(none|unexpected_eof|cancelled|timeout|other)$")
 
 
 def endpoint_label(raw: str) -> str:
@@ -138,6 +149,20 @@ def incomplete_stream_shape(line: str) -> str:
     return "other_error_payload"
 
 
+def stream_observation(line: str) -> dict | None:
+    """Read the experimental observer's fixed vocabulary without returning raw input."""
+    match = STREAM_OBSERVATION.search(line.rstrip("\r\n"))
+    if not match:
+        return None
+    phase, outcome, event, items, elapsed, since_read, read_error = match.groups()
+    items, elapsed, since_read = int(items), int(elapsed), int(since_read)
+    if (event not in STREAM_OBSERVATION_EVENTS or items > 1_000_000 or
+            elapsed > 86_400_000 or since_read > 86_400_000):
+        return None
+    return {"phase": phase, "outcome": outcome, "last_event": event, "data_items": items,
+            "elapsed_ms": elapsed, "since_read_ms": since_read, "read_error": read_error}
+
+
 def proxy_summary(path: Path, since: datetime) -> dict:
     counts, errors = Counter(), Counter()
     background_events, background_last = Counter(), {}
@@ -149,6 +174,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     shapes, shape_requests, shape_last = Counter(), {}, {}
     recent_inband = deque(maxlen=12)
     recent_preconnect = deque(maxlen=12)
+    stream_observation_outcomes, recent_stream_observations = Counter(), deque(maxlen=12)
     latencies, slow, failed = [], [], []
     coverage = {}
     for line in lines(path, coverage):
@@ -172,6 +198,11 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                                  "seconds": round(seconds, 3), "endpoint": endpoint})
         else:
             lower = line.lower()
+            observation = stream_observation(line)
+            if observation is not None:
+                stream_observation_outcomes[observation["outcome"]] += 1
+                request = re.match(r'^\[[^]]+\]\s+\[([a-f0-9]{8})\]', line)
+                recent_stream_observations.append((request[1] if request else None, at, observation))
             if "failed to refresh antigravity version" in lower:
                 # This exact upstream log marker is distinct from an inference
                 # request; it still only establishes a log mention. Do not
@@ -214,7 +245,8 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     # a cross-layer or transcript correlation, and 200 does not prove SSE end.
     matches = [[] for _ in recent_inband]
     preconnect_matches = [[] for _ in recent_preconnect]
-    if recent_inband or recent_preconnect:
+    stream_observation_matches = [[] for _ in recent_stream_observations]
+    if recent_inband or recent_preconnect or recent_stream_observations:
         try:
             for line in lines(path):
                 tag = re.match(r'^\[([^]]+)\]\s+\[([a-f0-9]{8})\]', line)
@@ -235,9 +267,15 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                             and len(preconnect_matches[index]) < 2):
                         preconnect_matches[index].append({"http_status": int(row[2]),
                             "seconds": duration(row[3].strip()), "delay": delay})
+                for index, (failure_tag, failure_at, _observation) in enumerate(recent_stream_observations):
+                    if (failure_tag == tag[2] and abs((failure_at - at).total_seconds()) <= 5
+                            and len(stream_observation_matches[index]) < 2):
+                        stream_observation_matches[index].append({"http_status": int(row[2]),
+                            "seconds": duration(row[3].strip())})
         except OSError:
             matches = [[] for _ in recent_inband]
             preconnect_matches = [[] for _ in recent_preconnect]
+            stream_observation_matches = [[] for _ in recent_stream_observations]
     observations = []
     for (failure_tag, at, shape), rows in zip(recent_inband, matches):
         unique = len(rows) == 1
@@ -253,6 +291,13 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "http_status": rows[0]["http_status"] if unique else None,
             "http_seconds": round(rows[0]["seconds"], 3) if unique and rows[0]["seconds"] is not None else None,
             "seconds_after_failure": round(rows[0]["delay"], 3) if unique else None})
+    stream_observations = []
+    for (failure_tag, at, observation), rows in zip(recent_stream_observations, stream_observation_matches):
+        unique = len(rows) == 1
+        stream_observations.append({"at": at.isoformat(), **observation,
+            "same_log_match": "unique" if unique else "ambiguous" if rows else "unmatched" if failure_tag else "untagged",
+            "http_status": rows[0]["http_status"] if unique else None,
+            "http_seconds": round(rows[0]["seconds"], 3) if unique and rows[0]["seconds"] is not None else None})
     ordered = sorted(latencies)
     return {"completed_http_statuses": dict(counts), "transport_error_mentions": dict(errors),
             "background_event_mentions": {category: {"mentions": count, "last_at": background_last[category].isoformat()}
@@ -269,6 +314,8 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                 "mentions": count, "tagged_requests": len(shape_requests.get(category, set())),
                 "last_at": shape_last[category]} for category, count in shapes.items()},
             "recent_stream_failure_http": observations,
+            "stream_termination_observations": {"outcome_mentions": dict(stream_observation_outcomes),
+                                                 "recent": stream_observations},
             "inference_requests": len(ordered),
             "latency_seconds": {"median": round(statistics.median(ordered), 3) if ordered else None,
                                 "p95": round(ordered[math.ceil(len(ordered) * .95) - 1], 3) if ordered else None,
@@ -276,7 +323,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "slow_requests": slow[-12:],
             "failed_requests": failed[-12:],
             "coverage": coverage,
-            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error and background-event mentions are not retry or inference-failure counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them."}
+            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error and background-event mentions are not retry or inference-failure counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them. Since-read time includes downstream processing and is not proof of upstream network silence."}
 
 
 def session_summary(path: Path, since: datetime) -> dict:
@@ -390,6 +437,7 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
                     # no recognizable in-window records were seen.
                     if (any(summary[key] for key in ("completed_http_statuses", "transport_error_mentions", "background_event_mentions",
                                                      "upstream_preconnection_failures", "stream_failure_mentions"))
+                            or summary["stream_termination_observations"]["outcome_mentions"]
                             or summary["coverage"]["oversized_lines"]):
                         detail["backends"].append({"generation_tag": hashlib.sha256(log.parent.name.encode()).hexdigest()[:12],
                                                   "current": log.parent.name == managed["current"], **summary})

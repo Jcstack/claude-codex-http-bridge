@@ -21,6 +21,52 @@ cannot reconstruct a missing upstream terminal event. Their framing, timing,
 error handling, cancellation and interaction with safe retries still need an
 isolated end-to-end test before changing the active runtime.
 
+### Forwarded incomplete-stream failures
+
+In a read-only review of one tracked session and its children on 2026-11-04,
+one main-session incomplete-stream record and one managed-backend error with
+the same sentinel occurred in the same minute. No cross-layer request ID was
+available and the screenshot had no confirmed time. These observations do not
+prove they are the same request, which component caused the original missing
+terminal event, or whether other clients were affected. A logged HTTP 200 is
+not a completed stream. OpenAI documents `response.completed` as the terminal
+completion event in its [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
+
+A separate credential-free reproduction shows a distinct recovery defect in the
+pinned two-layer translator. When the fake origin closes early, the executor's
+locally synthesized failure is request-scoped and a later request can reach the
+origin. When that exact failure is forwarded as a `server_error` /
+`request_timeout` terminal event, the receiving translator loses its scope and
+cools the credential; the next independent request returns 503 without reaching
+the fake origin. The [candidate fix](upstream/patches/forwarded-incomplete-stream-candidate.patch)
+recognizes the exact sentinel, type and code only, with a 502 or 408 status;
+it preserves the error body and prevents credential cooldown and implicit
+cross-account failover for that failure. It does not resume or replay the
+interrupted stream. Synthetic controls retain quota, authentication, unrelated
+timeout and explicit conflicting-status behavior.
+
+On macOS, a pinned real Claude Code client using only a fake origin completed
+the partial-argument and forwarded `response.failed` cases with one synthetic
+write and a retained tool result. Completed-argument and completed-item cases
+also wrote at most once. This is not an exactly-once guarantee for real tools,
+parallel calls, every client version, or Windows. The unmodified and fixed
+proxy are compared by [a standalone fixture](tests/probe_forwarded_incomplete.py).
+The candidate and a separate [metadata-only observer](upstream/patches/codex-stream-observation-candidate.patch)
+are not part of the selected source lock and are not active. The observer is
+disabled by default; if explicitly enabled in a future candidate, it logs only
+allowlisted event/outcome/error categories, bounded timings and a local request
+tag. It is not an upstream network-idle measurement: time since a read can
+include processing and backpressure. A [manual three-platform workflow](.github/workflows/forwarded-stream-observation.yml)
+uses synthetic traffic and no account credentials. Further validation and a
+draining managed-backend handoff are required before any activation.
+
+Community reports such as [CLIProxyAPI issue 6469](https://github.com/router-for-me/CLIProxyAPI/issues/6469)
+show both short and long incomplete streams; they do not establish a universal
+timeout or this installation's cause. The unmerged [diagnostics proposal 6497](https://github.com/router-for-me/CLIProxyAPI/pull/6497)
+is useful background but does not cover every terminal-error path. No
+user-generated prompt, transcript, error body, or credential is needed in the
+observer output.
+
 An initial isolated test of the pinned translator enabled a one-second
 keep-alive against a fake delayed Responses upstream. After the first output,
 the downstream stream included keep-alive comments and finished normally. With

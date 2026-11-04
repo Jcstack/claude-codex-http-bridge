@@ -13,14 +13,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 
 from live_support import temporary_translator
+from codex_stream_fixture import temporary_codex_translator
+from diagnostics import proxy_summary, stream_observation
 
 
 def result_hints(items):
@@ -166,7 +170,8 @@ class Handler(BaseHTTPRequestHandler):
             elif first and self.server.mode.startswith("eof_"):
                 self.connection.shutdown(socket.SHUT_WR)
             elif first and mode not in ("healthy", "denied_target"):
-                error = {"type": "server_error", "code": "request_timeout", "message": "Synthetic incomplete-stream fixture"}
+                error = getattr(self.server, "synthetic_error", {
+                    "type": "server_error", "code": "request_timeout", "message": "Synthetic incomplete-stream fixture"})
                 failure = ({"type": "response.failed", "response": {"status": "failed", "error": error}} if
                            self.server.mode.startswith("failed_") else {"type": "error", "error": error})
                 self.wfile.write(("data: " + json.dumps(failure) + "\n\n").encode())
@@ -178,7 +183,20 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--proxy-binary", type=Path, help="Also exercise the actual Responses-to-Messages translator")
+    parser.add_argument("--codex-executor", action="store_true", help="Exercise the Codex executor against a fake Responses upstream")
+    parser.add_argument("--codex-observation", action="store_true", help="Exercise the opt-in Codex-executor observer")
+    parser.add_argument("--forwarded-incomplete", action="store_true", help="Emit the exact synthetic forwarded incomplete-stream error")
+    parser.add_argument("--case", action="append", help="Run only the named synthetic case; may be repeated")
+    parser.add_argument("--client-timeout", type=float, default=45, help="Maximum seconds for the disposable client")
+    parser.add_argument("--debug-shapes", action="store_true", help="Classify disposable client debug lines on timeout")
+    parser.add_argument("--file-output", action="store_true", help="Collect disposable client output through private files")
     args = parser.parse_args()
+    if (args.codex_observation or args.codex_executor) and args.proxy_binary is None:
+        parser.error("The Codex executor requires --proxy-binary")
+    if args.forwarded_incomplete and not (args.codex_observation or args.codex_executor):
+        parser.error("--forwarded-incomplete requires the Codex executor")
+    if not 0 < args.client_timeout <= 120:
+        parser.error("--client-timeout must be greater than zero and at most 120")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if claude is None:
         raise RuntimeError("Install the pinned Claude fixture before running the safety gate")
@@ -189,6 +207,10 @@ def main():
               "max_item_incomplete", "max_item_incomplete_then_completed", "max_tool_item_done") if args.proxy_binary else
              ("denied_target", "healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop",
               "eof_partial_arguments", "eof_tool_block", "eof_stop_reason", "eof_message_stop"))
+    if args.case:
+        if any(case not in modes for case in args.case):
+            parser.error("Unknown synthetic stream case")
+        modes = tuple(dict.fromkeys(args.case))
     for mode in modes:
         with tempfile.TemporaryDirectory(prefix="bridge-stream-safety-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
             root = Path(temporary)
@@ -222,6 +244,9 @@ else:
             server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             server.requests = []
             server.mode = mode
+            if args.forwarded_incomplete:
+                server.synthetic_error = {"type": "server_error", "code": "request_timeout",
+                    "message": "stream error: stream disconnected before completion: stream closed before response.completed"}
             server.responses = bool(args.proxy_binary)
             server.work = work
             server.target_name = "blocked.txt" if mode == "denied_target" else "owned.txt"
@@ -237,6 +262,9 @@ else:
                 "--model", "gpt-6.1-sol", "--tools", "Write",
                 "--add-dir", work.as_posix(), "--max-turns", "4",
                 "-p", "Write SYNTHETIC to owned.txt exactly once."]
+            debug = root / "client-debug.log"
+            if args.debug_shapes:
+                command.extend(["--debug-file", str(debug)])
             stack = ExitStack()
             try:
                 if args.proxy_binary:
@@ -244,9 +272,44 @@ else:
                             "supported_reasoning_levels": [{"effort": value} for value in ("low", "medium", "high", "xhigh", "max")]}
                     upstream = {"state": {"port": server.server_port}, "key": "synthetic-local-upstream",
                                 "models": {"gpt-6.1-sol": spec}}
-                    port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, "gpt-6.1-sol"))
+                    if args.codex_observation or args.codex_executor:
+                        port, key, proxy_log = stack.enter_context(temporary_codex_translator(args.proxy_binary.resolve(), server.server_port))
+                    else:
+                        port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, "gpt-6.1-sol"))
                     env.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_AUTH_TOKEN=key)
-                result = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, timeout=45)
+                try:
+                    if args.file_output:
+                        with tempfile.TemporaryFile(dir=root) as stdout, tempfile.TemporaryFile(dir=root) as stderr:
+                            completed = subprocess.run(command, cwd=work, env=env, stdout=stdout, stderr=stderr,
+                                                       timeout=args.client_timeout)
+                            stdout.seek(0); stderr.seek(0)
+                            result = SimpleNamespace(returncode=completed.returncode,
+                                stdout=stdout.read(10_000_001).decode("utf-8", errors="replace"),
+                                stderr=stderr.read(10_000_001).decode("utf-8", errors="replace"))
+                            if len(result.stdout) > 10_000_000 or len(result.stderr) > 10_000_000:
+                                raise RuntimeError("Synthetic client output exceeded the fixture limit")
+                    else:
+                        result = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, timeout=args.client_timeout)
+                except subprocess.TimeoutExpired:
+                    detail = {"failed_case": mode, "reason": "client_timeout", "requests": len(server.requests),
+                              "codex_observation": args.codex_observation,
+                              "write_hook_count": len(marker.read_text(encoding="utf-8").splitlines()) if marker.exists() else 0,
+                              "file_exists": (work / "owned.txt").exists()}
+                    if args.codex_observation or args.codex_executor:
+                        rows = [stream_observation(line) for line in proxy_log.read_text(encoding="utf-8", errors="replace").splitlines()]
+                        detail["observation_outcomes"] = [row["outcome"] for row in rows if row is not None]
+                        summary = proxy_summary(proxy_log, datetime.now(timezone.utc) - timedelta(hours=1))
+                        detail["proxy_http_statuses"] = summary["completed_http_statuses"]
+                        detail["proxy_inference_requests"] = summary["inference_requests"]
+                    if args.debug_shapes and debug.is_file():
+                        lines = debug.read_text(encoding="utf-8", errors="replace").lower().splitlines()
+                        detail["debug_categories"] = {name: sum(any(term in line for term in terms) for line in lines)
+                            for name, terms in (("retry", ("retrying", "retry after", "retry in")),
+                                ("api_error", ("api error", "apierror", "api_error", "server_error")),
+                                ("stream", ("stream",)), ("tool", ("tool_use", "tool use")),
+                                ("timeout", ("timed out", "timeout")), ("abort", ("abort", "cancel")))}
+                    print(json.dumps(detail), flush=True)
+                    raise
                 try:
                     final = json.loads(result.stdout)
                 except ValueError:
@@ -272,6 +335,15 @@ else:
                         assert any(request["has_tool_result"] for request in server.requests[1:]), "Continuation lost the committed tool result"
                     else:
                         assert final.get("is_error") is True or result.returncode != 0, "Client termination was ambiguous"
+                    if args.codex_observation:
+                        rows = [line for line in proxy_log.read_text(encoding="utf-8", errors="replace").splitlines()
+                                if "codex stream observation:" in line]
+                        assert all(str(root) not in line and "SYNTHETIC" not in line and "fixture-upstream" not in line
+                                   for line in rows), "Synthetic observation leaked private content"
+                        if mode == "eof_partial_arguments":
+                            assert any("outcome=eof" in line for line in rows), "Synthetic EOF was not observed"
+                        if mode == "failed_partial_arguments":
+                            assert any("outcome=terminal_event" in line for line in rows), "Synthetic terminal error was not observed"
                 except AssertionError as error:
                     # Every assertion string is fixed fixture code, never model output.
                     print(json.dumps({"failed_case": mode, "reason": str(error), "returncode": result.returncode,
@@ -288,7 +360,8 @@ else:
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
-    print(json.dumps({"mock_only": True, "through_translator": bool(args.proxy_binary), "cases": metrics}))
+    print(json.dumps({"mock_only": True, "through_translator": bool(args.proxy_binary),
+                      "codex_observation": args.codex_observation, "cases": metrics}))
 
 
 if __name__ == "__main__":

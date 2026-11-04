@@ -123,6 +123,8 @@
 !upstream/patches/caller-policy-guard-candidate.patch
 !upstream/patches/browser-state-candidate.patch
 !upstream/patches/antigravity-lazy-candidate.patch
+!upstream/patches/codex-stream-observation-candidate.patch
+!upstream/patches/forwarded-incomplete-stream-candidate.patch
 !upstream/patches/claude-hud-v0.15-git-safety.patch
 !upstream/patches/claude-hud-v0.15-bun-node-fallback.patch
 !upstream/patches/claude-hud-v0.15-windows-fixture.patch
@@ -148,3 +150,4 @@
 !.github/workflows/toolset-sdk-inventory.yml
 !.github/workflows/usage-environment-gate.yml
 !.github/workflows/capability-snapshot-gate.yml
+!.github/workflows/forwarded-stream-observation.yml

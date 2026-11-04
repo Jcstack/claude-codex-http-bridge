@@ -13,6 +13,56 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_stream_observer_categories_are_bounded_private_and_paired_only_within_log(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proxy.log"
+            prefix = "codex stream observation: phase=stream outcome=eof last_event=response.output_text.delta "
+            suffix = "data_items=2 elapsed_ms=3000 since_read_ms=1000 read_error=none"
+            path.write_text(
+                f'[2025-12-31 23:59:59] [aabbccdd] {prefix}{suffix}\n'
+                f'[2026-01-02 12:00:00] [aabbccdd] [warn] {prefix}{suffix}\n'
+                '[2026-01-02 12:00:01] [aabbccdd] [info] [gin.go:1] 200 | 3s | 127.0.0.1 | POST "/v1/messages"\n'
+                f'[2026-01-02 12:01:00] [11223344] [warn] {prefix}{suffix}\n'
+                '[2026-01-02 12:01:01] [11223344] [info] [gin.go:1] 200 | 2s | 127.0.0.1 | POST "/v1/messages"\n'
+                '[2026-01-02 12:01:02] [11223344] [info] [gin.go:1] 200 | 3s | 127.0.0.1 | POST "/v1/messages"\n'
+                f'[2026-01-02 12:02:00] [55667788] [warn] {prefix}{suffix}\n'
+                f'[2026-01-02 12:03:00] [warn] {prefix}{suffix}\n'
+                '[2026-01-02 12:04:00] [warn] codex stream observation: phase=stream outcome=terminal_event '
+                'last_event=error data_items=9 elapsed_ms=900 since_read_ms=2 read_error=none\n'
+                '[2026-01-02 12:05:00] [warn] codex stream observation: phase=stream outcome=eof '
+                'last_event=private_secret data_items=9 elapsed_ms=900 since_read_ms=2 read_error=none\n'
+                f'[2026-01-02 12:05:01] [warn] {prefix}{suffix} PRIVATE_SECRET\n'
+                f'[2026-01-02 12:05:02] [warn] {prefix}data_items=1000001 elapsed_ms=3000 since_read_ms=1000 read_error=none\n',
+                encoding="utf-8")
+            report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            observation = report["stream_termination_observations"]
+            self.assertEqual(observation["outcome_mentions"], {"eof": 4, "terminal_event": 1})
+            self.assertEqual([row["same_log_match"] for row in observation["recent"]],
+                             ["unique", "ambiguous", "unmatched", "untagged", "untagged"])
+            self.assertEqual(observation["recent"][0]["http_status"], 200)
+            self.assertEqual(observation["recent"][0]["http_seconds"], 3)
+            self.assertEqual(observation["recent"][-1]["last_event"], "error")
+            for private in ("PRIVATE_SECRET", "private_secret", "aabbccdd", "11223344", "55667788", str(path)):
+                self.assertNotIn(private, json.dumps(report))
+
+    def test_managed_backend_with_only_stream_observation_is_retained(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            generation = "g-" + "a" * 24
+            directory = root / "runtime-managed" / generation
+            directory.mkdir(parents=True)
+            (directory / "proxy.log").write_text(
+                '[2026-01-02 12:00:00] [aabbccdd] [warn] codex stream observation: '
+                'phase=bootstrap outcome=read_error last_event=other data_items=1 '
+                'elapsed_ms=50 since_read_ms=10 read_error=timeout\n', encoding="utf-8")
+            with patch.object(rolling_runtime, "state", return_value={"pid": 123, "port": 12345, "current": generation}), \
+                 patch.object(launcher, "listener_pids", return_value={123}):
+                report = diagnostics.collect(root, "subscription", [], datetime(2026, 1, 1, tzinfo=timezone.utc))
+            self.assertEqual(len(report["managed"]["backends"]), 1)
+            observation = report["managed"]["backends"][0]["stream_termination_observations"]
+            self.assertEqual(observation["outcome_mentions"], {"read_error": 1})
+            self.assertNotIn("aabbccdd", json.dumps(report))
+
     def test_background_refresh_events_are_separate_bounded_and_private(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "proxy.log"

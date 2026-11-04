@@ -1,0 +1,131 @@
+diff --git a/internal/runtime/executor/codex_executor_terminal.go b/internal/runtime/executor/codex_executor_terminal.go
+index bb6d98ba..2b06d7fc 100644
+--- a/internal/runtime/executor/codex_executor_terminal.go
++++ b/internal/runtime/executor/codex_executor_terminal.go
+@@ -31,6 +31,21 @@ func (codexIncompleteStreamError) IsRequestScoped() bool {
+ 	return true
+ }
+ 
++// An intermediary can encode the same locally synthesized incomplete-stream
++// failure as a terminal upstream event. Its scope must survive that hop: the
++// generation already started, and neither credential cooldown nor implicit
++// failover is justified by this exact diagnostic.
++type codexForwardedIncompleteStreamError struct {
++	statusErr
++}
++
++func (codexForwardedIncompleteStreamError) IsRequestScoped() bool { return true }
++
++type codexTerminalFailureError interface {
++	error
++	StatusCode() int
++}
++
+ type codexEmptyIncompleteStreamError struct {
+ 	statusErr
+ }
+@@ -193,19 +208,27 @@ func codexTerminalStreamErrWithCooling(eventData []byte, modelLevelCooling bool)
+ 	return newCodexStatusErrWithCooling(http.StatusBadRequest, body, modelLevelCooling), body, true
+ }
+ 
+-func codexTerminalFailureErr(eventData []byte) (statusErr, []byte, bool) {
++func codexTerminalFailureErr(eventData []byte) (codexTerminalFailureError, []byte, bool) {
+ 	return codexTerminalFailureErrWithCooling(eventData, false)
+ }
+ 
+-func codexTerminalFailureErrWithCooling(eventData []byte, modelLevelCooling bool) (statusErr, []byte, bool) {
++func codexTerminalFailureErrWithCooling(eventData []byte, modelLevelCooling bool) (codexTerminalFailureError, []byte, bool) {
+ 	if streamErr, body, ok := codexTerminalStreamErrWithCooling(eventData, modelLevelCooling); ok {
+ 		return streamErr, body, true
+ 	}
+ 	body, ok := codexTerminalFailureBody(eventData)
+ 	if !ok {
+-		return statusErr{}, nil, false
++		return nil, nil, false
++	}
++	status := codexTerminalFailureStatus(body)
++	streamErr := newCodexStatusErrWithCooling(status, body, modelLevelCooling)
++	if (status == http.StatusBadGateway || status == http.StatusRequestTimeout) &&
++		gjson.GetBytes(body, "error.type").String() == "server_error" &&
++		gjson.GetBytes(body, "error.code").String() == "request_timeout" &&
++		gjson.GetBytes(body, "error.message").String() == codexIncompleteStreamMessage {
++		return codexForwardedIncompleteStreamError{statusErr: streamErr}, body, true
+ 	}
+-	return newCodexStatusErrWithCooling(codexTerminalFailureStatus(body), body, modelLevelCooling), body, true
++	return streamErr, body, true
+ }
+ 
+ func codexTerminalFailureStatus(body []byte) int {
+diff --git a/internal/runtime/executor/codex_forwarded_incomplete_test.go b/internal/runtime/executor/codex_forwarded_incomplete_test.go
+new file mode 100644
+index 00000000..9bbef121
+--- /dev/null
++++ b/internal/runtime/executor/codex_forwarded_incomplete_test.go
+@@ -0,0 +1,67 @@
++package executor
++
++import (
++	"encoding/json"
++	"net/http"
++	"testing"
++)
++
++func TestBridgeForwardedIncompleteStreamScope(t *testing.T) {
++	cases := []struct {
++		name, kind, code, message string
++		status                    int
++		requestScoped             bool
++	}{
++		{"forwarded", "server_error", "request_timeout", codexIncompleteStreamMessage, 0, true},
++		{"explicit timeout", "server_error", "request_timeout", codexIncompleteStreamMessage, http.StatusRequestTimeout, true},
++		{"other message", "server_error", "request_timeout", "different", 0, false},
++		{"message suffix", "server_error", "request_timeout", codexIncompleteStreamMessage + " extra", 0, false},
++		{"other code", "server_error", "different", codexIncompleteStreamMessage, 0, false},
++		{"other type", "api_error", "request_timeout", codexIncompleteStreamMessage, 0, false},
++		{"quota status", "server_error", "request_timeout", codexIncompleteStreamMessage, http.StatusTooManyRequests, false},
++		{"auth status", "server_error", "request_timeout", codexIncompleteStreamMessage, http.StatusUnauthorized, false},
++		{"genuine quota", "rate_limit_error", "usage_limit_reached", "quota reached", http.StatusTooManyRequests, false},
++		{"genuine auth", "authentication_error", "invalid_api_key", "invalid credential", http.StatusUnauthorized, false},
++		{"other upstream outage", "server_error", "unavailable", "outage", http.StatusServiceUnavailable, false},
++	}
++	for _, eventType := range []string{"error", "response.failed"} {
++		for _, tc := range cases {
++			t.Run(eventType+"/"+tc.name, func(t *testing.T) {
++				detail := map[string]any{"type": tc.kind, "code": tc.code, "message": tc.message}
++				if tc.status != 0 {
++					detail["status_code"] = tc.status
++				}
++				event := map[string]any{"type": eventType}
++				if eventType == "error" {
++					event["error"] = detail
++				} else {
++					event["response"] = map[string]any{"error": detail}
++				}
++				payload, err := json.Marshal(event)
++				if err != nil {
++					t.Fatal(err)
++				}
++				failure, body, ok := codexTerminalFailureErrWithCooling(payload, false)
++				if !ok || failure == nil || len(body) == 0 {
++					t.Fatal("missing terminal failure")
++				}
++				requestErr, implements := failure.(interface{ IsRequestScoped() bool })
++				if got := implements && requestErr.IsRequestScoped(); got != tc.requestScoped {
++					t.Fatalf("request-scoped = %t, want %t", got, tc.requestScoped)
++				}
++				if tc.requestScoped {
++					wantStatus := tc.status
++					if wantStatus == 0 {
++						wantStatus = http.StatusBadGateway
++					}
++					if got := failure.StatusCode(); got != wantStatus {
++						t.Fatalf("status = %d, want %d", got, wantStatus)
++					}
++					if failure.Error() != string(body) {
++						t.Fatal("forwarded failure body changed")
++					}
++				}
++			})
++		}
++	}
++}
