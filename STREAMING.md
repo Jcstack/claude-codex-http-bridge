@@ -120,6 +120,14 @@ is useful background but does not cover every terminal-error path. No
 user-generated prompt, transcript, error body, or credential is needed in the
 observer output.
 
+[Issue 6856](https://github.com/router-for-me/CLIProxyAPI/issues/6856)
+describes one distinct bootstrap-buffering failure involving a moderation
+metadata event. Its fix is present in the pinned source and precedes the
+original v8.0.46 release; the feature is disabled by default. The local logs do
+not establish that this specific failure or an overload caused the observed
+incomplete streams. Do not enable buffering or replay partial tool calls on
+that assumption.
+
 ### Response resume is a separate provider capability
 
 The official OpenAI API documents [background response streaming and resuming

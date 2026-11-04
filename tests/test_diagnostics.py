@@ -13,6 +13,84 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_stream_observer_accepts_old_and_new_metadata_without_partial_shapes(self):
+        prefix = ('codex stream observation: phase=stream outcome=eof last_event=response.output_text.delta ')
+        legacy = prefix + 'data_items=2 elapsed_ms=3000 since_read_ms=1000 read_error=none'
+        current = (prefix + 'prior_event=response.created data_items=2 elapsed_ms=3000 since_read_ms=1000 '
+                   'event_gap_ms=500 max_read_gap_ms=800 read_error=none')
+        old = diagnostics.stream_observation(legacy)
+        new = diagnostics.stream_observation(current)
+        self.assertIsNone(old['prior_event'])
+        self.assertIsNone(old['event_gap_ms'])
+        self.assertIsNone(old['max_read_gap_ms'])
+        self.assertEqual(new['prior_event'], 'response.created')
+        self.assertEqual(new['event_gap_ms'], 500)
+        self.assertIsNone(diagnostics.stream_observation(legacy.replace('data_items=', 'prior_event=none data_items=')))
+        self.assertIsNone(diagnostics.stream_observation(current.replace('prior_event=response.created ', '')))
+        self.assertIsNone(diagnostics.stream_observation(current.replace('prior_event=response.created', 'prior_event=PRIVATE_SECRET')))
+
+    def test_cross_layer_stream_timing_is_bounded_ambiguous_and_private(self):
+        since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'PRIVATE_PATH.log'
+            path.write_text(
+                '[2026-01-02T12:00:00Z] [aabbccdd] [info] [gin.go:1] 200 | 78s | PRIVATE_HOST | POST "/v1/responses?key=PRIVATE_SECRET"\n'
+                '[2026-01-02T12:01:00Z] [bbccddee] [info] [gin.go:1] 200 | 50s | PRIVATE_HOST | POST "/v1/responses"\n'
+                '[2026-01-02T12:01:01Z] [ccddee11] [info] [gin.go:1] 502 | 51s | PRIVATE_HOST | POST "/v1/responses"\n'
+                '[2026-01-02T12:02:00Z] [11223344] [info] [gin.go:1] 200 | 80s | PRIVATE_HOST | POST "/v1/responses"\n'
+                '[2026-01-02T12:04:00Z] [11223344] [info] [gin.go:1] 200 | 30s | PRIVATE_HOST | GET "/v1/responses"\n',
+                encoding='utf-8')
+            def failure(at, seconds, match='unique'):
+                return {'at': f'2026-01-02T12:0{at}:00+00:00', 'same_log_match': match,
+                        'http_status': 200, 'http_seconds': seconds}
+            backends = [{'recent_stream_failure_http': [failure(0, 78), failure(1, 50),
+                        failure(2, 60), failure(3, 1, 'ambiguous'), failure(4, 30)]}]
+            report = diagnostics.correlate_stream_endings(path, backends, since)
+            self.assertEqual([r['origin_timing_match'] for r in report['recent']],
+                             ['unique_candidate', 'ambiguous', 'unmatched', 'unavailable', 'unmatched'])
+            self.assertEqual(report['recent'][0]['origin_candidate'],
+                             {'status': 200, 'seconds': 78, 'time_delta_seconds': 0, 'duration_delta_seconds': 0})
+            self.assertIsNone(report['recent'][1]['origin_candidate'])
+            self.assertIsNone(report['recent'][3]['managed_http_status'])
+            self.assertIn('not a cross-layer identity', report['limits'])
+            for private in ('PRIVATE_SECRET', 'PRIVATE_PATH', 'PRIVATE_HOST', 'aabbccdd', 'bbccddee'):
+                self.assertNotIn(private, json.dumps(report))
+
+            bounded = diagnostics.correlate_stream_endings(path,
+                [{'recent_stream_failure_http': [failure(4, 30) for _ in range(20)]}], since)
+            self.assertEqual(len(bounded['recent']), 12)
+            self.assertEqual(bounded['omitted_at_limit'], 8)
+
+    def test_collection_compares_only_owned_log_metadata_without_reading_keys(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            origin = root / 'origin.log'
+            origin.write_text('[2026-01-02T12:00:00Z] [12345678] [info] [gin.go:1] 200 | 78s | '
+                              'PRIVATE_HOST | POST "/v1/responses?key=PRIVATE_SECRET"\n')
+            generation = 'g-' + 'a' * 24
+            directory = root / 'runtime-managed' / generation
+            directory.mkdir(parents=True)
+            (directory / 'proxy.log').write_text(
+                '[2026-01-02T12:00:00Z] [87654321] upstream stream failed: '
+                'stream disconnected before completion PRIVATE_SECRET\n'
+                '[2026-01-02T12:00:00Z] [87654321] [info] [gin.go:1] 200 | 78s | '
+                'PRIVATE_HOST | POST "/v1/messages"\n')
+            with patch.object(launcher, 'read_state', return_value={'pid': 123, 'port': 12345}), \
+                 patch.object(launcher, 'state_paths', return_value=(None, None, None, origin)), \
+                 patch.object(launcher, 'listener_pids', return_value={123}), \
+                 patch.object(rolling_runtime, 'state', return_value={'pid': 123, 'port': 12345, 'current': generation}), \
+                 patch.object(rolling_runtime, 'private_key', side_effect=AssertionError('must not read keys')):
+                report = diagnostics.collect(root, 'subscription', [], datetime(2026, 1, 1, tzinfo=timezone.utc))
+                with patch.object(diagnostics, 'correlate_stream_endings', side_effect=OSError('PRIVATE_SECRET')):
+                    unavailable = diagnostics.collect(root, 'subscription', [], datetime(2026, 1, 1, tzinfo=timezone.utc))
+            row, = report['stream_timing_correlations']['recent']
+            self.assertEqual(row['origin_timing_match'], 'unique_candidate')
+            self.assertEqual(row['origin_candidate']['seconds'], 78)
+            self.assertEqual(unavailable['stream_timing_correlations'], {'metadata_unavailable': True})
+            self.assertEqual(len(unavailable['managed']['backends']), 1)
+            for private in ('PRIVATE_SECRET', 'PRIVATE_HOST', '12345678', '87654321', generation, str(root)):
+                self.assertNotIn(private, json.dumps(report))
+
     def test_stream_observer_categories_are_bounded_private_and_paired_only_within_log(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "proxy.log"

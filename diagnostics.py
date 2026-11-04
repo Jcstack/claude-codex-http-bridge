@@ -36,8 +36,8 @@ STREAM_OBSERVATION_EVENTS = frozenset({"none", "other", "response.created", "res
 STREAM_OBSERVATION = re.compile(
     r"codex stream observation: phase=(bootstrap|stream|other) "
     r"outcome=(terminal_event|incomplete_event|read_error|eof|other) "
-    r"last_event=([a-z0-9_.-]{1,64}) prior_event=([a-z0-9_.-]{1,64}) data_items=(\d{1,7}) "
-    r"elapsed_ms=(\d{1,8}) since_read_ms=(\d{1,8}) event_gap_ms=(\d{1,8}) max_read_gap_ms=(\d{1,8}) "
+    r"last_event=([a-z0-9_.-]{1,64}) (?:prior_event=([a-z0-9_.-]{1,64}) )?data_items=(\d{1,7}) "
+    r"elapsed_ms=(\d{1,8}) since_read_ms=(\d{1,8}) (?:event_gap_ms=(\d{1,8}) max_read_gap_ms=(\d{1,8}) )?"
     r"read_error=(none|unexpected_eof|cancelled|timeout|other)$")
 
 
@@ -155,9 +155,14 @@ def stream_observation(line: str) -> dict | None:
     if not match:
         return None
     phase, outcome, event, prior, items, elapsed, since_read, event_gap, max_read_gap, read_error = match.groups()
-    items, elapsed, since_read, event_gap, max_read_gap = map(int, (items, elapsed, since_read, event_gap, max_read_gap))
-    if (event not in STREAM_OBSERVATION_EVENTS or prior not in STREAM_OBSERVATION_EVENTS or items > 1_000_000 or
-            any(value > 86_400_000 for value in (elapsed, since_read, event_gap, max_read_gap))):
+    items, elapsed, since_read = map(int, (items, elapsed, since_read))
+    if (prior is None) != (event_gap is None):
+        return None
+    event_gap = int(event_gap) if event_gap is not None else None
+    max_read_gap = int(max_read_gap) if max_read_gap is not None else None
+    timings = (elapsed, since_read) + ((event_gap, max_read_gap) if event_gap is not None else ())
+    if (event not in STREAM_OBSERVATION_EVENTS or (prior is not None and prior not in STREAM_OBSERVATION_EVENTS) or
+            items > 1_000_000 or any(value > 86_400_000 for value in timings)):
         return None
     return {"phase": phase, "outcome": outcome, "last_event": event, "prior_event": prior, "data_items": items,
             "elapsed_ms": elapsed, "since_read_ms": since_read, "event_gap_ms": event_gap,
@@ -188,7 +193,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             endpoint = endpoint_label(match[5])
             status = int(match[2])
             counts[str(status)] += 1
-            seconds = duration(match[3].strip())
+            seconds = number(duration(match[3].strip()))
             if status >= 400:
                 failed.append({"at": at.isoformat(), "status": status, "endpoint": endpoint,
                                "seconds": round(seconds, 3) if seconds is not None else None})
@@ -327,6 +332,52 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error and background-event mentions are not retry or inference-failure counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them. Observer timing starts after response headers and includes downstream processing; it does not prove upstream network silence."}
 
 
+def correlate_stream_endings(origin: Path, backends: list[dict], since: datetime) -> dict:
+    """Bound timing comparisons without asserting a cross-layer request identity."""
+    failures = []
+    for backend in backends:
+        for row in backend.get("recent_stream_failure_http", []):
+            at = timestamp(row.get("at"))
+            if at is not None and at >= since:
+                failures.append((at, row))
+    failures.sort(key=lambda item: item[0])
+    omitted = max(0, len(failures) - 12)
+    failures = failures[-12:]
+    candidates = [[] for _ in failures]
+    coverage = {}
+    if failures:
+        for line in lines(origin, coverage):
+            match = GIN.search(line)
+            at = timestamp(match[1]) if match else None
+            if (at is None or at < since or match[4] != "POST" or
+                    endpoint_label(match[5]) != "/v1/responses"):
+                continue
+            seconds = number(duration(match[3].strip()))
+            if seconds is None:
+                continue
+            for index, (failure_at, row) in enumerate(failures):
+                managed_seconds = number(row.get("http_seconds"))
+                if (row.get("same_log_match") == "unique" and managed_seconds is not None and
+                        abs((at - failure_at).total_seconds()) <= 2 and
+                        abs(seconds - managed_seconds) <= 2 and len(candidates[index]) < 2):
+                    candidates[index].append({"status": int(match[2]), "seconds": round(seconds, 3),
+                        "time_delta_seconds": round((at - failure_at).total_seconds(), 3),
+                        "duration_delta_seconds": round(seconds - managed_seconds, 3)})
+    result = []
+    for (at, row), matches in zip(failures, candidates):
+        managed_seconds = number(row.get("http_seconds"))
+        comparable = row.get("same_log_match") == "unique" and managed_seconds is not None
+        status = "unavailable" if not comparable else "unique_candidate" if len(matches) == 1 else "ambiguous" if matches else "unmatched"
+        detail = matches[0] if status == "unique_candidate" else None
+        managed_status = row.get("http_status")
+        managed_status = managed_status if type(managed_status) is int and 100 <= managed_status <= 599 else None
+        result.append({"at": at.isoformat(), "managed_http_status": managed_status if comparable else None,
+                       "managed_http_seconds": managed_seconds if comparable else None,
+                       "origin_timing_match": status, "origin_candidate": detail})
+    return {"recent": result, "omitted_at_limit": omitted, "origin_scan_coverage": coverage,
+            "limits": "Only timestamp and duration are compared; a unique candidate is not a cross-layer identity, proof of SSE completion, or a root-cause diagnosis. Records may refer to the same failure. Oversized lines and in-flight requests may be absent."}
+
+
 def session_summary(path: Path, since: datetime) -> dict:
     compactions, last_request, last_activity = [], None, None
     api_errors = 0
@@ -407,6 +458,7 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
     import launcher
     runtime = root / ("runtime-api" if route == "api" else "runtime")
     state = launcher.read_state(runtime)
+    origin_log = None
     result = {"read_only": True, "since": since.isoformat(), "route": route,
               "service": {"recorded": state is not None}, "sessions": []}
     if state:
@@ -417,6 +469,7 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
         except (OSError, RuntimeError):
             result["service"]["listener_matches_state"] = None
         if log.is_file() and not log.is_symlink() and not log.parent.is_symlink():
+            origin_log = log
             result["proxy"] = proxy_summary(log, since)
     if route == "subscription":
         try:
@@ -443,6 +496,11 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
                         detail["backends"].append({"generation_tag": hashlib.sha256(log.parent.name.encode()).hexdigest()[:12],
                                                   "current": log.parent.name == managed["current"], **summary})
                 result["managed"] = detail
+                if origin_log is not None:
+                    try:
+                        result["stream_timing_correlations"] = correlate_stream_endings(origin_log, detail["backends"], since)
+                    except (OSError, ValueError, OverflowError):
+                        result["stream_timing_correlations"] = {"metadata_unavailable": True}
         except (OSError, RuntimeError, ValueError, ImportError):
             result["managed"] = {"metadata_unavailable": True}
     if not include_sessions:
