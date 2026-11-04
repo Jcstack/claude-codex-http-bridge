@@ -97,6 +97,9 @@ jobs:
         run: python tests/probe_subagent_models.py
       - name: Check per-model subagent compaction with synthetic usage
         run: python tests/probe_subagent_compaction.py
+      - name: Check model-evaluation isolation against a fake Messages server
+        if: runner.os == 'macOS'
+        run: python tests/probe_model_eval_isolation.py
       - name: Observe main-session automatic compaction effort without an account
         shell: bash
         run: |

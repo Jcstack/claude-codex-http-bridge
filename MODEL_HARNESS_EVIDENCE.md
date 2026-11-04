@@ -7,6 +7,27 @@ FrontierCode 2.0 leaders, Coding Agent Index comparison, and Composio Astra
 matrix remain as stated below. FrontierCode's score includes its weighted
 rubric after blocking checks; it is not simply a binary task pass rate.
 
+Rechecked 2026-11-05: the local subscription-proxy catalog also lists
+`gpt-6.1-terra`. The catalog is not a verified entitlement list for every
+selected account. In Artificial Analysis' common Stirrup harness,
+[Terra Max and Astra Max both round to 42% on FrontierCode 2.0](https://artificialanalysis.ai/models/comparisons/gpt-6-1-terra-vs-gpt-6-astra);
+[Sol Max rounds to 41%](https://artificialanalysis.ai/models/comparisons/gpt-6-1-sol-vs-gpt-6-astra).
+This is a weighted benchmark score, not a binary pass rate or proof of parity
+inside Claude Code. On the same comparison pages Astra scores higher than Terra
+on Terminal-Bench 4.0 and the broader Intelligence Index. Treat Terra as a
+coding candidate, not as an established replacement for Astra on every task.
+
+[Endor Labs' 179 scored secure-coding tasks](https://www.endorlabs.com/learn/gpt-6-1-sol-on-codex-astra-level-security-a-third-faster-zero-cheating)
+reported a 7.9-minute median for GPT-6.1 Sol and 11.6 minutes for Astra in
+Codex CLI on Azure, with functional pass rates of 77.7% and 82.1%, respectively.
+The comparison does not use this subscription route or Claude Code. On
+Artificial Analysis' broader Intelligence Index, Astra's reported average time
+per task is lower than Sol's despite Sol's higher output-token speed. These are
+different task sets and measures; neither predicts an individual session's
+latency. [OpenAI's model guide](https://developers.openai.com/api/docs/guides/latest-model)
+positions Astra for maximum capability and Sol 6.1 for a capability/speed
+tradeoff. Do not apply API prices, throughput or limits to a Codex subscription.
+
 | Comparison | What it isolates | Current evidence and limit |
 | --- | --- | --- |
 | Different models, one harness | Mostly model and inference settings | [Artificial Analysis FrontierCode 2.0](https://artificialanalysis.ai/evaluations/frontiercode-2-0) runs 132 private coding tasks three times per model in the same Stirrup harness. Its current Max scores are Opus 5.5 **46.4%**, GPT-6 Astra **42.4%**, GPT-6.1 Sol **40.6%**, and Fable 5.1 with fallback **31.6%** ([comparison table](https://artificialanalysis.ai/models/releases/comparisons/gpt-6-1-sol-vs-claude-fable-5-1)). This supports a model-level gap between Opus and the tested GPT models on that suite; it does not prove a universal ranking or evaluate this bridge. The Claude fallback policy is part of the reported model configuration. |
@@ -31,8 +52,9 @@ The [independent FrontierCode 2.0 setup](https://artificialanalysis.ai/evaluatio
 | Model | Real-repository FrontierCode 2.0 | Terminal-Bench 4.0 | Practical interpretation |
 | --- | ---: | ---: | --- |
 | Claude Opus 5.5 Max | 46.4% | about 59.6% | Target; native Claude Code route avoids an extra translator. [Source](https://artificialanalysis.ai/evaluations/frontiercode-2-0) |
-| GPT-6 Astra Max | 42.4% | about 59% | Closest **generally available non-Claude model on repository work** in this set, but this does not measure GPT through our bridge. [Source](https://artificialanalysis.ai/models/comparisons/gemini-4-carbon-vs-gpt-6-astra) |
-| GPT-6.1 Sol Max | 40.6% | — | Strong lower-cost GPT route; a Claude Code quality lift is unproven. [Source](https://artificialanalysis.ai/evaluations/frontiercode-2-0) |
+| GPT-6 Astra Max | 42.4% | about 59% | Leading GPT on broad reasoning and a strong repository result in this set; this does not measure GPT through our bridge. [Source](https://artificialanalysis.ai/models/comparisons/gemini-4-carbon-vs-gpt-6-astra) |
+| GPT-6.1 Sol Max | about 41% | about 56% | Strong lower-cost GPT route; a Claude Code quality lift is unproven. [Source](https://artificialanalysis.ai/models/comparisons/gpt-6-1-sol-vs-gpt-6-astra) |
+| GPT-6.1 Terra Max | about 42% | about 56% | Near Astra on this repository suite, with a lower broad Intelligence Index score; test task-specific quality and account access. [Source](https://artificialanalysis.ai/models/comparisons/gpt-6-1-terra-vs-gpt-6-astra) |
 | Gemini 4 Carbon High | about 41% | about 65% | Close on these two tasks, but [Google currently restricts access to selected partners](https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-carbon/); not an installable general-user option. [Scores](https://artificialanalysis.ai/models/comparisons/gemini-4-carbon-vs-claude-opus-5-5) |
 | Gemini 4 Argon High | about 26% | about 57% | [Public API exists](https://ai.google.dev/gemini-api/docs/latest-model), but current repository benchmark does not support Opus-level coding. [Scores](https://artificialanalysis.ai/models/comparisons/gemini-4-argon-vs-claude-opus-5-5-xhigh) |
 | Kimi K3.1 Pro | about 25% | **67.2%** | Strong terminal specialist, weaker on merge-quality repository changes. [Independent scores](https://artificialanalysis.ai/models/comparisons/kimi-k3-1-pro-vs-claude-opus-5-5-xhigh); [Kimi officially supports direct Anthropic Messages in Claude Code](https://www.kimi.com/code/docs/en/third-party-tools/claude-code.html), with plan-dependent 256k/1M context and mandatory thinking. |
@@ -53,3 +75,21 @@ Use the same model ID and effort for Codex CLI and `claude-codex`, with the same
 The useful minimum matrix is **Opus 5.5 + Claude Code** (target), **GPT-6 Astra/Sol + Codex** (native harness control), **the same GPT model + Claude Code** (bridge effect), and **Kimi K3.1 Pro + Claude Code** (different model, same harness) when each route is legitimately available. Sample real repository bug fixes, multi-file refactors, terminal/environment work, search/MCP use, and long-context continuation separately. Run from clean disposable worktrees, hide reference fixes, use executable acceptance tests plus blind human patch review, and report each task family rather than only one blended score. Effort labels across providers do not represent equal compute, so compare both a matched latency/quota budget and each model's best practical setting.
 
 Until that matrix is run, “150% capability” and Opus/Fable parity are goals, not measured results.
+
+## Offline model-evaluation boundary, 2026-11-05
+
+The [macOS boundary probe](tests/probe_model_eval_isolation.py) runs a copied
+locked Claude client against a fake loopback Messages endpoint. A private
+`CLAUDE_CODE_TMPDIR` keeps this fixture away from Claude's shared per-user temp
+directory. Seatbelt denies user-home, mounted-volume and common temp reads,
+outside writes and other network ports; Claude is limited to Read/Edit with
+workspace-scoped permissions. Local synthetic checks passed for in-workspace
+Read/Edit, rejected outside Read/Edit, a rejected outside symlink, and a blocked
+second loopback port. No account, actual model inference, production project,
+or running session was used.
+
+This is not a complete adversarial sandbox: system-wide paths and non-network
+IPC are not comprehensively constrained. It is a preparatory fixture, not an
+approved live benchmark, and has no native Windows isolation equivalent yet.
+Run the representative model comparison only after its privacy boundary,
+independent acceptance and effect on active requests are verified.
