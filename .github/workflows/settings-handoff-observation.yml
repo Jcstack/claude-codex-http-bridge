@@ -38,14 +38,14 @@ jobs:
           mkdir runtime-bundle
           cd gateway
           go build -o ../runtime-bundle/bridge-ingress.exe .
-      - name: Recheck synthetic handoff
-        shell: bash
-        run: |
-          set -euo pipefail
-          python tests/probe_settings_handoff.py runtime-bundle
       - name: Observe synthetic main-session compaction efforts
         shell: bash
         run: |
           set -euo pipefail
           python tests/probe_main_compaction_effort.py --effort xhigh
           python tests/probe_main_compaction_effort.py --effort low
+      - name: Recheck synthetic handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_settings_handoff.py runtime-bundle

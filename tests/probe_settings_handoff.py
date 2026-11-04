@@ -138,7 +138,16 @@ def run_case(claude, ingress, mode):
             launch_settings = root / "launch.json"
             marker, changed = root / "prompt-marker", root / "change-marker"
             hook = root / "hook.py"
-            hook.write_text("import pathlib,sys\npathlib.Path(sys.argv[1]).write_text(sys.argv[2])\n", encoding="utf-8")
+            hook.write_text("import pathlib,sys\n"
+                            "with pathlib.Path(sys.argv[1]).open('a',encoding='utf-8') as out:\n"
+                            " out.write(sys.argv[2]+'\\n')\n", encoding="utf-8")
+
+            def check_prompt_hook(expected, message):
+                lines = marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
+                if not lines or lines[-1] != expected:
+                    safe = [value if value in ("A", "B") else "other" for value in lines[-8:]]
+                    print("Synthetic prompt-hook sequence: " + json.dumps(safe), file=sys.stderr)
+                    raise AssertionError(message)
 
             def hook_settings(label):
                 def call(path, value):
@@ -230,13 +239,13 @@ def run_case(claude, ingress, mode):
                 assert succeeded and delta == [0, 1], "Changed user settings did not route the next turn to TLS"
                 assert any("Synthetic first turn" in json.dumps(row.get("messages")) for row in servers[1].requests), \
                     "Synthetic conversation history was not retained"
-                assert marker.read_text() == "B", "Changed user hook did not run"
+                check_prompt_hook("B", "Changed user hook did not run")
             elif mode == "missing_ca":
                 assert not succeeded and delta == [0, 0], "Untrusted synthetic TLS gateway unexpectedly succeeded"
             else:
                 assert succeeded and delta == [1, 0], "Higher-priority or restricted setting unexpectedly changed route"
                 if mode == "launch_priority":
-                    assert marker.read_text() == "B", "User setting change was not otherwise applied"
+                    check_prompt_hook("B", "User setting change was not otherwise applied")
                 if mode == "restricted":
                     assert not marker.exists(), "Restricted mode unexpectedly ran the user hook"
             return {"case": mode, "same_client_alive": True, "next_turn_succeeded": succeeded,
