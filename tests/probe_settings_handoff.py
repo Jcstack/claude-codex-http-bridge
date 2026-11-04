@@ -23,6 +23,25 @@ from claude_fixture import isolated_environment
 
 MODEL = "gpt-6.1-sol"
 
+# These are fixed fixture assertions only. Exception text from the client,
+# filesystem or subprocess must never be copied into public CI output.
+SAFE_ASSERTION_FAILURES = frozenset({
+    "Synthetic CA was unexpectedly trusted",
+    "First synthetic stream did not reach its barrier",
+    "First synthetic turn did not finish",
+    "Synthetic user settings change was not observed",
+    "Synthetic in-flight turn failed after settings changed",
+    "A synthetic gateway received the wrong credential",
+    "Synthetic client unexpectedly exited",
+    "Changed user settings did not route the next turn to TLS",
+    "Synthetic conversation history was not retained",
+    "Changed user hook did not run",
+    "Untrusted synthetic TLS gateway unexpectedly succeeded",
+    "Higher-priority or restricted setting unexpectedly changed route",
+    "User setting change was not otherwise applied",
+    "Restricted mode unexpectedly ran the user hook",
+})
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
@@ -251,7 +270,12 @@ def main():
     for case in cases:
         try:
             results.append(run_case(claude, ingress, case))
-        except (OSError, ValueError, RuntimeError, AssertionError, subprocess.SubprocessError):
+        except AssertionError as error:
+            print("Failed synthetic case: " + case, file=sys.stderr)
+            if str(error) in SAFE_ASSERTION_FAILURES:
+                print("Fixed fixture assertion: " + str(error), file=sys.stderr)
+            raise
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             print("Failed synthetic case: " + case, file=sys.stderr)
             raise
     print(json.dumps({"mock_only": True, "cases": results}))

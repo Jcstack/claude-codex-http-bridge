@@ -1,0 +1,45 @@
+name: settings-handoff-observation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-fixture:
+    runs-on: windows-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install the integrity-locked synthetic client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+          python tests/claude_fixture.py
+      - name: Build the isolated ingress fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir runtime-bundle
+          cd gateway
+          go build -o ../runtime-bundle/bridge-ingress.exe .
+      - name: Recheck synthetic handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_settings_handoff.py runtime-bundle
