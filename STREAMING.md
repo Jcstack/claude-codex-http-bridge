@@ -54,10 +54,15 @@ error itself, and the outer baseline reproduces the 503 while the candidate
 admits the next request for both streaming and non-streaming clients. The pinned
 Claude client also completed partial- and completed-tool cases through both
 processes with one synthetic write. This is not an exactly-once guarantee for
-real tools, parallel calls, every client version, or Windows. The unmodified and fixed
+real tools, every client version, or Windows. In another local two-layer
+fixture, two interleaved synthetic tools each ran once and both results were
+retained across three EOF positions; this does not establish exactly-once
+execution for arbitrary parallel tools or timing. The unmodified and fixed
 proxy are compared by [a standalone fixture](tests/probe_forwarded_incomplete.py).
-The candidate and a separate [metadata-only observer](upstream/patches/codex-stream-observation-candidate.patch)
-are not part of the selected source lock and are not active. The observer is
+The fix is included in the next source-lock candidate for the full proxy gate;
+it is not active in the existing managed backend. The separate
+[metadata-only observer](upstream/patches/codex-stream-observation-candidate.patch)
+is not part of that source lock and is not active. The observer is
 disabled by default; if explicitly enabled in a future candidate, it logs only
 allowlisted event/outcome/error categories, bounded timings and a local request
 tag. It is not an upstream network-idle measurement: time since a read can

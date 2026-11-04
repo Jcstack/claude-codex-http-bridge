@@ -22,6 +22,7 @@ import threading
 import uuid
 
 from live_support import temporary_translator
+from codex_stream_fixture import temporary_codex_translator
 
 
 MODEL = "gpt-6.1-sol"
@@ -219,6 +220,8 @@ def main():
                         help="Probe resuming the interrupted between-effects session")
     parser.add_argument("--incomplete-only", action="store_true",
                         help="Run only the two incomplete-terminal cases")
+    parser.add_argument("--two-layer-eof-origin", type=Path,
+                        help="Run healthy and EOF cases through two owned Codex proxies")
     args = parser.parse_args()
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if not claude:
@@ -228,7 +231,7 @@ def main():
              "cancel_before_items", "cancel_after_both")
     if os.name != "nt":
         modes += ("ctrl_c_before_items", "ctrl_c_after_first_item", "ctrl_c_between_effects", "ctrl_c_after_both")
-    if args.resume_interrupted and args.incomplete_only:
+    if sum(bool(value) for value in (args.resume_interrupted, args.incomplete_only, args.two_layer_eof_origin)) > 1:
         raise RuntimeError("Choose only one focused fixture")
     if args.incomplete_only:
         modes = ("max_before_first", "max_after_first")
@@ -236,6 +239,8 @@ def main():
         if os.name == "nt":
             raise RuntimeError("This terminal Ctrl-C fixture requires POSIX")
         modes = ("ctrl_c_between_effects",)
+    elif args.two_layer_eof_origin:
+        modes = ("healthy", "eof_before_first", "eof_after_first", "eof_after_both")
     metrics = []
     for mode in modes:
         with tempfile.TemporaryDirectory(prefix="bridge-parallel-stream-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
@@ -306,7 +311,13 @@ elif label is not None:
             process = None
             terminal_master = None
             try:
-                port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, MODEL))
+                if args.two_layer_eof_origin:
+                    inner_port, inner_key, _inner_log = stack.enter_context(
+                        temporary_codex_translator(args.two_layer_eof_origin.resolve(), server.server_port))
+                    port, key, _outer_log = stack.enter_context(temporary_codex_translator(
+                        args.proxy_binary.resolve(), inner_port, upstream_prefix="/v1", upstream_key=inner_key))
+                else:
+                    port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, MODEL))
                 env.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_AUTH_TOKEN=key,
                     ANTHROPIC_DEFAULT_SONNET_MODEL=MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=MODEL)
                 command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
@@ -434,7 +445,7 @@ elif label is not None:
                     if sys.exc_info()[0] is None:
                         raise RuntimeError("Synthetic client cleanup did not complete")
                     print("Synthetic client cleanup did not complete", file=sys.stderr)
-    print(json.dumps({"mock_only": True, "through_translator": True,
+    print(json.dumps({"mock_only": True, "through_translator": True, "two_layer": bool(args.two_layer_eof_origin),
                       "terminal_ctrl_c_exercised": any(mode.startswith("ctrl_c_") for mode in modes), "cases": metrics}))
 
 

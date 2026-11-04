@@ -6,12 +6,15 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
 import urllib.request
 
 from claude_fixture import isolated_environment
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import launcher
 
 
