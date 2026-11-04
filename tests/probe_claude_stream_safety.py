@@ -360,7 +360,8 @@ else:
                         assert all(str(root) not in line and "SYNTHETIC" not in line and "fixture-upstream" not in line
                                    for line in rows), "Synthetic observation leaked private content"
                         if mode == "eof_partial_arguments":
-                            assert any("outcome=eof" in line for line in rows), "Synthetic EOF was not observed"
+                            outcome = "terminal_event" if args.codex_origin_binary else "eof"
+                            assert any("outcome=" + outcome in line for line in rows), "Synthetic EOF was not observed at the expected hop"
                         if mode == "failed_partial_arguments":
                             assert any("outcome=terminal_event" in line for line in rows), "Synthetic terminal error was not observed"
                 except AssertionError as error:

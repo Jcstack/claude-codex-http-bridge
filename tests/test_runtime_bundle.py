@@ -131,6 +131,25 @@ class BundleTests(unittest.TestCase):
             self.assertEqual(environment["CLAUDE_CODEX_LOOPBACK_CA"], str(ca))
             self.assertEqual(environment["CLAUDE_CODEX_LOOPBACK_AUTHORITY"], "127.0.0.1:12345")
 
+    def test_stream_observation_is_explicit_and_only_forwarded_to_backends(self):
+        flag = "CLAUDE_CODEX_STREAM_DIAGNOSTICS"
+        with patch.dict(os.environ, {flag: "1", "OPENAI_API_KEY": "PRIVATE_FIXTURE_SENTINEL"}, clear=True):
+            self.assertNotIn(flag, rolling_runtime.process_environment())
+            opted = rolling_runtime.process_environment(observe_streams=True)
+            self.assertEqual(opted.get(flag), "1")
+            self.assertNotIn("OPENAI_API_KEY", opted)
+        for value in ("0", "true", "1 private", "PRIVATE_FIXTURE_SENTINEL"):
+            with self.subTest(value=value), patch.dict(os.environ, {flag: value}, clear=True):
+                self.assertNotIn(flag, rolling_runtime.process_environment(observe_streams=True))
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {flag: "1"}), \
+             patch.object(runtime_bundle, "safe_file"), patch.object(windows_acl, "lock"), \
+             patch.object(rolling_runtime.subprocess, "Popen") as spawn:
+            root = Path(temporary)
+            rolling_runtime.start(root / "binary", [], root / "ingress.log")
+            self.assertNotIn(flag, spawn.call_args.kwargs["env"])
+            rolling_runtime.start(root / "binary", [], root / "backend.log", observe_streams=True)
+            self.assertEqual(spawn.call_args.kwargs["env"].get(flag), "1")
+
     def test_real_managed_child_does_not_receive_shell_credentials(self):
         child = ("import json,os; print(json.dumps({"
                  "'secret_present': 'OPENAI_API_KEY' in os.environ, "

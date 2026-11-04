@@ -77,6 +77,9 @@ jobs:
           git apply --check ../upstream/patches/forwarded-incomplete-stream-candidate.patch
           git apply ../upstream/patches/forwarded-incomplete-stream-candidate.patch
           go test -timeout 180s -run '^(TestBridgeForwardedIncompleteStreamScope|TestCodex)' ./internal/runtime/executor
+          git apply --check ../upstream/patches/codex-stream-observation-candidate.patch
+          git apply ../upstream/patches/codex-stream-observation-candidate.patch
+          go test -timeout 180s -run '^TestBridgeStreamObservation' ./internal/runtime/executor
           go build -o "../${{ matrix.binary }}" ./cmd/server
           # This independent system-role candidate is tested but not packed or activated.
           git apply ../upstream/patches/midconversation-system-fidelity.patch
@@ -117,6 +120,8 @@ jobs:
           python tests/probe_forwarded_incomplete.py "${{ matrix.binary }}" --origin-binary "forwarded-baseline-${{ matrix.binary }}"
           python tests/probe_managed_stream_policy.py "forwarded-baseline-${{ matrix.binary }}" "forwarded-baseline-${{ matrix.binary }}" bridge-ingress
           python tests/probe_managed_stream_policy.py "forwarded-baseline-${{ matrix.binary }}" "${{ matrix.binary }}" bridge-ingress
+          python tests/probe_managed_stream_policy.py "forwarded-baseline-${{ matrix.binary }}" "${{ matrix.binary }}" bridge-ingress --observe
+          python tests/probe_response_resume_route.py "${{ matrix.binary }}"
           python tests/probe_proxy_features.py "${{ matrix.binary }}"
           python tests/probe_toolsearch_cache_batch.py "${{ matrix.binary }}"
           python tests/probe_mcp_alias_gateway.py "${{ matrix.binary }}"
@@ -145,6 +150,7 @@ jobs:
           python tests/probe_settings_handoff.py runtime-bundle
           python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}"
           python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "forwarded-baseline-${{ matrix.binary }}" --case eof_partial_arguments --case eof_arguments_done --case eof_tool_item_done --client-timeout 45 --file-output
+          python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-observation --codex-origin-binary "forwarded-baseline-${{ matrix.binary }}" --codex-managed-policy --case eof_partial_arguments --case eof_tool_item_done --client-timeout 45 --file-output
           python tests/probe_parallel_stream.py "${{ matrix.binary }}"
           python tests/probe_parallel_stream.py "${{ matrix.binary }}" --two-layer-eof-origin "forwarded-baseline-${{ matrix.binary }}"
           if [ "$RUNNER_OS" != "Windows" ]; then

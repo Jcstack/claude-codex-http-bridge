@@ -37,11 +37,13 @@ RUNTIME_ENVIRONMENT = (
 )
 
 
-def process_environment() -> dict[str, str]:
+def process_environment(*, observe_streams: bool = False) -> dict[str, str]:
     """Keep unrelated shell credentials out of managed loopback processes."""
     environment = {name: os.environ[name] for name in RUNTIME_ENVIRONMENT if name in os.environ}
     environment["NO_PROXY"] = "127.0.0.1,localhost"
     environment["no_proxy"] = "127.0.0.1,localhost"
+    if observe_streams and os.environ.get("CLAUDE_CODEX_STREAM_DIAGNOSTICS") == "1":
+        environment["CLAUDE_CODEX_STREAM_DIAGNOSTICS"] = "1"
     return environment
 
 
@@ -136,9 +138,10 @@ def preflight_routes(root: Path, value: dict, models: dict | None = None) -> Non
         raise RuntimeError("Managed route catalog did not become ready")
 
 
-def start(binary: Path, arguments: list[str], log: Path, *, ca: Path | None = None, authority: str | None = None) -> subprocess.Popen:
+def start(binary: Path, arguments: list[str], log: Path, *, ca: Path | None = None, authority: str | None = None,
+          observe_streams: bool = False) -> subprocess.Popen:
     runtime_bundle.safe_file(binary)
-    environment = process_environment()
+    environment = process_environment(observe_streams=observe_streams)
     if ca is not None:
         if authority is None: raise RuntimeError("Private loopback TLS authority is required")
         environment["CLAUDE_CODEX_LOOPBACK_CA"] = str(ca)
@@ -374,7 +377,8 @@ def restore_ingress(root: Path, runtime: Path, value: dict, models: dict,
     try:
         proxy = bundle / manifest["binaries"]["proxy"]["file"]
         backend = start(proxy, ["--local-model", "-config", str(generation_dir / "config.yaml")],
-                        generation_dir / "proxy.log", ca=runtime / "ca.pem", authority=f"127.0.0.1:{port}")
+                        generation_dir / "proxy.log", ca=runtime / "ca.pem", authority=f"127.0.0.1:{port}",
+                        observe_streams=True)
         launcher.wait_for_private_listener(backend, backend_port)
         preflight_backend(backend, backend_port, key, models)
         if before_publish is not None: before_publish()
@@ -467,7 +471,8 @@ def ensure(root: Path, base_runtime: Path, base: dict, models: dict, *, force: b
             api_profile.write_private(generation_dir / "config.yaml", backend_config(runtime, port, value["port"], models, key))
             proxy = bundle / manifest["binaries"]["proxy"]["file"]
             backend = start(proxy, ["--local-model", "-config", str(generation_dir / "config.yaml")],
-                            generation_dir / "proxy.log", ca=runtime / "ca.pem", authority=f'127.0.0.1:{value["port"]}')
+                            generation_dir / "proxy.log", ca=runtime / "ca.pem", authority=f'127.0.0.1:{value["port"]}',
+                            observe_streams=True)
             launcher.wait_for_private_listener(backend, port)
             preflight_backend(backend, port, key, models)
             if before_publish is not None:

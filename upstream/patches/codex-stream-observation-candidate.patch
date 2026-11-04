@@ -90,10 +90,10 @@ index ba214635..a9379036 100644
  			emptyErr := statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before first payload"}
 diff --git a/internal/runtime/executor/codex_stream_observation.go b/internal/runtime/executor/codex_stream_observation.go
 new file mode 100644
-index 00000000..9ce2402b
+index 00000000..867a99bf
 --- /dev/null
 +++ b/internal/runtime/executor/codex_stream_observation.go
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,153 @@
 +package executor
 +
 +// A disabled-by-default, metadata-only observation for an incomplete stream.
@@ -115,25 +115,38 @@ index 00000000..9ce2402b
 +)
 +
 +type codexStreamObservation struct {
-+	started  time.Time
-+	lastRead time.Time
-+	items    uint32
-+	last     string
++	started          time.Time
++	expires          time.Time
++	lastRead         time.Time
++	lastEventAt      time.Time
++	items            uint32
++	last             string
++	previous         string
++	eventGapMillis   int64
++	maxReadGapMillis int64
 +}
 +
++// An opted-in process stops recording after one hour even if it remains alive.
++// The monotonic portion of time.Time makes this independent of wall-clock jumps.
++var codexStreamObservationExpiry = time.Now().Add(time.Hour)
++
 +func newCodexStreamObservation() *codexStreamObservation {
-+	if os.Getenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS") != "1" {
++	now := time.Now()
++	if os.Getenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS") != "1" || !now.Before(codexStreamObservationExpiry) {
 +		return nil
 +	}
-+	now := time.Now()
-+	return &codexStreamObservation{started: now, lastRead: now, last: "none"}
++	return &codexStreamObservation{started: now, expires: codexStreamObservationExpiry, lastRead: now, lastEventAt: now, last: "none", previous: "none"}
 +}
 +
 +// Scanner callbacks and frame observations are sequential, including the
 +// bootstrap-to-stream goroutine handoff. No frame or request bytes are stored.
 +func (d *codexStreamObservation) noteRead() {
 +	if d != nil {
-+		d.lastRead = time.Now()
++		now := time.Now()
++		if gap := codexObservationMillis(d.lastRead, now); gap > d.maxReadGapMillis {
++			d.maxReadGapMillis = gap
++		}
++		d.lastRead = now
 +	}
 +}
 +
@@ -144,6 +157,10 @@ index 00000000..9ce2402b
 +	if d.items < 1_000_000 {
 +		d.items++
 +	}
++	now := time.Now()
++	d.eventGapMillis = codexObservationMillis(d.lastEventAt, now)
++	d.lastEventAt = now
++	d.previous = d.last
 +	value := gjson.GetBytes(bytes.TrimSpace(line[len(dataTag):]), "type")
 +	if value.Type != gjson.String {
 +		d.last = "other"
@@ -210,7 +227,7 @@ index 00000000..9ce2402b
 +}
 +
 +func (d *codexStreamObservation) emit(ctx context.Context, phase, outcome string, readErr error) {
-+	if d == nil || ctx == nil || ctx.Err() != nil {
++	if d == nil || ctx == nil || ctx.Err() != nil || !time.Now().Before(d.expires) {
 +		return
 +	}
 +	if phase != "bootstrap" && phase != "stream" {
@@ -220,10 +237,10 @@ index 00000000..9ce2402b
 +		outcome = "other"
 +	}
 +	now := time.Now()
-+	// Since the last scanner read also includes time blocked on downstream work;
-+	// it is not a measurement of upstream network silence.
-+	message := fmt.Sprintf("codex stream observation: phase=%s outcome=%s last_event=%s data_items=%d elapsed_ms=%d since_read_ms=%d read_error=%s",
-+		phase, outcome, d.last, d.items, codexObservationMillis(d.started, now), codexObservationMillis(d.lastRead, now), codexObservationReadError(readErr))
++	// These intervals include downstream work and backpressure. They do not
++	// measure upstream network silence; the clock starts after response headers.
++	message := fmt.Sprintf("codex stream observation: phase=%s outcome=%s last_event=%s prior_event=%s data_items=%d elapsed_ms=%d since_read_ms=%d event_gap_ms=%d max_read_gap_ms=%d read_error=%s",
++		phase, outcome, d.last, d.previous, d.items, codexObservationMillis(d.started, now), codexObservationMillis(d.lastRead, now), d.eventGapMillis, d.maxReadGapMillis, codexObservationReadError(readErr))
 +	entry := log.NewEntry(log.StandardLogger())
 +	if tag := codexObservationRequestTag(ctx); tag != "" {
 +		entry = entry.WithField("request_id", tag)
@@ -232,10 +249,10 @@ index 00000000..9ce2402b
 +}
 diff --git a/internal/runtime/executor/codex_stream_observation_test.go b/internal/runtime/executor/codex_stream_observation_test.go
 new file mode 100644
-index 00000000..9e295ed8
+index 00000000..b7f7458a
 --- /dev/null
 +++ b/internal/runtime/executor/codex_stream_observation_test.go
-@@ -0,0 +1,205 @@
+@@ -0,0 +1,243 @@
 +package executor
 +
 +import (
@@ -310,6 +327,11 @@ index 00000000..9e295ed8
 +	d.emit(ctx, "stream", "eof", nil)
 +	if len(hook.snapshot()) != 1 {
 +		t.Fatal("a cancelled request emitted a failure observation")
++	}
++	d.expires = time.Now().Add(-time.Second)
++	d.emit(context.Background(), "stream", "eof", nil)
++	if len(hook.snapshot()) != 1 {
++		t.Fatal("an expired observer emitted a failure observation")
 +	}
 +	if codexObservationMillis(time.Unix(10, 0), time.Unix(5, 0)) != 0 ||
 +		codexObservationMillis(time.Unix(0, 0), time.Unix(1000000, 0)) != (24*time.Hour).Milliseconds() {
@@ -387,6 +409,39 @@ index 00000000..9e295ed8
 +	disabled.noteRead()
 +	disabled.observe([]byte(`data: {"type":"error"}`))
 +	disabled.emit(context.Background(), "stream", "eof", nil)
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++	oldExpiry := codexStreamObservationExpiry
++	codexStreamObservationExpiry = time.Now().Add(-time.Second)
++	defer func() { codexStreamObservationExpiry = oldExpiry }()
++	if newCodexStreamObservation() != nil {
++		t.Fatal("observation enabled after the one-hour process window")
++	}
++}
++
++func TestBridgeStreamObservationPriorEventAndGapAreBounded(t *testing.T) {
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++	hook := &observationHook{}
++	logger := log.StandardLogger()
++	old := logger.ReplaceHooks(make(log.LevelHooks))
++	defer logger.ReplaceHooks(old)
++	logger.AddHook(hook)
++	d := newCodexStreamObservation()
++	d.noteRead()
++	d.observe([]byte(`data: {"type":"response.output_text.delta","delta":"` + observationSecret + `"}`))
++	d.lastRead = time.Now().Add(-4 * time.Second)
++	d.lastEventAt = time.Now().Add(-3 * time.Second)
++	d.noteRead()
++	d.observe([]byte(`data: {"type":"error","error":{"message":"` + observationSecret + `"}}`))
++	d.emit(context.Background(), "stream", "terminal_event", nil)
++	entries := hook.snapshot()
++	if len(entries) != 1 || strings.Contains(entries[0].Message, observationSecret) ||
++		!strings.Contains(entries[0].Message, "last_event=error prior_event=response.output_text.delta") {
++		t.Fatal("event history was not limited to fixed categories")
++	}
++	if d.eventGapMillis < 2900 || d.eventGapMillis > (24*time.Hour).Milliseconds() ||
++		d.maxReadGapMillis < 3900 || d.maxReadGapMillis > (24*time.Hour).Milliseconds() {
++		t.Fatal("bounded synthetic event and read gaps were not captured")
++	}
 +}
 +
 +func TestBridgeStreamObservationPreservesSyntheticStream(t *testing.T) {

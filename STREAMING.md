@@ -77,16 +77,33 @@ fixture, two interleaved synthetic tools each ran once and both results were
 retained across three EOF positions; this does not establish exactly-once
 execution for arbitrary parallel tools or timing. The unmodified and fixed
 proxy are compared by [a standalone fixture](tests/probe_forwarded_incomplete.py).
-The fix is included in the next source-lock candidate for the full proxy gate;
-it is not active in the existing managed backend. The separate
-[metadata-only observer](upstream/patches/codex-stream-observation-candidate.patch)
-is not part of that source lock and is not active. The observer is
-disabled by default; if explicitly enabled in a future candidate, it logs only
-allowlisted event/outcome/error categories, bounded timings and a local request
-tag. It is not an upstream network-idle measurement: time since a read can
-include processing and backpressure. A [manual three-platform workflow](.github/workflows/forwarded-stream-observation.yml)
+The fix and a separate [metadata-only observer](upstream/patches/codex-stream-observation-candidate.patch)
+are included in the next source-lock candidate; neither is active in the
+existing managed backend. The observer is disabled by default. When explicitly
+enabled in a candidate backend, it logs only
+allowlisted event/outcome/error categories, the preceding event category,
+bounded timing intervals and a local request tag. It stops recording one hour
+after that backend process starts, even if it remains running; events ending
+after the window are not recorded. The clock starts after
+response headers, and intervals include processing and backpressure; they are
+not measurements of upstream network silence. A [manual three-platform workflow](.github/workflows/forwarded-stream-observation.yml)
 uses synthetic traffic and no account credentials. Further validation and a
-draining managed-backend handoff are required before any activation.
+draining managed-backend handoff are required before any activation. The flag
+is accepted only for a newly created backend, so an existing in-flight stream
+cannot acquire observation retroactively.
+
+After an observer-capable runtime and controller have been selected, a POSIX
+shell can request one bounded observation window for newly routed requests:
+
+```sh
+CLAUDE_CODEX_STREAM_DIAGNOSTICS=1 claude-codex bridge reload
+```
+
+For PowerShell, set `$env:CLAUDE_CODEX_STREAM_DIAGNOSTICS = '1'` before the
+reload and remove it afterward with `Remove-Item Env:CLAUDE_CODEX_STREAM_DIAGNOSTICS`.
+These commands do not enable the feature in an older runtime. A reload starts a
+new managed backend and relies on the existing draining mechanism; it does not
+replace the original Codex listener or capture an already-started request.
 
 A separate local before/after fixture compared synthetic model, instructions,
 tools, input, reasoning, tool choice and prompt-cache key bytes across three
@@ -102,6 +119,28 @@ timeout or this installation's cause. The unmerged [diagnostics proposal 6497](h
 is useful background but does not cover every terminal-error path. No
 user-generated prompt, transcript, error body, or credential is needed in the
 observer output.
+
+### Response resume is a separate provider capability
+
+The official OpenAI API documents [background response streaming and resuming
+from a sequence number](https://developers.openai.com/api/docs/guides/background).
+That mechanism requires creating the response in background streaming mode;
+the documentation also says response data is temporarily stored to support
+asynchronous operation even with `store=false`. It is not a way to retrieve an
+already interrupted foreground response. The local pinned proxy returned 404
+for a synthetic `GET /v1/responses/:id?stream=true&starting_after=...` without
+contacting its fake upstream; [the routing fixture](tests/probe_response_resume_route.py)
+does not test a real provider. The Codex subscription endpoint's entitlement,
+retention and resume semantics are unverified. Do not infer them from the
+separately billed API documentation or enable background storage implicitly.
+Safe adoption would also need ordered deduplication, cancellation and tool-effect
+tests, cache behavior, privacy review, and a user-selected supported route.
+
+Claude Code's [StopFailure hook](https://code.claude.com/docs/en/hooks#stopfailure)
+can observe an API-failed turn, but its output and exit code do not direct a
+retry. It is not an official way to resume a partial model stream. Reissuing a
+turn or injecting terminal input after partial tool output can repeat effects;
+the bridge does not do that automatically.
 
 An initial isolated test of the pinned translator enabled a one-second
 keep-alive against a fake delayed Responses upstream. After the first output,

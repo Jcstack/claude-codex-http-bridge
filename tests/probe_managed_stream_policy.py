@@ -9,6 +9,7 @@ from contextlib import ExitStack
 from http.server import ThreadingHTTPServer
 import argparse
 import json
+import os
 from pathlib import Path
 import ssl
 import sys
@@ -22,13 +23,14 @@ from codex_stream_fixture import temporary_codex_translator
 from probe_claude_stream_safety import Handler
 from smoke_managed_runtime import MODEL, SPEC
 import api_profile
+import diagnostics
 import launcher
 import process_identity
 import rolling_runtime
 import runtime_bundle
 
 
-def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path):
+def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, observe: bool):
     with tempfile.TemporaryDirectory(prefix="bridge-managed-stream-policy-") as temporary:
         root = Path(temporary)
         runtime_bundle.private_dir(root)
@@ -62,7 +64,8 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path):
                 with patch.object(runtime_bundle, "source_lock", return_value=source):
                     runtime_bundle.pack(backend_binary, ingress_binary, bundle)
                     runtime_bundle.activate(root, bundle)
-                with patch.object(launcher, "ROOT", root):
+                with patch.object(launcher, "ROOT", root), patch.dict(os.environ,
+                        {"CLAUDE_CODEX_STREAM_DIAGNOSTICS": "1" if observe else "0"}):
                     value = rolling_runtime.ensure(root, original_runtime, state, {MODEL: SPEC})
                     try:
                         runtime = root / "runtime-managed"
@@ -96,6 +99,19 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path):
                             raise AssertionError("Managed fixture did not forward the interruption")
                         if not (rows[1]["status"] == 200 and rows[1]["sse_stop"] and rows[1]["fake_upstream_requests"] == 2):
                             raise AssertionError("Managed policy did not admit the follow-up")
+                        log = runtime / value["current"] / "proxy.log"
+                        observation_lines = [line for line in log.read_text(encoding="utf-8", errors="replace").splitlines()
+                                             if "codex stream observation:" in line]
+                        observations = [diagnostics.stream_observation(line) for line in observation_lines]
+                        if any(item is None for item in observations):
+                            raise AssertionError("Managed observer emitted an unrecognized shape")
+                        if any(str(root) in line or key in line or "SYNTHETIC" in line or "fixture-upstream" in line
+                               for line in observation_lines):
+                            raise AssertionError("Managed observation exposed synthetic private input")
+                        if observe and not any(item["outcome"] == "terminal_event" for item in observations):
+                            raise AssertionError("The opted-in managed observer did not record the synthetic failure")
+                        if not observe and observations:
+                            raise AssertionError("The disabled managed observer recorded a failure")
                         return rows
                     finally:
                         rolling_runtime.stop(root)
@@ -110,10 +126,11 @@ def main():
     parser.add_argument("origin", type=Path)
     parser.add_argument("backend", type=Path)
     parser.add_argument("ingress", type=Path)
+    parser.add_argument("--observe", action="store_true", help="Enable bounded metadata in the disposable backend")
     args = parser.parse_args()
-    rows = check(args.origin.resolve(), args.backend.resolve(), args.ingress.resolve())
+    rows = check(args.origin.resolve(), args.backend.resolve(), args.ingress.resolve(), observe=args.observe)
     print(json.dumps({"mock_only": True, "actual_generated_managed_config": True,
-                      "tls_ingress": True, "requests": rows}))
+                      "tls_ingress": True, "observer_enabled": args.observe, "requests": rows}))
 
 
 if __name__ == "__main__":

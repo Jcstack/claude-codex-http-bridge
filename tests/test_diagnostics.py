@@ -16,8 +16,8 @@ class DiagnosticsTests(unittest.TestCase):
     def test_stream_observer_categories_are_bounded_private_and_paired_only_within_log(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "proxy.log"
-            prefix = "codex stream observation: phase=stream outcome=eof last_event=response.output_text.delta "
-            suffix = "data_items=2 elapsed_ms=3000 since_read_ms=1000 read_error=none"
+            prefix = "codex stream observation: phase=stream outcome=eof last_event=response.output_text.delta prior_event=response.created "
+            suffix = "data_items=2 elapsed_ms=3000 since_read_ms=1000 event_gap_ms=2000 max_read_gap_ms=2000 read_error=none"
             path.write_text(
                 f'[2025-12-31 23:59:59] [aabbccdd] {prefix}{suffix}\n'
                 f'[2026-01-02 12:00:00] [aabbccdd] [warn] {prefix}{suffix}\n'
@@ -28,11 +28,15 @@ class DiagnosticsTests(unittest.TestCase):
                 f'[2026-01-02 12:02:00] [55667788] [warn] {prefix}{suffix}\n'
                 f'[2026-01-02 12:03:00] [warn] {prefix}{suffix}\n'
                 '[2026-01-02 12:04:00] [warn] codex stream observation: phase=stream outcome=terminal_event '
-                'last_event=error data_items=9 elapsed_ms=900 since_read_ms=2 read_error=none\n'
+                'last_event=error prior_event=response.created data_items=9 elapsed_ms=900 since_read_ms=2 event_gap_ms=800 max_read_gap_ms=800 read_error=none\n'
                 '[2026-01-02 12:05:00] [warn] codex stream observation: phase=stream outcome=eof '
-                'last_event=private_secret data_items=9 elapsed_ms=900 since_read_ms=2 read_error=none\n'
+                'last_event=private_secret prior_event=response.created data_items=9 elapsed_ms=900 since_read_ms=2 event_gap_ms=800 max_read_gap_ms=800 read_error=none\n'
                 f'[2026-01-02 12:05:01] [warn] {prefix}{suffix} PRIVATE_SECRET\n'
-                f'[2026-01-02 12:05:02] [warn] {prefix}data_items=1000001 elapsed_ms=3000 since_read_ms=1000 read_error=none\n',
+                f'[2026-01-02 12:05:02] [warn] {prefix}data_items=1000001 elapsed_ms=3000 since_read_ms=1000 event_gap_ms=2000 max_read_gap_ms=2000 read_error=none\n'
+                '[2026-01-02 12:05:03] [warn] codex stream observation: phase=stream outcome=eof '
+                'last_event=error prior_event=private_secret data_items=1 elapsed_ms=1 since_read_ms=1 event_gap_ms=1 max_read_gap_ms=1 read_error=none\n'
+                '[2026-01-02 12:05:04] [warn] codex stream observation: phase=stream outcome=eof '
+                'last_event=error prior_event=none data_items=1 elapsed_ms=1 since_read_ms=1 event_gap_ms=86400001 max_read_gap_ms=1 read_error=none\n',
                 encoding="utf-8")
             report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
             observation = report["stream_termination_observations"]
@@ -41,7 +45,10 @@ class DiagnosticsTests(unittest.TestCase):
                              ["unique", "ambiguous", "unmatched", "untagged", "untagged"])
             self.assertEqual(observation["recent"][0]["http_status"], 200)
             self.assertEqual(observation["recent"][0]["http_seconds"], 3)
+            self.assertEqual(observation["recent"][0]["event_gap_ms"], 2000)
+            self.assertEqual(observation["recent"][0]["max_read_gap_ms"], 2000)
             self.assertEqual(observation["recent"][-1]["last_event"], "error")
+            self.assertEqual(observation["recent"][-1]["prior_event"], "response.created")
             for private in ("PRIVATE_SECRET", "private_secret", "aabbccdd", "11223344", "55667788", str(path)):
                 self.assertNotIn(private, json.dumps(report))
 
@@ -53,8 +60,8 @@ class DiagnosticsTests(unittest.TestCase):
             directory.mkdir(parents=True)
             (directory / "proxy.log").write_text(
                 '[2026-01-02 12:00:00] [aabbccdd] [warn] codex stream observation: '
-                'phase=bootstrap outcome=read_error last_event=other data_items=1 '
-                'elapsed_ms=50 since_read_ms=10 read_error=timeout\n', encoding="utf-8")
+                'phase=bootstrap outcome=read_error last_event=other prior_event=none data_items=1 '
+                'elapsed_ms=50 since_read_ms=10 event_gap_ms=5 max_read_gap_ms=5 read_error=timeout\n', encoding="utf-8")
             with patch.object(rolling_runtime, "state", return_value={"pid": 123, "port": 12345, "current": generation}), \
                  patch.object(launcher, "listener_pids", return_value={123}):
                 report = diagnostics.collect(root, "subscription", [], datetime(2026, 1, 1, tzinfo=timezone.utc))

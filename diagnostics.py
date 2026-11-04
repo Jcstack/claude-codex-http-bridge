@@ -36,8 +36,8 @@ STREAM_OBSERVATION_EVENTS = frozenset({"none", "other", "response.created", "res
 STREAM_OBSERVATION = re.compile(
     r"codex stream observation: phase=(bootstrap|stream|other) "
     r"outcome=(terminal_event|incomplete_event|read_error|eof|other) "
-    r"last_event=([a-z0-9_.-]{1,64}) data_items=(\d{1,7}) "
-    r"elapsed_ms=(\d{1,8}) since_read_ms=(\d{1,8}) "
+    r"last_event=([a-z0-9_.-]{1,64}) prior_event=([a-z0-9_.-]{1,64}) data_items=(\d{1,7}) "
+    r"elapsed_ms=(\d{1,8}) since_read_ms=(\d{1,8}) event_gap_ms=(\d{1,8}) max_read_gap_ms=(\d{1,8}) "
     r"read_error=(none|unexpected_eof|cancelled|timeout|other)$")
 
 
@@ -154,13 +154,14 @@ def stream_observation(line: str) -> dict | None:
     match = STREAM_OBSERVATION.search(line.rstrip("\r\n"))
     if not match:
         return None
-    phase, outcome, event, items, elapsed, since_read, read_error = match.groups()
-    items, elapsed, since_read = int(items), int(elapsed), int(since_read)
-    if (event not in STREAM_OBSERVATION_EVENTS or items > 1_000_000 or
-            elapsed > 86_400_000 or since_read > 86_400_000):
+    phase, outcome, event, prior, items, elapsed, since_read, event_gap, max_read_gap, read_error = match.groups()
+    items, elapsed, since_read, event_gap, max_read_gap = map(int, (items, elapsed, since_read, event_gap, max_read_gap))
+    if (event not in STREAM_OBSERVATION_EVENTS or prior not in STREAM_OBSERVATION_EVENTS or items > 1_000_000 or
+            any(value > 86_400_000 for value in (elapsed, since_read, event_gap, max_read_gap))):
         return None
-    return {"phase": phase, "outcome": outcome, "last_event": event, "data_items": items,
-            "elapsed_ms": elapsed, "since_read_ms": since_read, "read_error": read_error}
+    return {"phase": phase, "outcome": outcome, "last_event": event, "prior_event": prior, "data_items": items,
+            "elapsed_ms": elapsed, "since_read_ms": since_read, "event_gap_ms": event_gap,
+            "max_read_gap_ms": max_read_gap, "read_error": read_error}
 
 
 def proxy_summary(path: Path, since: datetime) -> dict:
@@ -323,7 +324,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "slow_requests": slow[-12:],
             "failed_requests": failed[-12:],
             "coverage": coverage,
-            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error and background-event mentions are not retry or inference-failure counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them. Since-read time includes downstream processing and is not proof of upstream network silence."}
+            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error and background-event mentions are not retry or inference-failure counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them. Observer timing starts after response headers and includes downstream processing; it does not prove upstream network silence."}
 
 
 def session_summary(path: Path, since: datetime) -> dict:
