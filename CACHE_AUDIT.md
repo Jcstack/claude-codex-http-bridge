@@ -304,6 +304,12 @@ input items remained a structural prefix. These comparisons use parsed JSON,
 not a byte-for-byte assertion or a provider cache-hit measurement. The same
 fixture skips the interactive console on Windows.
 
+On 2026-11-05, the same synthetic interactive test passed for Terra with the
+locally selected managed-version proxy; its five CLI effort settings also
+reached the fake upstream unchanged. The test now isolates the client's temp
+directories. These structural comparisons do not establish actual provider
+cache hits, support for every effort on an account, or Windows TUI behavior.
+
 ## Status-line cache metrics
 
 [Claude's status-line schema](https://code.claude.com/docs/en/statusline#prompt-cache-fields)

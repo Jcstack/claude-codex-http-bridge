@@ -94,6 +94,13 @@ approved live benchmark, and has no native Windows isolation equivalent yet.
 Run the representative model comparison only after its privacy boundary,
 independent acceptance and effect on active requests are verified.
 
+The first [hosted macOS run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41867934739)
+failed both its network and file preflight checks although the client completed
+the synthetic tool sequence. The local Mac run passed. The initial hosted
+output did not distinguish a preflight startup failure from a boundary
+failure; additional bounded diagnostics are required. Neither result establishes
+that this boundary is suitable for real model access.
+
 A separate small subscription-route text check on 2026-11-05 requested
 `gpt-6.1-terra` at `low` through the installed managed endpoint. The synthetic
 stream completed in 2.969 seconds, returned the expected short answer, and the
@@ -102,3 +109,10 @@ independent served-model attestation. This single short request used no Claude
 tools and does not establish coding quality, long-context behavior, general
 latency, or access for a different account or future session. Existing sessions
 and services were not restarted.
+
+Separately, a synthetic real-client/translator round trip on macOS checked all
+five effort levels for Terra in both CLI and interactive `/effort` use. The
+fake upstream saw the requested level and model; the observed synthetic cache
+key, tool definitions and historical input prefix stayed structurally stable
+across switches. This is not a provider entitlement, real cache-hit or quality
+comparison. Windows interactive terminals were not tested.

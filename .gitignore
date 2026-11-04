@@ -134,6 +134,7 @@
 !.github/workflows/
 !.github/workflows/ci.yml
 !.github/workflows/candidate-proxy.yml
+!.github/workflows/terra-effort-roundtrip.yml
 !.github/workflows/hud-safety.yml
 !.github/workflows/nested-agent-observation.yml
 !.github/workflows/duplicate-settings-observation.yml

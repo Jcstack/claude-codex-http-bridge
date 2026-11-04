@@ -20,6 +20,7 @@ from live_support import temporary_translator
 
 
 FAMILIES = {"sol": ("gpt-6.1-sol", "claude-sonnet-5-5"),
+            "terra": ("gpt-6.1-terra", "claude-sonnet-5-5"),
             "astra": ("gpt-6-astra", "claude-opus-5-5"),
             "luna": ("gpt-6-luna", "claude-haiku-5-5")}
 LEVELS = ("low", "medium", "high", "xhigh", "max")
@@ -174,7 +175,8 @@ def main():
         thread.start()
         environment = isolated_environment(root)
         environment.update(CLAUDE_CONFIG_DIR=str(config), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
-                           DISABLE_TELEMETRY="1")
+                           DISABLE_TELEMETRY="1", CLAUDE_CODE_TMPDIR=str(root), TMPDIR=str(root),
+                           TMP=str(root), TEMP=str(root))
         spec = {"context_window": 500000, "supports_search_tool": True, "input_modalities": ["text"],
                 "supported_reasoning_levels": [{"effort": value} for value in LEVELS]}
         upstream = {"state": {"port": server.server_port}, "key": "synthetic-local-upstream", "models": {model: spec}}

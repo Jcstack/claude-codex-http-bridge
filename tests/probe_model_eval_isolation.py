@@ -139,12 +139,22 @@ def main():
         try:
             # A separate local port must remain inaccessible even though the fake
             # Messages endpoint is permitted. No provider request is made.
-            preflight = ("import socket,sys; s=socket.socket(); s.settimeout(1); "
+            preflight = ("import json,socket,sys; s=socket.socket(); s.settimeout(1); "
                          "result=s.connect_ex(('127.0.0.1',int(sys.argv[1]))); "
-                         "s.close(); sys.exit(0 if result else 1)")
-            denied = subprocess.run(["/usr/bin/sandbox-exec", "-p", policy(root, server.server_port, home),
-                                     "/usr/bin/python3", "-c", preflight, str(blocked.getsockname()[1])],
-                                    cwd=work, env=env, capture_output=True, timeout=10).returncode == 0
+                         "s.close(); print(json.dumps({'other_port_connected': result == 0}))")
+            network_check = subprocess.run(["/usr/bin/sandbox-exec", "-p", policy(root, server.server_port, home),
+                                            "/usr/bin/python3", "-c", preflight, str(blocked.getsockname()[1])],
+                                           cwd=work, env=env, capture_output=True, text=True, timeout=10)
+            try:
+                network_observation = json.loads(network_check.stdout)
+                if not isinstance(network_observation, dict) or type(network_observation.get("other_port_connected")) is not bool:
+                    network_observation = None
+                else:
+                    network_observation = {"other_port_connected": network_observation["other_port_connected"]}
+            except ValueError:
+                network_observation = None
+            denied = (network_check.returncode == 0 and network_observation is not None and
+                      network_observation["other_port_connected"] is False)
             file_preflight = '''import json,sys
 from pathlib import Path
 def readable(path):
@@ -160,9 +170,13 @@ print(json.dumps([readable(path) for path in sys.argv[1:5]] + [writable(sys.argv
                                          str(home_fixture), str(link), str(home_fixture.parent / "outside-created.txt")],
                                         cwd=work, env=env, capture_output=True, text=True, timeout=10)
             try:
-                file_boundary = file_check.returncode == 0 and json.loads(file_check.stdout) == [True, False, False, False, False]
+                file_observation = json.loads(file_check.stdout)
+                if not (isinstance(file_observation, list) and len(file_observation) == 5 and
+                        all(type(value) is bool for value in file_observation)):
+                    file_observation = None
             except ValueError:
-                file_boundary = False
+                file_observation = None
+            file_boundary = file_check.returncode == 0 and file_observation == [True, False, False, False, False]
             command = ["/usr/bin/sandbox-exec", "-p", policy(root, server.server_port, home), str(client),
                        "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                        "--settings", str(settings), "--model", "gpt-6.1-sol", "--tools", "Read,Edit",
@@ -187,8 +201,15 @@ print(json.dumps([readable(path) for path in sys.argv[1:5]] + [writable(sys.argv
             categories = [name for name, needle in (("permissions", "permission"), ("eacces", "eacces"),
                 ("authentication", "authentication"), ("network", "network"), ("settings", "settings"),
                 ("sandbox", "sandbox"), ("tls", "certificate"), ("api_error", "api error")) if needle in diagnostic_text]
+            preflight_error_text = (network_check.stderr + "\n" + file_check.stderr).lower()
+            preflight_categories = [name for name, needle in (("xcrun", "xcrun"),
+                ("python", "python"), ("permission", "permission"), ("sandbox", "sandbox"),
+                ("developer_tools", "developer tools")) if needle in preflight_error_text]
             print(json.dumps({"synthetic_only": True, "checks": checks, "client_exit_code": completed.returncode,
                               "model_requests": server.step,
+                              "preflight_exit_codes": {"network": network_check.returncode, "files": file_check.returncode},
+                              "preflight_observations": {"network": network_observation, "files": file_observation},
+                              "preflight_error_categories": preflight_categories,
                               "client_error_categories": categories if not all(checks.values()) else []}, sort_keys=True))
             if not all(checks.values()):
                 raise RuntimeError("Synthetic evaluation boundary failed")
