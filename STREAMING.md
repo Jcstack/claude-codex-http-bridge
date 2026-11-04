@@ -73,7 +73,10 @@ draining managed-backend handoff are required before any activation.
 A separate local before/after fixture compared synthetic model, instructions,
 tools, input, reasoning, tool choice and prompt-cache key bytes across three
 dynamic-tool stages and found them unchanged. It does not measure provider
-cache hits or establish cache behavior after a real interrupted request.
+cache hits or establish cache behavior after a real interrupted request. A
+separate two-layer local fixture also compared those raw fields and the
+synthetic session cache key between two identical requests on either side of
+an EOF; it does not imply that a real Claude retry sends identical content.
 
 Community reports such as [CLIProxyAPI issue 6469](https://github.com/router-for-me/CLIProxyAPI/issues/6469)
 show both short and long incomplete streams; they do not establish a universal

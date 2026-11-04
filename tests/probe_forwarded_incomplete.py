@@ -24,6 +24,8 @@ def send_twice(port, key, server, *, stream=True):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     payload = json.dumps({
         "model": "gpt-6.1-sol", "max_tokens": 1024, "stream": stream,
+        "system": "Synthetic stable instructions",
+        "metadata": {"user_id": json.dumps({"session_id": "00000000-0000-4000-8000-000000000001"})},
         "messages": [{"role": "user", "content": "Write a synthetic fixture."}],
         "tools": [{"name": "Write", "description": "Write a fixture", "input_schema": {
             "type": "object", "properties": {"file_path": {"type": "string"}, "content": {"type": "string"}},
@@ -81,6 +83,8 @@ def check_two_layers(inner, outer, expect_old, *, stream):
         server.responses = True
         server.work = Path(root)
         server.target_name = "owned.txt"
+        server.capture_contract = True
+        server.contracts = []
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
@@ -96,8 +100,13 @@ def check_two_layers(inner, outer, expect_old, *, stream):
             elif (second[0] != 200 or (stream and b"event: message_stop" not in second[1]) or
                   (not stream and json.loads(second[1]).get("type") != "message") or second[2] != 2):
                 raise AssertionError("The two-layer candidate did not admit the follow-up")
+            if not expect_old:
+                if len(server.contracts) != 2 or server.contracts[0] != server.contracts[1]:
+                    raise AssertionError("Synthetic request fields changed across the follow-up")
+                if any(server.contracts[0][field] is None for field in ("model", "input", "tools", "prompt_cache_key")):
+                    raise AssertionError("The two-layer cache fixture lacked a required field")
             return {"case": "two-layer-eof" if stream else "two-layer-nonstream", "first_status": first[0], "followup_status": second[0],
-                    "upstream_attempts": second[2]}
+                    "upstream_attempts": second[2], "same_request_fields_preserved": None if expect_old else True}
         finally:
             server.shutdown()
             server.server_close()

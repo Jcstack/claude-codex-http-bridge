@@ -49,7 +49,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        body = json.loads(raw)
+        if self.server.responses and getattr(self.server, "capture_contract", False):
+            from probe_proxy_features import raw_json_field
+            self.server.contracts.append({field: raw_json_field(raw, field) for field in
+                ("model", "instructions", "input", "tools", "tool_choice", "reasoning", "prompt_cache_key")})
         if "count_tokens" in self.path:
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
