@@ -58,7 +58,9 @@ jobs:
           go build -o "../baseline-${{ matrix.binary }}" ./cmd/server
           git apply --check ../upstream/patches/forwarded-incomplete-stream-candidate.patch
           git apply ../upstream/patches/forwarded-incomplete-stream-candidate.patch
-          go test -timeout 180s -run '^(TestBridgeForwardedIncompleteStreamScope|TestCodexTerminal|TestCodexExecutor)' ./internal/runtime/executor
+          # This changes only three synthetic upstream test servers, not the binary.
+          git apply ../tests/upstream_keepalive_fixture.patch
+          go test -timeout 180s -run '^(TestBridgeForwardedIncompleteStreamScope|TestCodex)' ./internal/runtime/executor
           go build -o "../fixed-${{ matrix.binary }}" ./cmd/server
           git apply --check ../upstream/patches/codex-stream-observation-candidate.patch
           git apply ../upstream/patches/codex-stream-observation-candidate.patch
@@ -70,6 +72,7 @@ jobs:
           set -euo pipefail
           python tests/probe_forwarded_incomplete.py "baseline-${{ matrix.binary }}" --expect-old --origin-binary "baseline-${{ matrix.binary }}"
           python tests/probe_forwarded_incomplete.py "fixed-${{ matrix.binary }}" --origin-binary "baseline-${{ matrix.binary }}"
+          python tests/probe_incomplete_cache_handoff.py "baseline-${{ matrix.binary }}" "fixed-${{ matrix.binary }}"
       - name: Check real Claude client against a fake Codex upstream
         shell: bash
         run: |

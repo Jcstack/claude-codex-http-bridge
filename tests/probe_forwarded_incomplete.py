@@ -20,10 +20,10 @@ from probe_claude_stream_safety import Handler
 SENTINEL = "stream error: stream disconnected before completion: stream closed before response.completed"
 
 
-def send_twice(port, key, server):
+def send_twice(port, key, server, *, stream=True):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     payload = json.dumps({
-        "model": "gpt-6.1-sol", "max_tokens": 1024, "stream": True,
+        "model": "gpt-6.1-sol", "max_tokens": 1024, "stream": stream,
         "messages": [{"role": "user", "content": "Write a synthetic fixture."}],
         "tools": [{"name": "Write", "description": "Write a fixture", "input_schema": {
             "type": "object", "properties": {"file_path": {"type": "string"}, "content": {"type": "string"}},
@@ -73,7 +73,7 @@ def check(binary, name, mode, error, expected_second, expected_upstream):
             thread.join(timeout=2)
 
 
-def check_two_layers(inner, outer, expect_old):
+def check_two_layers(inner, outer, expect_old, *, stream):
     with tempfile.TemporaryDirectory(prefix="bridge-two-layer-stream-") as root:
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.requests = []
@@ -86,15 +86,17 @@ def check_two_layers(inner, outer, expect_old):
         try:
             with temporary_codex_translator(inner, server.server_port) as (inner_port, inner_key, _log):
                 with temporary_codex_translator(outer, inner_port, upstream_prefix="/v1", upstream_key=inner_key) as (port, key, _outer_log):
-                    first, second = send_twice(port, key, server)
-            if first[0] != 200 or b"event: error" not in first[1] or SENTINEL.encode() not in first[1] or first[2] != 1:
+                    first, second = send_twice(port, key, server, stream=stream)
+            if (first[0] != (200 if stream else 502) or
+                    (stream and b"event: error" not in first[1]) or SENTINEL.encode() not in first[1] or first[2] != 1):
                 raise AssertionError("The two-layer fixture did not forward its incomplete stream")
             if expect_old:
                 if second[0] != 503 or second[2] != 1:
                     raise AssertionError("The baseline two-layer cooldown did not reproduce")
-            elif second[0] != 200 or b"event: message_stop" not in second[1] or second[2] != 2:
+            elif (second[0] != 200 or (stream and b"event: message_stop" not in second[1]) or
+                  (not stream and json.loads(second[1]).get("type") != "message") or second[2] != 2):
                 raise AssertionError("The two-layer candidate did not admit the follow-up")
-            return {"case": "two-layer-eof", "first_status": first[0], "followup_status": second[0],
+            return {"case": "two-layer-eof" if stream else "two-layer-nonstream", "first_status": first[0], "followup_status": second[0],
                     "upstream_attempts": second[2]}
         finally:
             server.shutdown()
@@ -124,7 +126,8 @@ def main():
     ]
     rows = [check(args.proxy_binary.resolve(), *case) for case in cases]
     if args.origin_binary:
-        rows.append(check_two_layers(args.origin_binary.resolve(), args.proxy_binary.resolve(), args.expect_old))
+        for stream in (True, False):
+            rows.append(check_two_layers(args.origin_binary.resolve(), args.proxy_binary.resolve(), args.expect_old, stream=stream))
     print(json.dumps({"mock_only": True, "comparison": "baseline" if args.expect_old else "candidate", "cases": rows}))
 
 

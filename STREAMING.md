@@ -51,10 +51,10 @@ write and a retained tool result. Completed-argument and completed-item cases
 also wrote at most once. A second fixture connects two separate owned proxy
 processes to a fake origin: the inner proxy synthesizes the missing-completion
 error itself, and the outer baseline reproduces the 503 while the candidate
-admits the next request. The pinned Claude client also completed partial- and
-completed-tool cases through both processes with one synthetic write. This is
-not an exactly-once guarantee for real tools,
-parallel calls, every client version, or Windows. The unmodified and fixed
+admits the next request for both streaming and non-streaming clients. The pinned
+Claude client also completed partial- and completed-tool cases through both
+processes with one synthetic write. This is not an exactly-once guarantee for
+real tools, parallel calls, every client version, or Windows. The unmodified and fixed
 proxy are compared by [a standalone fixture](tests/probe_forwarded_incomplete.py).
 The candidate and a separate [metadata-only observer](upstream/patches/codex-stream-observation-candidate.patch)
 are not part of the selected source lock and are not active. The observer is
@@ -64,6 +64,11 @@ tag. It is not an upstream network-idle measurement: time since a read can
 include processing and backpressure. A [manual three-platform workflow](.github/workflows/forwarded-stream-observation.yml)
 uses synthetic traffic and no account credentials. Further validation and a
 draining managed-backend handoff are required before any activation.
+
+A separate local before/after fixture compared synthetic model, instructions,
+tools, input, reasoning, tool choice and prompt-cache key bytes across three
+dynamic-tool stages and found them unchanged. It does not measure provider
+cache hits or establish cache behavior after a real interrupted request.
 
 Community reports such as [CLIProxyAPI issue 6469](https://github.com/router-for-me/CLIProxyAPI/issues/6469)
 show both short and long incomplete streams; they do not establish a universal
