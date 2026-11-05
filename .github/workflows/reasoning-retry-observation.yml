@@ -19,6 +19,7 @@ jobs:
           - os: windows-latest
             binary: cli-proxy-api.exe
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     env:
       PYTHONPATH: ${{ github.workspace }}
     steps:
@@ -66,6 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python -m unittest tests.test_reasoning_retry_wait
           python tests/probe_reasoning_retry_candidate.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"
           python tests/probe_reasoning_retry_candidate.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}" --origin
           python tests/probe_reasoning_retry_candidate.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}" --origin --failure overload

@@ -23,6 +23,22 @@ def real_wait_environment(root):
     return env
 
 
+def collect_stream(response, start, *, deadline=90):
+    comments, done = 0, False
+    for line in response:
+        if time.monotonic() - start >= deadline:
+            raise TimeoutError("Synthetic stream exceeded its total deadline")
+        if line.startswith(b":"):
+            comments += 1
+        if line.startswith(b"data:"):
+            try:
+                event = json.loads(line[5:])
+            except ValueError:
+                continue
+            done |= isinstance(event, dict) and event.get("type") == "message_stop"
+    return comments, done
+
+
 class Origin(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -153,24 +169,12 @@ def main():
                 },
             )
             start = time.monotonic()
-            comments, done = 0, False
             with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
                 request, timeout=95
             ) as response:
                 if response.status != 200:
                     raise AssertionError("Synthetic stream did not start")
-                for line in response:
-                    if line.startswith(b":"):
-                        comments += 1
-                    if line.startswith(b"data:"):
-                        try:
-                            event = json.loads(line[5:])
-                        except ValueError:
-                            continue
-                        done |= (
-                            isinstance(event, dict)
-                            and event.get("type") == "message_stop"
-                        )
+                comments, done = collect_stream(response, start)
             elapsed = time.monotonic() - start
             checks = {
                 "waited_at_least_30_seconds": elapsed >= 29.5,
