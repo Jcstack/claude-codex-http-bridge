@@ -333,10 +333,10 @@ index 00000000..689c9fda
 +}
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
 new file mode 100644
-index 00000000..dc12149b
+index 00000000..e95a7147
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
-@@ -0,0 +1,420 @@
+@@ -0,0 +1,500 @@
 +package executor
 +
 +import (
@@ -348,9 +348,14 @@ index 00000000..dc12149b
 +	"net/http/httptest"
 +	"strings"
 +	"sync"
++	"sync/atomic"
 +	"testing"
 +	"time"
 +
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
++	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
++	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 +	"github.com/tidwall/gjson"
 +)
 +
@@ -755,5 +760,80 @@ index 00000000..dc12149b
 +	defer mu.Unlock()
 +	if err != nil || out.String() != bridgeFixtureSuccess || len(bodies) != 2 || bodies[0] != payload || bodies[1] != payload || selectedDuringRetry != "synthetic-account-b" {
 +		t.Fatal("synthetic HTTP replay did not preserve the request and response boundary")
++	}
++}
++
++func TestBridgeReasoningRetryExecutorUsesOriginalOAuthSnapshot(t *testing.T) {
++	t.Setenv("BRIDGE_SYNTHETIC_REASONING_RETRY", "1")
++	type attempt struct{ token, account, body string }
++	attempts := make(chan attempt, 8)
++	firstStarted := make(chan struct{})
++	release := make(chan struct{})
++	var releaseOnce sync.Once
++	var calls atomic.Int32
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		body, err := io.ReadAll(r.Body)
++		if err != nil {
++			t.Error("could not read synthetic request")
++			return
++		}
++		n := calls.Add(1)
++		attempts <- attempt{r.Header.Get("Authorization"), r.Header.Get("Chatgpt-Account-Id"), string(body)}
++		w.Header().Set("Content-Type", "text/event-stream")
++		w.WriteHeader(http.StatusOK)
++		w.(http.Flusher).Flush()
++		if n == 1 {
++			close(firstStarted)
++			<-release
++			_, _ = io.WriteString(w, bridgeFixtureCreated+bridgeFixtureReasoning+bridgeFixtureError)
++			return
++		}
++		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"synthetic\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-6.1-sol\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
++	}))
++	defer func() { releaseOnce.Do(func() { close(release) }); server.Close() }()
++	cfg := &config.Config{}
++	cfg.DisableImageGeneration = config.DisableImageGenerationPassthrough
++	executor := NewCodexExecutor(cfg)
++	makeAuth := func(token, account string) *cliproxyauth.Auth {
++		return &cliproxyauth.Auth{Provider: "codex", Attributes: map[string]string{"base_url": server.URL},
++			Metadata: map[string]any{"type": "codex", "access_token": token, "account_id": account}}
++	}
++	selectedA := makeAuth("synthetic-token-a", "synthetic-account-a")
++	selectedB := makeAuth("synthetic-token-b", "synthetic-account-b")
++	req := cliproxyexecutor.Request{Model: "gpt-6.1-sol", Payload: []byte(`{"model":"gpt-6.1-sol","input":"synthetic","reasoning":{"effort":"xhigh"}}`)}
++	opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, Stream: true}
++	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
++	defer cancel()
++	first, err := executor.ExecuteStream(ctx, selectedA.Clone(), req, opts)
++	if err != nil {
++		t.Fatalf("first synthetic executor request failed: %v", err)
++	}
++	<-firstStarted
++	// The manager chooses B for future work while the first request retains A.
++	selected := selectedB.Clone()
++	releaseOnce.Do(func() { close(release) })
++	for chunk := range first.Chunks {
++		if chunk.Err != nil {
++			t.Fatalf("synthetic retry stream failed: %v", chunk.Err)
++		}
++	}
++	second, err := executor.ExecuteStream(ctx, selected, req, opts)
++	if err != nil {
++		t.Fatalf("subsequent synthetic executor request failed: %v", err)
++	}
++	for chunk := range second.Chunks {
++		if chunk.Err != nil {
++			t.Fatalf("subsequent synthetic stream failed: %v", chunk.Err)
++		}
++	}
++	if len(attempts) != 3 {
++		t.Fatalf("expected three synthetic upstream attempts, got %d", len(attempts))
++	}
++	firstAttempt, retryAttempt, nextAttempt := <-attempts, <-attempts, <-attempts
++	if firstAttempt.token != "Bearer synthetic-token-a" || retryAttempt.token != firstAttempt.token ||
++		firstAttempt.account != "synthetic-account-a" || retryAttempt.account != firstAttempt.account ||
++		firstAttempt.body != retryAttempt.body || nextAttempt.token != "Bearer synthetic-token-b" ||
++		nextAttempt.account != "synthetic-account-b" {
++		t.Fatal("OAuth-shaped credential snapshot or request changed")
 +	}
 +}

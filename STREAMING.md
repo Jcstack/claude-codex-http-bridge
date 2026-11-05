@@ -290,9 +290,13 @@ and account header on retry. A separate two-layer [client fixture](tests/probe_r
 changed a disposable fake API-key configuration while a request was in flight;
 the retry used the original fake key, the following request selected the new
 fake key, and the owned tool executed once. These illustrate a possible
-same-account boundary for the tested fake route, not a test of real OAuth
-refresh, revocation, a live subscription route, or safe migration of the
-running origin service.
+same-account boundary for the tested fake route. A further executor-level test
+used disposable OAuth-shaped metadata and separate synthetic account headers:
+the in-flight request and its retry retained the first credential snapshot,
+while a separately selected later request used the second. The test does not
+run the OAuth refresh or account manager; it does not establish real refresh,
+revocation, a live subscription route, or safe migration of the running origin
+service.
 
 The overload case was added after an actual session reported the same structured
 type and code; a coincident origin access record returned HTTP 200. The session
