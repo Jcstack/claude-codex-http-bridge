@@ -282,6 +282,12 @@ only fake credentials and network endpoints. Its test-only integration patch
 uses a deliberately unsafe always-true account check, and is **not a runtime
 bundle or an available production setting**. A separate race test reproduces
 how an account can change after a simple check and before retry selection.
+For an alternative placement inside the credential-owning origin executor, a
+synthetic HTTP test switched a fake selected account after the first attempt;
+cloning that attempt's request retained both its original fake authorization
+and account header on retry. This illustrates a possible same-account boundary,
+not a test of real OAuth refresh, revocation, the current two-layer route, or
+safe migration of the running origin service.
 
 The test-only wiring now converts a second-attempt HTTP rejection into a
 bounded in-band error, preserving its status and valid error object rather than
