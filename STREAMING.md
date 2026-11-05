@@ -276,7 +276,11 @@ experimental request classifier also declines to retry inputs above 16 MiB or
 with JSON nesting deeper than 64 levels; these limits affect only the test
 candidate, not the installed runtime. Buffering also withholds initial thinking
 events from the client until a response is released; responsiveness and
-keepalive behavior require real-world assessment. The fixture
+keepalive behavior require real-world assessment. A nonblocking process-local
+cap admits at most 16 concurrent recovery paths; a slot remains held until its
+stream finishes, even after buffering is released. Additional streams pass
+through without retry, including on cancellation. This bounds admitted paths,
+not total process memory or request-parsing overhead. The fixture
 preserves the full synthetic model request, including effort, tool definitions,
 input and cache key; this does not measure a real provider cache hit.
 
@@ -345,7 +349,7 @@ behavior for every error shape, or a real provider quota reset.
 
 Do not deploy this experiment: atomic account binding across the existing
 two-layer origin and real OAuth account switching is unresolved; second-attempt
-error headers, real pre-output keepalives, concurrent global memory limits,
+error headers, real pre-output keepalives, total process memory limits,
 raw EOF recovery, all server tools, and real subscription behavior remain unverified.
 Even a bounded repeat can consume more quota and
 cannot promise exactly-once effects for arbitrary model or provider behavior.

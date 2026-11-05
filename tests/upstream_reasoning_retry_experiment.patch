@@ -1,9 +1,9 @@
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
 new file mode 100644
-index 00000000..f5619230
+index 00000000..05e031a2
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
-@@ -0,0 +1,413 @@
+@@ -0,0 +1,451 @@
 +package executor
 +
 +// This isolated experiment is not wired into production. It tests a narrow
@@ -21,6 +21,7 @@ index 00000000..f5619230
 +	"net/http"
 +	"strings"
 +	"sync"
++	"sync/atomic"
 +	"time"
 +
 +	"github.com/tidwall/gjson"
@@ -30,6 +31,39 @@ index 00000000..f5619230
 +const bridgeReasoningBufferLimit = 2 << 20
 +const bridgeReasoningLineLimit = 64 << 10
 +const bridgeReasoningRequestLimit = 16 << 20
++const bridgeReasoningConcurrentLimit = 16
++
++var bridgeReasoningConcurrent atomic.Int32
++
++func bridgeReasoningAcquire() bool {
++	for {
++		current := bridgeReasoningConcurrent.Load()
++		if current >= bridgeReasoningConcurrentLimit {
++			return false
++		}
++		if bridgeReasoningConcurrent.CompareAndSwap(current, current+1) {
++			return true
++		}
++	}
++}
++
++func bridgeReasoningPassThrough(ctx context.Context, dst io.Writer, src io.ReadCloser) error {
++	done := make(chan struct{})
++	go func() {
++		select {
++		case <-ctx.Done():
++			_ = src.Close()
++		case <-done:
++		}
++	}()
++	defer close(done)
++	defer src.Close()
++	_, err := io.Copy(dst, src)
++	if ctx.Err() != nil {
++		return ctx.Err()
++	}
++	return err
++}
 +
 +// Reject duplicate JSON object keys and deeply nested frames. Distinct JSON
 +// readers can disagree on duplicate keys, including tool type and error code.
@@ -281,6 +315,10 @@ index 00000000..f5619230
 +func bridgeReasoningRetryExperimentWithWait(ctx context.Context, dst io.Writer, first io.ReadCloser,
 +	retry func(context.Context) (io.ReadCloser, error), sameAccount func() bool,
 +	overloadWait func(context.Context) error) error {
++	if !bridgeReasoningAcquire() {
++		return bridgeReasoningPassThrough(ctx, dst, first)
++	}
++	defer bridgeReasoningConcurrent.Add(-1)
 +	current := first
 +	var currentMu sync.Mutex
 +	done := make(chan struct{})
@@ -419,10 +457,10 @@ index 00000000..f5619230
 +}
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
 new file mode 100644
-index 00000000..3303d3a0
+index 00000000..3929cc12
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
-@@ -0,0 +1,548 @@
+@@ -0,0 +1,616 @@
 +package executor
 +
 +import (
@@ -796,6 +834,74 @@ index 00000000..3303d3a0
 +				t.Fatal("bounded stream was not preserved")
 +			}
 +		})
++	}
++}
++
++func TestBridgeReasoningRetrySaturationPassesThroughAndCancels(t *testing.T) {
++	acquired := 0
++	defer func() { bridgeReasoningConcurrent.Add(-int32(acquired)) }()
++	for i := 0; i < bridgeReasoningConcurrentLimit; i++ {
++		if !bridgeReasoningAcquire() {
++			t.Fatal("could not reserve a synthetic buffering slot")
++		}
++		acquired++
++	}
++	initial := bridgeFixtureCreated + bridgeFixtureReasoning + bridgeFixtureError
++	var out bytes.Buffer
++	retries := 0
++	err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++		func(context.Context) (io.ReadCloser, error) { retries++; return nil, nil }, func() bool { return true })
++	if err != nil || retries != 0 || out.String() != initial {
++		t.Fatal("a saturated retry buffer must pass the original stream through")
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	reader, writer := io.Pipe()
++	defer writer.Close()
++	done := make(chan error, 1)
++	go func() {
++		done <- bridgeReasoningRetryExperiment(ctx, io.Discard, reader,
++			func(context.Context) (io.ReadCloser, error) { return nil, nil }, func() bool { return true })
++	}()
++	cancel()
++	select {
++	case err := <-done:
++		if !errors.Is(err, context.Canceled) {
++			t.Fatal("saturated pass-through ignored cancellation")
++		}
++	case <-time.After(2 * time.Second):
++		t.Fatal("saturated pass-through did not release its reader")
++	}
++}
++
++func TestBridgeReasoningRetryConcurrentBufferCap(t *testing.T) {
++	const workers = bridgeReasoningConcurrentLimit + 24
++	start, release := make(chan struct{}), make(chan struct{})
++	results := make(chan bool, workers)
++	var wg sync.WaitGroup
++	for i := 0; i < workers; i++ {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			<-start
++			acquired := bridgeReasoningAcquire()
++			results <- acquired
++			if acquired {
++				<-release
++				bridgeReasoningConcurrent.Add(-1)
++			}
++		}()
++	}
++	close(start)
++	acquired := 0
++	for i := 0; i < workers; i++ {
++		if <-results {
++			acquired++
++		}
++	}
++	close(release)
++	wg.Wait()
++	if acquired != bridgeReasoningConcurrentLimit || bridgeReasoningConcurrent.Load() != 0 {
++		t.Fatal("concurrent buffer slots exceeded the fixed limit or were not released")
 +	}
 +}
 +
