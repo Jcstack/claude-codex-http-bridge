@@ -98,7 +98,7 @@ A [local transport fixture](tests/test_account_transport.py) uses only fake
 HTTP servers and a synthetic credential: an environment-aware control uses a
 fake proxy, while the account helper goes directly to the fake target, refuses
 a redirect and does not fall back to that proxy after a fake DNS failure. The
-[three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41655278774)
+[three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41655278774)
 passed. This does not test actual TLS, real network policy or the older running monitor.
 
 ## On-demand check
@@ -152,8 +152,8 @@ fake management, rejected CONNECT, wrong-host and untrusted certificates,
 redirects, invalid or oversized bodies and an ambient-proxy negative control.
 They also check that `SSLKEYLOGFILE` is not activated by the proxy client.
 This does not establish the behavior of a real proxy, account or provider.
-The [three-platform quota gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41660465685)
-and [source-and-install gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41660430157)
+The [three-platform quota gate](https://github.com/Jcstack/harnesslift/actions/runs/41660465685)
+and [source-and-install gate](https://github.com/Jcstack/harnesslift/actions/runs/41660430157)
 passed. The reviewed change was installed on the active Mac with a private
 rollback and no service restart; 44 synthetic checks using copies of the
 installed sources passed. The actual wrapper's help and invalid-port refusal
@@ -183,7 +183,7 @@ and a stub account lock. It demonstrates a recovery path in the fixture, not
 real upstream behavior or concurrent lock correctness. The tests do not use
 real account credentials or signal the user's existing watcher.
 
-The [initial gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41650357114)
+The [initial gate](https://github.com/Jcstack/harnesslift/actions/runs/41650357114)
 passed on macOS and Linux; Windows ran the broader suite but skipped the
 POSIX-descriptor fixture. A later macOS-only coordinator control substituted
 the memory child, replaced the snapshot during startup, and restored it before
@@ -199,7 +199,7 @@ process alive. The existing read-only identity observer rejects that memory
 child because it recognizes script-based commands, so repeated handoff and
 identity verification remain unimplemented. A second synthetic handoff
 attempt refused before spawning or signaling and left the successor alive.
-That fixture passed in the [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41651716086);
+That fixture passed in the [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41651716086);
 the owned signal and handoff test runs only on macOS.
 This does not authorize signaling the real monitor or establish safety for an
 in-flight real quota request.
@@ -233,7 +233,7 @@ Two further local controls distinguish failure modes: when a synthetic
 holding its lock; when the replacement crashes after a successful exec, the
 contender acquires the released lock. Recovery from a crash therefore still
 needs a separate verified monitor and durable probe-throttling policy.
-The controls passed on macOS and Linux in the [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41653951055);
+The controls passed on macOS and Linux in the [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41653951055);
 the POSIX fixture was skipped on Windows.
 
 This fixture does not implement an updater, authenticate a source manifest,

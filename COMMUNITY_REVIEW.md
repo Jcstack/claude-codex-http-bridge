@@ -61,7 +61,7 @@ Deployment update: the reviewed runtime is now activated behind a separate stabl
 
 The candidate starts from the **same v8.0.46 source commit** as the installed release, [`9717e32`](https://github.com/router-for-me/CLIProxyAPI/commit/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5). [The first patch](upstream/patches/12d97cf-inline-tools-backport.patch) backports only the Codex translator files from upstream's [`12d97cf` tool-addition change](https://github.com/router-for-me/CLIProxyAPI/commit/12d97cfe196be266b45f4f7e0cc394c9fdc2e099). [The second patch](upstream/patches/12d97cf-deferred-tools.patch) withholds `defer_loading` tools from top-level `tools`, then inserts their full sanitized schemas as an ordered `additional_tools` item after Claude Code's `tool_reference` result. It accepts references only when their result matches a prior `ToolSearch` call ID, and builds OpenAI function schemas from an allowlist so new Anthropic-only fields do not reach Responses. A later `tool_removal` applies a current-turn OpenAI `allowed_tools` restriction; prior tool declarations and reveals stay in the cached prefix. Forced calls to removed or unavailable tools fail closed with request-scoped HTTP 400 before any upstream call; they do not place the account in cooldown. Unknown removal references also fail closed. This covers function/tool references and mapped MCP function names, not every hosted-MCP-toolset lifecycle variant. Neither patch contains credentials.
 
-The local isolated macOS build passed the Codex translator unit package, the fake OpenAI API function-call/stream contract, and all four `probe_proxy_features.py` gates. The [candidate workflow at commit `6b57b1b`](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41030566455) passed all four gates, translator unit tests and the streaming/tool contract on macOS, Linux and native Windows without OAuth or API keys. The removal gate also verifies that a forced removed tool returns HTTP 400 without contacting the upstream. A separate [live subscription probe](tests/live_candidate_subscription.py) sent synthetic ToolSearch history through the candidate to the **existing authenticated localhost service**: GPT-6.1 Sol accepted the `additional_tools` reveal, called the loaded fixture tool, continued after its result, and respected a later `tool_removal`. A further isolated **real Claude Code** run called `ToolSearch`, then a temporary MCP fixture tool, and completed from its result. The candidate received only the existing service's private localhost client key; no OAuth file or OpenAI project key was copied to it. A subsequent [isolated coding pilot](HARNESS_PILOT.md) using candidate commit `383f3f2` passed a synthetic SSE repair task twice in Claude Code; the later `6b57b1b` change adds request-scoped policy errors and a no-removal fast path, and was validated by the cross-platform contract run above. At that earlier pilot the active service and installer used the official v8.0.46 binary. The installer and authenticated origin retain that pin, while new local sessions now use the activated patched translator. A paired tool-loop comparison and later managed TLS handoffs passed (see OPERATIONS.md). Authenticated Windows inference and longer representative project evaluations remain unverified.
+The local isolated macOS build passed the Codex translator unit package, the fake OpenAI API function-call/stream contract, and all four `probe_proxy_features.py` gates. The [candidate workflow at commit `6b57b1b`](https://github.com/Jcstack/harnesslift/actions/runs/41030566455) passed all four gates, translator unit tests and the streaming/tool contract on macOS, Linux and native Windows without OAuth or API keys. The removal gate also verifies that a forced removed tool returns HTTP 400 without contacting the upstream. A separate [live subscription probe](tests/live_candidate_subscription.py) sent synthetic ToolSearch history through the candidate to the **existing authenticated localhost service**: GPT-6.1 Sol accepted the `additional_tools` reveal, called the loaded fixture tool, continued after its result, and respected a later `tool_removal`. A further isolated **real Claude Code** run called `ToolSearch`, then a temporary MCP fixture tool, and completed from its result. The candidate received only the existing service's private localhost client key; no OAuth file or OpenAI project key was copied to it. A subsequent [isolated coding pilot](HARNESS_PILOT.md) using candidate commit `383f3f2` passed a synthetic SSE repair task twice in Claude Code; the later `6b57b1b` change adds request-scoped policy errors and a no-removal fast path, and was validated by the cross-platform contract run above. At that earlier pilot the active service and installer used the official v8.0.46 binary. The installer and authenticated origin retain that pin, while new local sessions now use the activated patched translator. A paired tool-loop comparison and later managed TLS handoffs passed (see OPERATIONS.md). Authenticated Windows inference and longer representative project evaluations remain unverified.
 
 To repeat the live probe after reviewing a candidate binary, run `python3 tests/live_candidate_subscription.py /path/to/candidate --root /path/to/installed-bridge --claude-smoke`. It consumes a small amount of the existing subscription quota. The script prints only the model ID and pass/fail stages, then stops its temporary candidate process and removes the temporary local-key copy. Omit `--claude-smoke` to test the synthetic Anthropic Messages calls without launching Claude Code.
 
@@ -163,7 +163,7 @@ fixture switched between old and new translators within that tool loop: the
 tool result still arrived, but the serialized historical tool names changed,
 so a cached prefix can change. These are synthetic local tests, not a guarantee
 for arbitrary plugins or model decisions. A [credential-free three-platform
-run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41343960850)
+run](https://github.com/Jcstack/harnesslift/actions/runs/41343960850)
 passed for that experimental candidate. A live account handoff and broader
 plugin cases remain separate gates; the installed running translator has not
 been replaced by the name candidate.
@@ -208,7 +208,7 @@ different synthetic identity was rejected. These are three separate checks,
 not a network latency or throughput benchmark, and the timings do not predict
 other machines. The fixture passed no user credentials and contacted no model.
 
-The same [benchmark run's individual platform jobs](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41441024856)
+The same [benchmark run's individual platform jobs](https://github.com/Jcstack/harnesslift/actions/runs/41441024856)
 reported median in-process versus subprocess identity checks of 0.220 versus
 55.164 ms on macOS, 0.214 versus 31.832 ms on Linux, and 0.212 versus 76.240 ms
 on Windows, with 12 samples per platform. These are separate shared runners
@@ -221,7 +221,7 @@ changed executable and an exited process. Across 100 local batches of 32 checks,
 the median batch-average was 0.002523 ms per check and p95 was 0.004921 ms.
 The separate experiment does not reproduce an actual reused PID, and the
 measurement is not an end-to-end request or portability guarantee.
-The Linux, Windows and macOS gateway jobs in [this source run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41442611268)
+The Linux, Windows and macOS gateway jobs in [this source run](https://github.com/Jcstack/harnesslift/actions/runs/41442611268)
 also passed the isolated native identity probe. It covered a non-UTF-8 Linux
 executable path, Windows Unicode case mapping, process exit and synthetic
 birth/executable mismatches. The runners covered Linux x86-64, Windows x86-64
@@ -410,11 +410,11 @@ in-memory Go transport tests concurrent calls and request construction. These
 checks do not sandbox all possible outbound traffic. The candidate can return
 the fallback during its first refresh and does not stop its periodic goroutine
 after provider removal, so it does not yet meet the release goal.
-The [initial three-platform observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41642870542)
+The [initial three-platform observation](https://github.com/Jcstack/harnesslift/actions/runs/41642870542)
 passed with an unmodified upstream baseline; Linux also passed a race-enabled
 fixture. A later version tests the selected translator patches and a synthetic
 tool/stream contract, and holds the initial refresh to check fallback behavior;
-those extensions passed on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41643622344).
+those extensions passed on [three platforms](https://github.com/Jcstack/harnesslift/actions/runs/41643622344).
 
 At [Rust commit 737ac93](https://github.com/vayungodara/cliproxy-rs/blob/737ac93b48515e16554e49476cff7ac9fff3ad6b/crates/cpa-server/src/model_updater.rs),
 the provider updater watches the credential store and starts the Antigravity

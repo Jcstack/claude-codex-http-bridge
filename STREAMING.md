@@ -44,7 +44,7 @@ this client and fixture, not a measurement of actual model work, billing, or
 the events in another session. A growing terminal counter alone cannot prove
 useful reasoning progress or establish final provider usage.
 
-One [Windows workflow rerun](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/42035283391)
+One [Windows workflow rerun](https://github.com/Jcstack/harnesslift/actions/runs/42035283391)
 reported the synthetic draining handoff as passing, then failed while deleting
 the temporary proxy executable with `WinError 5`. The log alone does not show
 whether an exiting fixture process or an external file lock was responsible.
@@ -140,7 +140,7 @@ after that backend process starts, even if it remains running; events ending
 after the window are not recorded. The clock starts after
 response headers, and intervals include processing and backpressure; they are
 not measurements of upstream network silence. A [manual three-platform workflow](.github/workflows/forwarded-stream-observation.yml)
-uses synthetic traffic and no account credentials. Its [updated run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41939124084)
+uses synthetic traffic and no account credentials. Its [updated run](https://github.com/Jcstack/harnesslift/actions/runs/41939124084)
 passed on macOS, Linux and Windows, including a draining old-to-candidate
 handoff with an owned TLS ingress and a fake provider. It does not establish
 live-installation or provider behavior. Further validation is required before
@@ -430,7 +430,7 @@ session audit reports the allowlisted `incomplete_tool_call` category without
 printing that message. An automatic client retry may not leave such a record;
 absence of the category is not proof that no guard fired.
 
-On 2026-11-02, the safety-only candidate passed a [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41345932840)
+On 2026-11-02, the safety-only candidate passed a [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41345932840)
 and was rolled into the local managed backend. The selected account, original
 origin and stable TLS ingress remained unchanged. One old stream was still
 active during handoff and subsequently drained; a new backend inference later
@@ -468,7 +468,7 @@ all been migrated to this helper and still require a separate privacy review.
 
 ### Upstream WebSocket keepalive test timing
 
-The macOS build job in [candidate run 41487752563, attempt 1](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487752563/attempts/1)
+The macOS build job in [candidate run 41487752563, attempt 1](https://github.com/Jcstack/harnesslift/actions/runs/41487752563/attempts/1)
 failed the pinned upstream `TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless`:
 the synthetic client attempted a write after its local test connection had
 closed. This occurred before the new schema contract tests ran. The same
@@ -483,12 +483,12 @@ yet a proven root cause. A separate test-only patch makes three fake servers
 wait until their reader observes the payload before sending completion; the
 original requirement that the pong arrive while the write is held remains.
 The separate immediate-terminal test is left intact. The manually dispatched
-observation [passed on all three operating systems](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41489076037):
+observation [passed on all three operating systems](https://github.com/Jcstack/harnesslift/actions/runs/41489076037):
 30 repeats of each unmodified fixture, 50 of each modified fixture, and 10 of
 the separate immediate-terminal test passed. The original failure did not
 recur in that bounded sample, so these observations do not prove its cause.
 The upstream [write hook](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/runtime/executor/codex_websockets_session.go)
-is reached before the payload is written. In the [three-platform negative control](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41490027317),
+is reached before the payload is written. In the [three-platform negative control](https://github.com/Jcstack/harnesslift/actions/runs/41490027317),
 deliberately prolonging that hold produced five matching closed-connection test
 failures on each platform; the fake-server barrier passed five repeats with the
 same hold. Each platform also passed the unmodified bounded sample, the patched
@@ -496,9 +496,9 @@ normal sample, and the separate immediate-terminal test. This demonstrates a
 possible fixture race but does not prove what caused the earlier failed run.
 The candidate workflow applies the barrier only to the pinned upstream test
 file; production code and binaries do not include it. The [full candidate
-run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41490731389)
+run](https://github.com/Jcstack/harnesslift/actions/runs/41490731389)
 subsequently passed on macOS, Linux and Windows with that test-only barrier;
-the [earlier failed attempt](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487752563/attempts/1)
+the [earlier failed attempt](https://github.com/Jcstack/harnesslift/actions/runs/41487752563/attempts/1)
 remains part of the record. These checks do not establish real WebSocket
 behavior.
 

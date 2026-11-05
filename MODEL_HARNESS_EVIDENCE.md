@@ -96,15 +96,15 @@ approved live benchmark, and has no native Windows isolation equivalent yet.
 Run the representative model comparison only after its privacy boundary,
 independent acceptance and effect on active requests are verified.
 
-The first [hosted macOS run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41867934739)
+The first [hosted macOS run](https://github.com/Jcstack/harnesslift/actions/runs/41867934739)
 failed both its network and file preflight checks although the client completed
 the synthetic tool sequence. The local Mac run passed. The initial hosted
 output did not distinguish a preflight startup failure from a boundary
-failure. A [diagnostic rerun](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41870101094)
+failure. A [diagnostic rerun](https://github.com/Jcstack/harnesslift/actions/runs/41870101094)
 reported exit code 72 and developer-tool categories for both preflights, with
 no observations. The system Python shim therefore failed to start inside the
 policy. The fixture now compiles a minimal preflight before entering Seatbelt;
-the [subsequent hosted run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41871305758)
+the [subsequent hosted run](https://github.com/Jcstack/harnesslift/actions/runs/41871305758)
 passed the synthetic client, file and network checks. That hosted run preceded
 the unrestricted negative control, which has passed locally only. These results
 do not establish that the boundary is suitable for real model access.

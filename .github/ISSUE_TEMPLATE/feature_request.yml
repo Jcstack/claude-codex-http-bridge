@@ -1,0 +1,18 @@
+name: Feature request
+description: Propose a capability with clear boundaries and a way to verify it.
+body:
+  - type: markdown
+    attributes:
+      value: Use synthetic examples. Do not include credentials, private prompts, account identifiers, or logs.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Task and desired behavior
+      description: What should a user be able to do in Claude Code?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and verification
+      description: Optional official documentation or upstream issues, applicable route/platform, and a synthetic acceptance case. Mark assumptions as assumptions.

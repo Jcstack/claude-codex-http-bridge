@@ -4,6 +4,12 @@ umask 077
 
 bridge_root=${CLAUDE_CODEX_BRIDGE_HOME:-$HOME/.local/share/claude-codex-http-bridge}
 python_bin=${CLAUDE_CODEX_PYTHON_BIN:-$(command -v python3 || true)}
+# Only the installed entry points can select a brand title. Do not use an
+# arbitrary environment value as a tmux window name or target.
+case "${CLAUDE_CODEX_COMMAND_NAME:-}" in
+  harnesslift) command_name=harnesslift ;;
+  *) command_name=claude-codex ;;
+esac
 if [[ -z "$python_bin" ]]; then
   echo 'Python 3.10+ is required. Set CLAUDE_CODEX_PYTHON_BIN if it is not on PATH.' >&2
   exit 1
@@ -19,14 +25,14 @@ if [[ -z "$window_id" ]]; then
 fi
 previous_name=$(tmux display-message -p -t "$window_id" '#{window_name}' 2>/dev/null || true)
 previous_local_auto=$(tmux show-option -w -v -t "$window_id" automatic-rename 2>/dev/null || true)
-if ! tmux rename-window -t "$window_id" claude-codex 2>/dev/null; then
+if ! tmux rename-window -t "$window_id" "$command_name" 2>/dev/null; then
   exec "$python_bin" -E -s -X utf8 "$bridge_root/launcher.py" "$@"
 fi
 
 restore_tmux_name() {
   local current_name
   current_name=$(tmux display-message -p -t "$window_id" '#{window_name}' 2>/dev/null || true)
-  [[ "$current_name" == claude-codex ]] || return 0
+  [[ "$current_name" == "$command_name" ]] || return 0
   if [[ -z "$previous_local_auto" ]]; then
     tmux set-window-option -u -t "$window_id" automatic-rename >/dev/null 2>&1 || true
   else

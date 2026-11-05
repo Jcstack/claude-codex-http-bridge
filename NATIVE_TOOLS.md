@@ -198,11 +198,11 @@ the explicit schema, numeric-index normalization and exact AXPress path; they
 are not counted as passes. A separate native fixture passed coordinate click,
 text select-all and Unicode/emoji input on macOS without global pointer input.
 
-The [three-OS run at 788371c](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41094133443)
+The [three-OS run at 788371c](https://github.com/Jcstack/harnesslift/actions/runs/41094133443)
 passed all jobs, including the owned native Windows screenshot/text/button
 fixture. The subsequent keyboard extension exposed ineffective Windows Ctrl+A;
 the focused text-control selection/insertion fixes then passed the full
-[Windows Unicode GUI gate at ecf5b1b](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41099866806). No model
+[Windows Unicode GUI gate at ecf5b1b](https://github.com/Jcstack/harnesslift/actions/runs/41099866806). No model
 credential is sent to CI. Installed frozen MCP startup was also checked with a
 malicious synthetic workspace `sitecustomize.py`; isolated Python ignored it
 and read the real authenticated image catalog successfully.

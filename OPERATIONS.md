@@ -33,7 +33,7 @@ endpoint reads that local registry. The catalog can be an embedded or remote
 community-maintained source, subject to the proxy's current configuration.
 The source does not establish that any particular registered model is usable
 by an individual account or that its reported limit is current.
-An [isolated three-platform fixture](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41645294623)
+An [isolated three-platform fixture](https://github.com/Jcstack/harnesslift/actions/runs/41645294623)
 registered synthetic OAuth-shaped records with no tokens while its HTTP
 transport refused requests. Pro and Plus records received their corresponding
 embedded plan catalogs, and an unrecognized plan received the Pro catalog.
@@ -130,7 +130,7 @@ annotation-bearing history and continued in 7.710 seconds, recalling a source
 URL. The annotation URL did not match any native source-list URL byte for byte;
 the cause is not established. Preserving a provider citation does not verify its
 grounding. Claude's source-quotation field remains empty because the URL
-annotation provides no exact source excerpt. The [fifth-patch candidate run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41078035682) passed macOS, Linux and native Windows, including real Claude resume and the complete managed TLS/background fixture. The source/install run at the same commit also passed.
+annotation provides no exact source excerpt. The [fifth-patch candidate run](https://github.com/Jcstack/harnesslift/actions/runs/41078035682) passed macOS, Linux and native Windows, including real Claude resume and the complete managed TLS/background fixture. The source/install run at the same commit also passed.
 
 | Probe | Result | Scope |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ Individual paired requests took 4.258–6.747 seconds for the pin and 3.741–4.
 
 The source-locked [runtime controller](RUNTIME.md) is now implemented and activated on the reviewed local installation. Existing direct-listener sessions still use their original service, which was not stopped or replaced. New `claude-codex` launches use the fixed TLS endpoint and patched translator; later `bridge reload` replaces only that translator. The compatibility backend receives a separate loopback guard key, not the legacy key, OAuth material or an OpenAI project key. Native Responses, model discovery and media routes retain guarded passthrough. Proxy processes run in private directories rather than loading a project `.env`.
 
-The [candidate run at `22112c7`](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41070996073) passed all three operating systems. This includes the real pinned Claude client, exact Windows rollback bytes, active-stream stop refusal, readiness rollback, PID/auth boundaries, same-process conversation across reload, and a background reply through a supervisor started with an incorrect gateway. Those model replies were synthetic. The separate live subscription evidence below uses the installed managed endpoint.
+The [candidate run at `22112c7`](https://github.com/Jcstack/harnesslift/actions/runs/41070996073) passed all three operating systems. This includes the real pinned Claude client, exact Windows rollback bytes, active-stream stop refusal, readiness rollback, PID/auth boundaries, same-process conversation across reload, and a background reply through a supervisor started with an incorrect gateway. Those model replies were synthetic. The separate live subscription evidence below uses the installed managed endpoint.
 
 | Live check | Observed result |
 | --- | --- |
@@ -184,8 +184,8 @@ includes fixes for corrupted compressed-response hangs, restricted file reads,
 PowerShell hook blocking and inherited subagent models. This release note is not
 evidence that every reported gateway failure has been fixed. Existing processes
 remain on their loaded version; updating the client executable does not restart
-them. Both the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41159711919)
-and [patched-translator gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41159754573)
+them. Both the [three-platform source gate](https://github.com/Jcstack/harnesslift/actions/runs/41159711919)
+and [patched-translator gate](https://github.com/Jcstack/harnesslift/actions/runs/41159754573)
 passed. The official pinned installer then selected 2.1.316 locally; both
 already-running Claude processes survived, with the origin/ingress metadata,
 TLS CA and local keys unchanged. New launches use the updated executable.
@@ -215,7 +215,7 @@ separate endpoint labels. Opaque call/session identifiers and query values are
 replaced or removed. A failed voice-cleanup request is therefore distinguishable
 from `/v1/messages` and `/v1/responses` failures; none is silently discarded.
 The follow-up suite passed 71 local tests with one platform skip, and the
-[three-platform source/install run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41161289097)
+[three-platform source/install run](https://github.com/Jcstack/harnesslift/actions/runs/41161289097)
 passed all 11 jobs. The installed read-only helper matches that reviewed source;
 no service, endpoint, signing key or active Claude process was replaced.
 
@@ -246,7 +246,7 @@ reboot, Windows login, or a successful real model call.
 Only operating-system errors corresponding to lock contention are treated as
 busy. A synthetic I/O failure remains a failed recovery and its exception text
 is withheld from the status file; it is not silently classified as contention.
-The final controller passed the [login-recovery gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41515747735)
+The final controller passed the [login-recovery gate](https://github.com/Jcstack/harnesslift/actions/runs/41515747735)
 on macOS, Windows and Linux. The controller alone was atomically installed on the
 local Mac under operation, account and service locks after verifying the exact
 previous source, and a private rollback copy was retained. Service and network
@@ -267,13 +267,13 @@ child process cannot be started. Those restorations passed a synthetic spawn
 failure; a separate registry-write failure is not covered. Actual
 Windows user-login and crash behavior remain separate acceptance work.
 
-The verified-runtime rollback controller passed the [three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41440397811) and was installed without restarting the existing origin or ingress. Its private previous-version record was reconstructed from the uniquely matching prior source-locked bundle and verified with the selected bundle's immutable hashes. The actual `bridge rollback` transition was exercised only in isolated fixtures with a fake origin and a continuing Claude client; it was not run on the live session.
+The verified-runtime rollback controller passed the [three-platform candidate gate](https://github.com/Jcstack/harnesslift/actions/runs/41440397811) and was installed without restarting the existing origin or ingress. Its private previous-version record was reconstructed from the uniquely matching prior source-locked bundle and verified with the selected bundle's immutable hashes. The actual `bridge rollback` transition was exercised only in isolated fixtures with a fake origin and a continuing Claude client; it was not run on the live session.
 
-The status-line adapter's unknown-usage correction passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41446391248) and was installed as a standalone file. A synthetic child process verified that an unknown `current_usage` remains unknown and that the standard cache object is still withheld. The origin, managed ingress and Claude processes were not restarted. Individual plugins can still choose their own fallback for unknown usage; the local HUD 0.8.0 sample is documented in [COMPATIBILITY.md](COMPATIBILITY.md).
+The status-line adapter's unknown-usage correction passed the [three-platform source gate](https://github.com/Jcstack/harnesslift/actions/runs/41446391248) and was installed as a standalone file. A synthetic child process verified that an unknown `current_usage` remains unknown and that the standard cache object is still withheld. The origin, managed ingress and Claude processes were not restarted. Individual plugins can still choose their own fallback for unknown usage; the local HUD 0.8.0 sample is documented in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 On 2026-11-02 the fuller account-catalog reconciliation and optional cache
-telemetry controller passed their [source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41447807601);
-the matching runtime passed the [three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41445355599).
+telemetry controller passed their [source gate](https://github.com/Jcstack/harnesslift/actions/runs/41447807601);
+the matching runtime passed the [three-platform candidate gate](https://github.com/Jcstack/harnesslift/actions/runs/41445355599).
 The selected Mac bundle and its binaries were checked against their reviewed
 source lock and hashes. The controller was installed under the account and
 service locks, and the backend was rolled through the managed handoff. The
@@ -292,7 +292,7 @@ backup. A small local Bun-to-Node launcher correction was installed separately
 and tested with a synthetic frame and the PATH of an already-running client.
 No Claude process or bridge service was restarted. Upstream 0.15.0's synthetic
 Git security check failed on this Mac. After the corrected collector and
-version-gated opt-in passed their [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41454320316),
+version-gated opt-in passed their [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41454320316),
 the local package was patched and the guarded Git display was restored. The
 standard Git switch remains false for older and unmodified versions. One first
 installation attempt failed in its isolated test bootstrap and restored the
@@ -301,7 +301,7 @@ enabling the opt-in. See [SECURITY.md](SECURITY.md) for the local package
 modifications, privacy behavior and remaining limits.
 
 The cache-telemetry controller files were then installed under the account and
-service locks after their [source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41455750069)
+service locks after their [source gate](https://github.com/Jcstack/harnesslift/actions/runs/41455750069)
 passed. Original files were backed up privately, and the selected and previous
 runtime bundles, origin and ingress were checked again. The shared subscription
 preference was enabled locally; it is disabled by default in a new installation.
@@ -318,14 +318,14 @@ origin, ingress, selected runtime and rollback record. These targeted file
 updates are not an atomic general-purpose controller installer. See
 [CACHE_AUDIT.md](CACHE_AUDIT.md) for interpretation and limits.
 
-The offline MCP definition comparison passed its [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41485153990).
+The offline MCP definition comparison passed its [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41485153990).
 The local module was published before its launcher entry, with a private backup
 and account/service locks; the origin and ingress state stayed unchanged. A
 synthetic installed-command check verified the comparison without starting a
 service or modifying the input files. The command needs a separately supplied
 snapshot, checks only retained descriptions and input schemas, and does not
 prevent a stale call. See [MCP_NAMING.md](MCP_NAMING.md#offline-definition-comparison).
-The later input-replacement check passed its own [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41485934743)
+The later input-replacement check passed its own [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41485934743)
 and was installed as a single atomic module update with a private backup. An
 installed-module test rejected a replaced synthetic path; the service state
 again remained unchanged. Metadata checks do not create an atomic file snapshot.
@@ -339,7 +339,7 @@ rollback bundle. A comparison of up to 32 recent shared backend logs did not
 find additional newly visible events. See [SESSION_AUDIT.md](SESSION_AUDIT.md).
 
 The later cache-counter and retained-schema summaries passed the [three-platform
-metadata gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41488570288)
+metadata gate](https://github.com/Jcstack/harnesslift/actions/runs/41488570288)
 and were installed as one atomic module update with a private backup. The
 installed diagnostic and synthetic privacy checks passed without restarting
 the service. See [SESSION_AUDIT.md](SESSION_AUDIT.md) for the limits of both
@@ -437,7 +437,7 @@ service was restarted for this pack. Read-only production diagnostics still
 contain upstream TLS/EOF and slow-compaction incidents; these new capability
 checks do not resolve their root cause or certify Opus parity.
 
-The [full Windows Unicode gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41099866806)
+The [full Windows Unicode gate](https://github.com/Jcstack/harnesslift/actions/runs/41099866806)
 subsequently passed: coordinate input, scoped select-all, emoji insertion and
 one actual button effect. OSV then identified the initial Pillow pin as affected
 by upstream advisories; the capability lock was upgraded to 13.0.0 and a public-
@@ -449,12 +449,12 @@ the update. Old immutable environments are not rewritten under live processes.
 An isolated Claude 2.1.316 settings-handoff fixture once observed the new TLS
 route after a `ConfigChange` notification while the expected updated
 `UserPromptSubmit` marker was absent. The
-[failing run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41857040571)
+[failing run](https://github.com/Jcstack/harnesslift/actions/runs/41857040571)
 used fake gateways and no account. The prior marker was overwritten by the old
 fixture, so that run cannot distinguish a stale hook from a missing invocation.
 
 The fixture now records only a sequence of synthetic `A`/`B` hook markers.
-[Four repeated handoffs and the full fixture passed](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41858121633),
+[Four repeated handoffs and the full fixture passed](https://github.com/Jcstack/harnesslift/actions/runs/41858121633),
 as did a full Windows candidate rerun. This does not establish a fix, the
 cause, or whether a real Windows session is affected. Continue testing config
 changes and plugin hooks against future client versions; do not assume that a

@@ -80,7 +80,7 @@ process, not proof that the old stream was preserved.
 The current installer replaces controller modules individually. An immutable
 versioned source directory and an atomic selection are a possible way to avoid
 mixed module generations, but moving the current files there is not sufficient.
-In a [three-platform disposable experiment](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41491394286),
+In a [three-platform disposable experiment](https://github.com/Jcstack/harnesslift/actions/runs/41491394286),
 the launcher's installation root was a synthetic parent while copied code was
 loaded from a child generation.
 The launcher used the parent, while the model, usage and status-line helpers

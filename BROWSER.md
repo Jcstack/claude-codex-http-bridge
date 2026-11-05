@@ -29,7 +29,7 @@ computer members, with 16 names shared across the families. Each shared name
 has a different set of top-level input field names in these generated types.
 It also confirms that upload, JavaScript, console and network readers default
 to disabled in that snapshot. The member inventory and negative controls
-passed on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41530519329).
+passed on [macOS, Linux and Windows](https://github.com/Jcstack/harnesslift/actions/runs/41530519329).
 The audit does not verify the checkout's integrity itself: fetch
 the public commit and verify its SHA and clean state independently, as the
 [isolated workflow](.github/workflows/toolset-sdk-inventory.yml) does. It is
@@ -52,7 +52,7 @@ A separate [request-local naming fixture](tests/toolset_identity_fixture.py)
 experiments with distinct, deterministic aliases for browser and computer
 members. It rejects collisions with custom names, unknown or removed returned
 tools and unsupported names, while retaining known historical names for replay.
-Controls on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41530875394)
+Controls on [three platforms](https://github.com/Jcstack/harnesslift/actions/runs/41530875394)
 cover the SDK snapshot's 48 members, a same-name custom tool, dynamic additions
 and separate requests. This is an isolated mapping experiment:
 it does not provide schemas, authenticate a session, process real streams,
@@ -72,7 +72,7 @@ same request and streaming/nonstreaming response boundaries through both the
 locally selected Mac binary and the uninstalled caller-only candidate. When
 the synthetic result contained only `browser_state`, its JSON arrived as a
 string rather than the original typed block. The mixed-result, state-only and
-tool-identity observations also passed on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41529298769).
+tool-identity observations also passed on [three platforms](https://github.com/Jcstack/harnesslift/actions/runs/41529298769).
 This does not
 establish that the current Claude Code client sends those API toolsets, nor
 that a real OpenAI backend would accept the synthetic request. Existing browser
@@ -84,7 +84,7 @@ An uninstalled [browser-state candidate](upstream/patches/browser-state-candidat
 preserves a `browser` tool result's `browser_state` JSON as an ordered Responses
 `input_text` item, both beside text/images and when it is the only result.
 Synthetic HTTP and native-executor tests passed for streaming and nonstreaming
-requests on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41529298769);
+requests on [three platforms](https://github.com/Jcstack/harnesslift/actions/runs/41529298769);
 the preceding source failed the corresponding native controls. A synthetic
 comparison without browser-state content kept the same prompt fields and
 session cache key, with and without an explicit direct caller policy. The

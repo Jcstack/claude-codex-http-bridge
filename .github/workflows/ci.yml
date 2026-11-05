@@ -216,6 +216,7 @@ jobs:
           python tests/smoke_transport.py "$RUNNER_TEMP/bridge/bin/cli-proxy-api"
           python tests/smoke_model_state.py "$RUNNER_TEMP/bridge/bin/cli-proxy-api"
           "$RUNNER_TEMP/bridge-bin/claude-codex" --help
+          "$RUNNER_TEMP/bridge-bin/harnesslift" --help
       - name: Verify native Windows installation and ACLs
         if: runner.os == 'Windows'
         shell: pwsh
@@ -240,4 +241,6 @@ jobs:
           python tests/smoke_model_state.py (Join-Path $bridgeRoot 'bin/cli-proxy-api.exe')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $bridgeRoot 'bin/claude-codex.cmd') --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $bridgeRoot 'bin/harnesslift.cmd') --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

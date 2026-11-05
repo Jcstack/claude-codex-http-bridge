@@ -33,7 +33,7 @@ are retained. This does not sandbox them from files accessible to the user, and
 does not change the environment of Claude Code, the original origin or any
 already-running process.
 
-On 2026-11-02, after the [three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41352045323)
+On 2026-11-02, after the [three-platform candidate gate](https://github.com/Jcstack/harnesslift/actions/runs/41352045323)
 passed, the installed helper was updated and the managed translator was
 replaced through the rolling reload. The selected account, original service,
 TLS ingress and selected binary bundle retained their identities; one old
@@ -45,7 +45,7 @@ process environments are unaffected. Historical
 sessions connected directly to the original service also remain on its older
 translator, outside the new incomplete-tool guard.
 
-Later on 2026-11-02, the [credential-free three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41425623062)
+Later on 2026-11-02, the [credential-free three-platform candidate gate](https://github.com/Jcstack/harnesslift/actions/runs/41425623062)
 passed for the effort-rejection guard and mid-conversation effort mapping. Its
 source-locked macOS ARM64 bundle was verified and selected using `bridge upgrade`.
 The original account, origin process, managed TLS port, and ingress were not
@@ -254,7 +254,7 @@ skipping the check. Existing ingresses keep their original behavior until the
 ingress process itself is replaced; updating the controller or translator
 alone does not enable this protection. The installed Mac is still running its
 earlier ingress, so that ingress does not yet perform the creation-identity
-check. The selected runtime passed a [three-platform candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41445355599)
+check. The selected runtime passed a [three-platform candidate gate](https://github.com/Jcstack/harnesslift/actions/runs/41445355599)
 with isolated synthetic recovery and stream tests, not an actual machine reboot
 or PID reuse.
 Process and listener checks narrow risk but are not a proof against every

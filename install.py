@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a pinned CLIProxyAPI release and private local bridge configuration."""
+"""Install HarnessLift with a pinned proxy and private local configuration."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ import zipfile
 
 
 VERSION = "8.0.46"
+COMMAND_NAMES = ("harnesslift", "claude-codex")
 ASSETS = {
     ("Darwin", "arm64"): ("darwin_aarch64", "f9cdb85ccd70602ce084ad0aa8576a057a5e7dd8ff63a64b229cd145c5e6652b"),
     ("Darwin", "x86_64"): ("darwin_amd64", "bf8ba3bd1990e115bfba6f61a93d83233974a5457540ebdd03df69d142f14efb"),
@@ -166,14 +167,17 @@ def install_config(root: Path) -> None:
     write_file(config, text.encode(), 0o600)
 
 
-def command_spec(root: Path, bin_dir: Path, *, legacy_windows: bool = False) -> tuple[Path, bytes]:
+def command_spec(root: Path, bin_dir: Path, *, name: str = "claude-codex",
+                 legacy_windows: bool = False) -> tuple[Path, bytes]:
     """Build the command bytes without changing either installation path."""
+    if name not in COMMAND_NAMES:
+        raise ValueError("Unsupported command name")
     if bin_dir.is_symlink():
         raise RuntimeError(f"Refusing symlinked command directory: {bin_dir}")
     if bin_dir.exists() and not bin_dir.is_dir():
         raise RuntimeError(f"Command directory is not a directory: {bin_dir}")
     if platform.system() == "Windows":
-        command = bin_dir / "claude-codex.cmd"
+        command = bin_dir / (name + ".cmd")
         for path in (root, Path(sys.executable)):
             if any(character in str(path) for character in ('\r', '\n', '"', '^')):
                 raise RuntimeError("Installation paths contain unsupported CMD characters")
@@ -181,45 +185,65 @@ def command_spec(root: Path, bin_dir: Path, *, legacy_windows: bool = False) -> 
         python = str(Path(sys.executable)).replace("%", "%%")
         launcher = str(root / "launcher.py").replace("%", "%%")
         python_flags = "" if legacy_windows else " -E -s -X utf8"
+        brand_env = 'set "CLAUDE_CODEX_COMMAND_NAME=harnesslift"\r\n' if name == "harnesslift" else ""
         wrapper = (
             "@echo off\r\n"
             "setlocal DisableDelayedExpansion\r\n"
             f'set "CLAUDE_CODEX_BRIDGE_HOME={home}"\r\n'
+            f"{brand_env}"
             f'"{python}"{python_flags} "{launcher}" %*\r\n'
             "exit /b %ERRORLEVEL%\r\n"
         ).encode()
     else:
-        command = bin_dir / "claude-codex"
+        command = bin_dir / name
+        brand_env = "export CLAUDE_CODEX_COMMAND_NAME=harnesslift\n" if name == "harnesslift" else ""
         wrapper = (
             "#!/usr/bin/env bash\n"
             "# managed by claude-codex-http-bridge\n"
             f"export CLAUDE_CODEX_BRIDGE_HOME={shlex.quote(str(root))}\n"
+            f"{brand_env}"
             f"exec {shlex.quote(str(root / 'run-claude-codex.sh'))} \"$@\"\n"
         ).encode()
     return command, wrapper
 
 
-def preflight_command(root: Path, bin_dir: Path, replace: bool) -> tuple[Path, bytes, bool]:
+def preflight_command(root: Path, bin_dir: Path, replace: bool, *,
+                      name: str = "claude-codex") -> tuple[Path, bytes, bool]:
     """Reject an unrelated command before writing installation files."""
-    command, wrapper = command_spec(root, bin_dir)
+    command, wrapper = command_spec(root, bin_dir, name=name)
     same = command.is_file() and not command.is_symlink() and command.read_bytes() == wrapper
-    legacy = (platform.system() == "Windows" and command.is_file() and not command.is_symlink() and
-              command.read_bytes() == command_spec(root, bin_dir, legacy_windows=True)[1])
+    legacy = (name == "claude-codex" and platform.system() == "Windows" and
+              command.is_file() and not command.is_symlink() and
+              command.read_bytes() == command_spec(root, bin_dir, name=name, legacy_windows=True)[1])
     if (command.exists() or command.is_symlink()) and not same and not legacy and not replace:
         raise RuntimeError(f"Existing {command} was not changed; rerun with --replace-command to replace it")
     return command, wrapper, same
 
 
-def install_command(root: Path, bin_dir: Path, replace: bool) -> None:
-    command, wrapper, same = preflight_command(root, bin_dir, replace)
+def install_command(root: Path, bin_dir: Path, replace: bool, *, name: str = "claude-codex") -> None:
+    command, wrapper, same = preflight_command(root, bin_dir, replace, name=name)
     bin_dir.mkdir(parents=True, exist_ok=True)
     # Recheck after creating the directory to catch a command installed since
     # the earlier preflight. This is not a multi-file transaction.
-    command, wrapper, same = preflight_command(root, bin_dir, replace)
+    command, wrapper, same = preflight_command(root, bin_dir, replace, name=name)
     if same:
         command.chmod(0o755)
         return
     write_file(command, wrapper, 0o755)
+
+
+def preflight_commands(root: Path, bin_dir: Path, replace: bool) -> None:
+    """Check both names before any installation write, including upgrades."""
+    for name in COMMAND_NAMES:
+        preflight_command(root, bin_dir, replace, name=name)
+
+
+def install_commands(root: Path, bin_dir: Path, replace: bool) -> None:
+    # Recheck the complete set before replacing either entry point. The source
+    # installer is still not a multi-file atomic update; do not use it live.
+    preflight_commands(root, bin_dir, replace)
+    for name in COMMAND_NAMES:
+        install_command(root, bin_dir, replace, name=name)
 
 
 def add_windows_user_path(bin_dir: Path) -> None:
@@ -251,14 +275,14 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=default_root)
     parser.add_argument("--bin-dir", type=Path, help="Windows default: ROOT/bin; POSIX default: ~/.local/bin")
     parser.add_argument("--archive", type=Path, help="Use a local release archive with the same pinned SHA-256")
-    parser.add_argument("--replace-command", action="store_true", help="Replace an existing claude-codex command")
+    parser.add_argument("--replace-command", action="store_true", help="Replace conflicting harnesslift or claude-codex commands")
     args = parser.parse_args()
     root = args.root.expanduser().absolute()
     bin_dir = (args.bin_dir.expanduser().absolute() if args.bin_dir else
                root / "bin" if windows else Path.home() / ".local" / "bin")
     if windows and bin_dir != root / "bin":
         raise RuntimeError("On Windows, the command directory must be ROOT/bin so it stays under the private ACL")
-    preflight_command(root, bin_dir, args.replace_command)
+    preflight_commands(root, bin_dir, args.replace_command)
     install_root(root)
     if windows:
         import windows_acl
@@ -278,7 +302,7 @@ def main() -> None:
     write_file(root / "runtime-source-lock.json", runtime_bundle.canonical(runtime_bundle.source_lock()), 0o600)
     install_proxy(root, args.archive)
     install_config(root)
-    install_command(root, bin_dir, args.replace_command)
+    install_commands(root, bin_dir, args.replace_command)
     if windows:
         paths = [root, *root.rglob("*")]
         if any(path.is_symlink() for path in paths):
@@ -286,10 +310,11 @@ def main() -> None:
         windows_acl.lock(paths)
         if args.bin_dir is None:
             add_windows_user_path(bin_dir)
-    print(f"Installed: {bin_dir / ('claude-codex.cmd' if windows else 'claude-codex')}")
+    print(f"Installed: {bin_dir / ('harnesslift.cmd' if windows else 'harnesslift')}")
+    print("Compatibility command: claude-codex (same installation and accounts)")
     if windows:
         print("Open a new PowerShell or CMD terminal to pick up the user PATH change")
-    print("Next: claude-codex codex-login and models, or claude-codex api key set and api models")
+    print("Next: harnesslift codex-login and models, or harnesslift api key set and api models")
 
 
 if __name__ == "__main__":

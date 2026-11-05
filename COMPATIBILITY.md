@@ -6,7 +6,7 @@ Checked 2026-10-30. Claude Code is the harness. The local proxy supplies model i
 | --- | --- | --- |
 | Model inference and streaming | Verified on macOS with GPT-6.1 Sol, GPT-6 Sol, and GPT-5.6 Sol. | Real completion requests in the bridge evaluation. The local catalog is not an account entitlement test. |
 | `/model` | Verified interactive switching among Sol and Terra routes. | The picker is rebuilt from the authenticated local `/v1/models` catalog at session start. That local proxy catalog may be plan-based; it is not a live entitlement guarantee. Restart the session for new catalog entries. |
-| `/effort` | Low through max are offered only for catalog rows advertising all five levels. | A credential-free [round-trip fixture](tests/probe_effort_roundtrip.py) checks five CLI values through the real client, translator and fake Responses origin; the macOS interactive `/effort` path was checked for all five with Sol, Astra and Luna mappings, and locally with Terra using the selected managed-version proxy. A [Terra run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41870100266) passed on macOS and the Windows CLI but failed on Linux; a [later Linux run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41871305320) passed, without establishing the first failure's cause. Windows interactive behavior and each real model's entitlement remain separate checks. Claude Code's `ultracode` is its own workflow setting, not a Codex reasoning level. |
+| `/effort` | Low through max are offered only for catalog rows advertising all five levels. | A credential-free [round-trip fixture](tests/probe_effort_roundtrip.py) checks five CLI values through the real client, translator and fake Responses origin; the macOS interactive `/effort` path was checked for all five with Sol, Astra and Luna mappings, and locally with Terra using the selected managed-version proxy. A [Terra run](https://github.com/Jcstack/harnesslift/actions/runs/41870100266) passed on macOS and the Windows CLI but failed on Linux; a [later Linux run](https://github.com/Jcstack/harnesslift/actions/runs/41871305320) passed, without establishing the first failure's cause. Windows interactive behavior and each real model's entitlement remain separate checks. Claude Code's `ultracode` is its own workflow setting, not a Codex reasoning level. |
 | `/autocompact` | Reading the configured window works. New profiles derive it from maximum-context metadata. | Earlier profiles used 400k/200k from default windows. A command cannot override their higher-priority startup setting, and editing the file does not hot-update it. Live editing remains a gap; see [OPERATIONS.md](OPERATIONS.md). |
 | Claude HUD and other status-line commands | The temporary adapter corrects the selected model's context size and percentage after `/model` switches. A run against the user's installed HUD showed `500k` and the actual Codex weekly quota while suppressing a false 5-hour value and Claude cost. | The adapter withholds Claude-list-price cost and Anthropic prompt-cache timer. Quota follows one enabled bridge account, using matching native Codex RPC or its fixed ChatGPT usage endpoint; disabled backups and stale other-account caches are excluded. It leaves the user's plugin command and settings file intact. |
 | Read, Edit, Bash, Agent, skills, hooks, local plugins, MCP | These are Claude Code harness features; a sample of tools, ToolSearch, and MCP was exercised on macOS. | The original pin drops mid-conversation `tool_addition` and loads deferred schemas eagerly. The reviewed managed runtime fixes both and is activated for new launches on this installation. [Runtime rollout](RUNTIME.md), [community review](COMMUNITY_REVIEW.md). [Claude Code's provider matrix](https://code.claude.com/docs/en/feature-availability) lists local subagents, hooks, commands, skills, plugins, and MCP across providers. Individual plugins may still assume a Claude account or specific telemetry. |
@@ -41,7 +41,7 @@ Claude Code documents that `current_usage` may be null before the first API
 response and immediately after `/compact`. The existing adapter can turn that
 unknown state into `0%`. The adapter now preserves null percentages until all
 three input counters are available, while retaining a discovered context size.
-The [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41446391248)
+The [three-platform source gate](https://github.com/Jcstack/harnesslift/actions/runs/41446391248)
 passed, and this adapter was installed on the local status-line path without
 restarting the origin, ingress, or Claude clients.
 
@@ -67,9 +67,9 @@ tool, MCP, skill, agent and todo; after a synthetic compact boundary with
 51,271 post-tokens, it displayed `6% (51k/872k)` rather than `6% (0/872k)`.
 The hint is not a provider report. This does not establish every plugin or
 session behavior, and the candidate's security and rollout are separate gates.
-Those render checks also passed on three platform runners in the [candidate run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41451870244),
+Those render checks also passed on three platform runners in the [candidate run](https://github.com/Jcstack/harnesslift/actions/runs/41451870244),
 whose Windows security fixture failed separately; the later adjusted fixture
-passed on [all three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41454320316).
+passed on [all three platforms](https://github.com/Jcstack/harnesslift/actions/runs/41454320316).
 The local plugin now uses 0.15.0 with a guarded Git display and separately
 documented patches; see [SECURITY.md](SECURITY.md).
 
@@ -81,7 +81,7 @@ a fake 160k usage report whether its parent used 100k or 800k; an 800k child
 did not compact when its parent used 100k. The child also completed two
 synthetic Read calls. The sample exercises explicit per-model settings and
 fake token counts, not an actual long conversation, all agent types or a
-provider-enforced context limit. The [source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41449104553)
+provider-enforced context limit. The [source gate](https://github.com/Jcstack/harnesslift/actions/runs/41449104553)
 passed these synthetic cases on macOS, Linux and Windows.
 
 For future models with fewer reasoning levels, Claude Code documents a
@@ -115,7 +115,7 @@ reviewed translator, a fake upstream saw `max` on the rejected request and
 `xhigh` on the subsequent request. These were fake errors and do not establish
 that the real Codex backend has rejected the user's effort. A narrow guard now
 surfaces selected recognizable pre-header rejections on the managed runtime.
-It passed [credential-free three-platform tests](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41425623062)
+It passed [credential-free three-platform tests](https://github.com/Jcstack/harnesslift/actions/runs/41425623062)
 and was activated by rolling backend handoff on 2026-11-02. Legacy sessions
 connected directly to the original endpoint still use the older translator.
 In a separate direct-client control, a differently worded 400 was visible as

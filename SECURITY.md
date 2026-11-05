@@ -2,6 +2,8 @@
 
 Never commit or publish OAuth JSON, access or refresh tokens, API keys, `config.yaml`, `proxy.sha256`, proxy binaries, logs, Claude transcripts, model caches, or files from an installed runtime directory. This repository can be public; Git history must never contain credentials.
 
+To report a vulnerability, use GitHub's [private vulnerability reporting](https://github.com/Jcstack/harnesslift/security/advisories/new) for this repository. Include a synthetic reproduction and affected versions. Do not disclose a vulnerability with sensitive details in a public issue, and do not send live credentials even in a private report.
+
 The optional `claude-codex api` profile stores a project API key only in the installed root's `openai-api-key` file (0600 on POSIX, protected current-user NTFS ACL on Windows). Its separate `runtime-api` service config temporarily contains that key while the API bridge runs; the service binds loopback and requires a separate random client key. The profile sends the project key only to the fixed official `api.openai.com` model-list and Responses endpoints. Official model documentation is fetched without a credential, and redirects are rejected during metadata discovery. The API proxy uses a separate empty `api-auth` credential directory, so it does not load the subscription OAuth files. Stop its service after background work finishes to remove the per-service config. API Platform data-retention rules still apply to requests sent to OpenAI.
 
 Private file permissions protect the key from other OS users, not from programs running as your own user. Claude Code [command hooks run with the user's file permissions](https://code.claude.com/docs/en/hooks#security-considerations); review project hooks and plugins before starting an API-key session in an unfamiliar repository. For an untrusted checkout, Claude Code documents `--bare` or disabling hooks for that run. The bridge itself never installs a remote classifier or sends task excerpts to a third-party routing service.
@@ -40,7 +42,7 @@ When the bridge person is known but the native person is unavailable, the
 fixed selected-bridge endpoint remains the fallback. If the bridge person is
 unknown, quota display and automatic stale-cooldown reset remain unavailable
 instead of assuming two accounts are the same. The [three-platform identity
-gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41534034405)
+gate](https://github.com/Jcstack/harnesslift/actions/runs/41534034405)
 passed synthetic account, race and detached-helper controls. The local helper
 and monitor source were installed with private rollback copies; isolated
 imports and a same-account read-only quota check passed. New helper processes
@@ -55,7 +57,7 @@ that unrelated API keys and Python import paths are absent while the account
 directory and configured proxy remain available. This retains configured
 proxy and certificate trust, PATH and native Codex configuration; it is not an
 OS sandbox or proof about processes launched by Codex itself. The
-[three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41532735109)
+[three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41532735109)
 also covers a detached refresh using an owned fake app-server, with native
 Windows ACL handling. A local macOS install retained a private rollback copy,
 passed an isolated import and a same-account, read-only quota check, and did
@@ -107,15 +109,15 @@ The current source additionally gives the disposable account-validation proxy
 its own temporary HOME and, on Windows, temporary USERPROFILE and AppData
 directories. Its explicitly selected CA environment is retained, and the
 existing direct-network policy is unchanged. A synthetic child confirmed the
-environment boundaries in the [three-platform initial gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41646045132).
+environment boundaries in the [three-platform initial gate](https://github.com/Jcstack/harnesslift/actions/runs/41646045132).
 A later test also paired a former-HOME control with a real model helper
-against a fake loopback proxy. Its [expanded gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41646534202)
+against a fake loopback proxy. Its [expanded gate](https://github.com/Jcstack/harnesslift/actions/runs/41646534202)
 passed on Linux and Windows but timed out in the macOS real-helper fixture.
-A [stage-instrumented rerun](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41647595830)
+A [stage-instrumented rerun](https://github.com/Jcstack/harnesslift/actions/runs/41647595830)
 still failed on macOS during synthetic HTTP-server construction. A local
 negative control showed that a stalled reverse lookup can reproduce that stage;
 the exact runner cause remains unknown. The fixture explicitly rejects reverse
-lookup and uses a numeric loopback identity; its [revised three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41648079447)
+lookup and uses a numeric loopback identity; its [revised three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41648079447)
 passed. Four synthetic checks with copies of the installed dependencies passed,
 and the controller was installed atomically with a private rollback. Read-only
 account, quota, tools, autostart and model-list checks passed; no service or
@@ -244,7 +246,7 @@ of its own owner security fixture failed on this Mac. The separate
 [fail-closed experiment](upstream/patches/claude-hud-v0.15-git-safety.patch)
 passed the fixture and a synthetic config-enumeration failure check locally;
 it is now installed locally, but is not an upstream fix or a complete audit.
-The first [platform run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41451134573)
+The first [platform run](https://github.com/Jcstack/harnesslift/actions/runs/41451134573)
 passed on macOS and Linux but failed one Git-filter fixture on Windows. Its
 first classified failure was the fixture's `git add` positive control, not a
 reported command execution by the candidate. A Windows-only test experiment
@@ -263,7 +265,7 @@ private opt-in and the reviewed collector's per-process guard are both present.
 Its [synthetic controls](tests/probe_hud_guarded_git.py) check the opt-out, a
 missing collector guard or launcher relay even with an injected environment
 variable, the native `hud preview`/`set`/undo paths, and a fake repository command with an
-ordinary-Git positive control. The [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41454320316)
+ordinary-Git positive control. The [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41454320316)
 passed, including the Windows-specific fixture path adjustment. The local
 0.15.0 plugin now has the reviewed collector and guard patches, and its private
 `claudeCodexGuardedGit` opt-in is enabled while `gitStatus.enabled` remains
@@ -291,7 +293,7 @@ uses the process name to select Node, so launching its canonical binary under
 the shim name produced no HUD output. The compatibility patch now preserves
 `node` as `argv[0]` on POSIX while still executing the checked canonical file;
 Windows keeps the previous launch options. A synthetic relay regression fails
-without this change. The [HUD gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41943656248)
+without this change. The [HUD gate](https://github.com/Jcstack/harnesslift/actions/runs/41943656248)
 passed on macOS, Linux and Windows; the new shim-specific regression runs on
 POSIX. On the affected Mac, a no-network, temporary-home test
 using the existing selector, Bun, and Volta rendered a synthetic HUD. The local
@@ -339,7 +341,7 @@ An isolated locked-client test found that a second `--settings` argument
 replaced the bridge-generated launch settings. When that second file changed
 only the destination, Claude sent the synthetic inherited local key to the
 second synthetic endpoint. No real key or external endpoint was used. A
-temporary guard was installed locally after [three-platform unit-test steps](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41463928859),
+temporary guard was installed locally after [three-platform unit-test steps](https://github.com/Jcstack/harnesslift/actions/runs/41463928859),
 without restarting the origin, ingress or clients.
 
 The current source composes custom settings into one launch file. It snapshots
@@ -348,7 +350,7 @@ combines hook event lists and per-model entries, and refuses custom authenticati
 provider, proxy, TLS and conflicting compact-window controls. It puts the local
 key into the composed settings rather than the child process's initial environment,
 so a rejected launch file cannot redirect that inherited key via user settings.
-The [three-platform isolated gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41466134016)
+The [three-platform isolated gate](https://github.com/Jcstack/harnesslift/actions/runs/41466134016)
 used the locked Claude client and fake endpoints to cover normal and `--bare`
 startup, hooks, a denied tool, malformed settings and routing. This is
 not proof for arbitrary plugins, all settings, future clients, or protection from
@@ -370,7 +372,7 @@ Claude controls did not run it. No actual user command was used. The updated
 source avoids copying the user status line when restricted, bare or safe mode
 is selected by a CLI flag or inherited environment variable, or when user
 settings are excluded; an explicitly supplied
-launch status line remains eligible. The [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41469556864)
+launch status line remains eligible. The [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41469556864)
 and an installed-code isolated test passed, and the controller-only local update
 did not restart the origin, ingress or running clients. A separate synthetic
 client test found that the older fallback also overrode project/local status
@@ -379,7 +381,7 @@ check whether they define a status line, and leaves detected or uncertain
 project/local precedence to Claude. It does not persist, print or upload those
 file contents. In that case the project status line is not adapted,
 so its context, cost, quota and cache displays are not corrected by this bridge.
-The [three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41472944905)
+The [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41472944905)
 covered policy on Windows and locked-client project, local and linked-worktree
 cases on macOS/Linux. The local launcher was updated from commit `2322d92`,
 which changed only the warning text after that gate, without restarting the
@@ -405,7 +407,7 @@ error without the synthetic content or exception text. This protects that
 specific logger in newly started processes using an updated capability source
 snapshot; it does not sanitize the child program's own stderr, other loggers,
 or already running processes. See [MCP naming and SDK assessment](MCP_NAMING.md).
-After the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41408466871)
+After the [three-platform source gate](https://github.com/Jcstack/harnesslift/actions/runs/41408466871)
 passed on 2026-11-02, the local installation selected a new immutable snapshot
 containing only this source change. The previous snapshot and enablement choice
 were retained, and the origin, managed runtime, and running processes were not

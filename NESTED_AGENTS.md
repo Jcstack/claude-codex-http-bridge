@@ -21,7 +21,7 @@ background child. While that child was held open, the intermediate agent's
 synthetic file write and returned a tool result. In the independent root-session
 control, `TaskStop` reported success and no corresponding file appeared during
 the bounded observation. The same observations passed in the [Linux, macOS and
-Windows runner fixture](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41461244669).
+Windows runner fixture](https://github.com/Jcstack/harnesslift/actions/runs/41461244669).
 This is a direct-client, fake-model observation, so it shows a harness behavior
 without implicating the HTTP bridge. It does not prove every stop or descendant
 effect behaves the same way, nor does it identify the cause of a particular
@@ -42,7 +42,7 @@ for an ownership-shaped `TaskStop` failure: the target may still be running, and
 its state and authority need review before relying on cancellation. It accepts
 bounded hook input, emits no task IDs, paths or error text, and performs no task
 control, messaging, logging or network access. In the [three-platform isolated
-fixture](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41462466873)
+fixture](https://github.com/Jcstack/harnesslift/actions/runs/41462466873)
 its context reached the fake endpoint after the denial and was absent after the
 successful root-stop control. The hook is not installed or enabled. Its text
 depends on a non-contractual error shape, and a real model's response has not

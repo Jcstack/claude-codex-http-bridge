@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Claude Code against a private localhost model service."""
+"""HarnessLift: run Claude Code against a private localhost model service."""
 
 from __future__ import annotations
 
@@ -1078,23 +1078,25 @@ def main() -> int:
         return api_profile.key_command(ROOT, arguments[1])
     mode, selected, claude_args = parse_args(arguments)
     if mode == "help":
-        print("Usage: claude-codex [api] [--model MODEL_ID|sol|astra|terra|luna] [Claude Code options]")
-        print("Subscription: claude-codex codex-login; claude-codex models; claude-codex usage.")
-        print("Independent accounts: claude-codex account login ALIAS; account check ALIAS; account use ALIAS; account list.")
-        print("Direct OpenAI API: claude-codex api key set; claude-codex api models; claude-codex api --model sol.")
-        print("Run claude-codex [api] bridge start | status | stop to manage each private localhost service.")
-        print("macOS/Windows login recovery: claude-codex autostart enable | status | disable.")
-        print("Reviewed runtime: claude-codex bridge upgrade BUNDLE | rollback | reload; replaced backends drain.")
+        print("HarnessLift — run Claude Code with your Codex models.")
+        print("Commands: harnesslift (recommended), claude-codex (compatible alias).")
+        print("Usage: harnesslift [api] [--model MODEL_ID|sol|astra|terra|luna] [Claude Code options]")
+        print("Subscription: harnesslift codex-login; harnesslift models; harnesslift usage.")
+        print("Independent accounts: harnesslift account login ALIAS; account check ALIAS; account use ALIAS; account list.")
+        print("Direct OpenAI API: harnesslift api key set; harnesslift api models; harnesslift api --model sol.")
+        print("Run harnesslift [api] bridge start | status | stop to manage each private localhost service.")
+        print("macOS/Windows login recovery: harnesslift autostart enable | status | disable.")
+        print("Reviewed runtime: harnesslift bridge upgrade BUNDLE | rollback | reload; replaced backends drain.")
         print("Inside Claude Code, use /model, /effort, and /autocompact normally.")
-        print("Optional native capabilities: claude-codex tools install | status | enable | disable (Python 3.11+).")
+        print("Optional native capabilities: harnesslift tools install | status | enable | disable (Python 3.11+).")
         print("Use --no-native-tools to omit them for one launch; --native-tools explicitly enables them with strict MCP config.")
         print("Opt-in native V2 /compact: --native-compaction (reviewed subscription runtime required); --no-native-compaction disables it.")
-        print("Opt-in scoped computer use: claude-codex desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
-        print("Read-only metadata: claude-codex diagnostics [--hours 2 | --lifetime] [--session UUID | --tracked] [--include-children].")
-        print("Partial offline MCP name check: claude-codex mcp-audit [--config FILE] [--inventory FILE] [--show-names].")
-        print("Partial offline MCP definition check: claude-codex mcp-definitions --session-file FILE --inventory FILE.")
-        print("Reported cache tokens: claude-codex cache telemetry enable | disable | status.")
-        print("Quota monitor: claude-codex quota status | recover.")
+        print("Opt-in scoped computer use: harnesslift desktop install; desktop windows; desktop select WINDOW_ID; desktop disable.")
+        print("Read-only metadata: harnesslift diagnostics [--hours 2 | --lifetime] [--session UUID | --tracked] [--include-children].")
+        print("Partial offline MCP name check: harnesslift mcp-audit [--config FILE] [--inventory FILE] [--show-names].")
+        print("Partial offline MCP definition check: harnesslift mcp-definitions --session-file FILE --inventory FILE.")
+        print("Reported cache tokens: harnesslift cache telemetry enable | disable | status.")
+        print("Quota monitor: harnesslift quota status | recover.")
         return 0
     if mode == "diagnostics":
         import diagnostics

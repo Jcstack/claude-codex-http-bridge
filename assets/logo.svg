@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="HarnessLift">
+  <rect width="128" height="128" rx="30" fill="#101923"/>
+  <g fill="none" stroke="#8be0c2" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 94V36M32 66H88M88 94V23"/>
+    <path d="M69 42L88 23L107 42" stroke="#ffad8e"/>
+  </g>
+</svg>

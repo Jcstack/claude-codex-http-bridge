@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a reproducible problem without private data.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check COMPATIBILITY.md and STREAMING.md first. Use synthetic examples.
+        Do not post tokens, account/email identifiers, config files, private paths, prompts, transcripts, or raw logs.
+        For security issues, read SECURITY.md before opening a public report.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python/Claude Code versions, bridge commit, subscription or API route, pinned or reviewed runtime. No account details or installation paths.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: Minimal steps with dummy files and prompts. Note whether sleep/lock or long reasoning was involved when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+      description: Include only the short redacted error category and what happened. Do not paste raw logs.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy review
+      options:
+        - label: I reviewed this report and removed credentials, account identifiers, private paths, prompts, transcripts, and raw logs.
+          required: true

@@ -80,18 +80,18 @@ separate synthetic gateway test exercised
 the reviewed translator, deferred discovery through ToolSearch,
 both tool calls, and preservation of the cache key, initial tool definitions,
 instructions, and previous-input prefix. It did not test a provider cache hit.
-The [three-platform source/client gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41407283365)
-and [three-platform candidate translator gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41407306970)
+The [three-platform source/client gate](https://github.com/Jcstack/harnesslift/actions/runs/41407283365)
+and [three-platform candidate translator gate](https://github.com/Jcstack/harnesslift/actions/runs/41407306970)
 passed for these synthetic cases. They do not test real plugins, a real
 Windows account, or production transport behavior.
 
-The same test-only adapter later failed once in the [macOS client job](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41444475594/job/125274061156)
+The same test-only adapter later failed once in the [macOS client job](https://github.com/Jcstack/harnesslift/actions/runs/41444475594/job/125274061156)
 without a recorded case or failure category; its source was unchanged from an
 earlier passing run. A separate local run passed. Neither observation identifies
 the cause. Three further consecutive local macOS runs passed the resume, deny,
-and dynamic-list controls; the later [source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41455750069)
+and dynamic-list controls; the later [source gate](https://github.com/Jcstack/harnesslift/actions/runs/41455750069)
 also passed. These samples do not explain or rule out the original intermittent
-failure. A later [macOS client failure](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41473378959)
+failure. A later [macOS client failure](https://github.com/Jcstack/harnesslift/actions/runs/41473378959)
 recorded a changed server list without the new alias in the observed requests.
 Its precise cause is unproven. In the old test the fake gateway captured the
 next request before waiting for the changed-list marker, so that wait could
@@ -201,9 +201,9 @@ selected translator with a fake API-compatible Responses origin. The
 read-only definition comparison implementation reported the schema difference from that
 fixture's retained record and supplied snapshot. This does not establish how
 interactive clients, real plugins, models, or the subscription executor behave.
-The [direct-client observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487736135)
+The [direct-client observation](https://github.com/Jcstack/harnesslift/actions/runs/41487736135)
 passed on macOS, Linux and Windows, including the fixture-only refusal cases
-below. In [candidate run 41487752563, attempt 1](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41487752563/attempts/1),
+below. In [candidate run 41487752563, attempt 1](https://github.com/Jcstack/harnesslift/actions/runs/41487752563/attempts/1),
 Linux and Windows completed the translator controls; the macOS build failed an
 unrelated synthetic upstream WebSocket test before reaching those controls.
 That failed attempt is not a three-platform translator pass.
@@ -275,9 +275,9 @@ Windows without an account. Translator and native-executor checks remain in
 the separate candidate-proxy workflow. A successful observational step is not
 proof that a stale-definition issue is fixed; the workflow emits a warning
 when this specific synthetic stale condition is observed.
-The [three-platform client observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41484089396)
+The [three-platform client observation](https://github.com/Jcstack/harnesslift/actions/runs/41484089396)
 completed successfully on macOS, Linux and Windows, including its synthetic
-stdio and Streamable HTTP controls. The [candidate translator gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41480503513)
+stdio and Streamable HTTP controls. The [candidate translator gate](https://github.com/Jcstack/harnesslift/actions/runs/41480503513)
 also passed on those platforms. These results do not remove the observed
 stale-definition or notification-recovery limitations.
 
@@ -365,7 +365,7 @@ characters are counted separately. Zero conflicts in a partial snapshot is
 not a guarantee of safe or complete plugin behavior. Without a tool inventory,
 tool-collision and related unexamined counts are `null`, not zero.
 
-After the [three-platform source and client gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41356275179)
+After the [three-platform source and client gate](https://github.com/Jcstack/harnesslift/actions/runs/41356275179)
 passed on 2026-11-02, the local installation received the reviewed launcher
 and audit module. A synthetic installed-command check passed; the selected
 account, origin, ingress and current backend retained their identities, and no
@@ -436,7 +436,7 @@ that the session has no retained definitions. Session input is limited
 to 256 MiB and each JSONL record to 8 MiB; the snapshot limit is 16 MiB. This
 is not a guard and does not prevent a stale tool call.
 
-The [dedicated three-platform gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41485153990)
+The [dedicated three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41485153990)
 passed with the locked client and synthetic inputs. The new module and launcher
 were then installed locally, in that order. A private launcher backup was retained,
 and an installed-command synthetic check passed without restarting the origin,

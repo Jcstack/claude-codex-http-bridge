@@ -40,7 +40,7 @@ client itself had not sent that flag in the tested MCP request. In corresponding
 controls, a valid string reached the fake server once, while an explicit
 `PreToolUse` denial ran and prevented the invalid call from reaching it.
 The selected installed translator was exercised locally on macOS; the direct
-and candidate routes produced the same observations on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41521874679).
+and candidate routes produced the same observations on [macOS, Linux and Windows](https://github.com/Jcstack/harnesslift/actions/runs/41521874679).
 
 In another client test, the loopback shim injected a programmatic-only
 `allowed_callers` field into the synthetic tool definition. The selected
@@ -51,7 +51,7 @@ request reached the fake upstream or fake tool. The client had not itself sent
 the caller field in these samples. This confirms only the behavior of the
 synthetic injection and controls, not a real model call, plugin invocation or
 Claude permission bypass. The same baseline and combined-candidate controls
-passed on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41525145049).
+passed on [three platforms](https://github.com/Jcstack/harnesslift/actions/runs/41525145049).
 
 This is evidence about a permissive fixture and the tested client/translator
 combination, not evidence that a real provider violates strict mode, that a
@@ -89,8 +89,8 @@ same prompt fields and session cache key versus the locally selected binary,
 both without caller policies and with an explicit direct policy on every tool.
 That comparison does not establish real provider cache hits.
 The corresponding protocol, native-executor, real-client and synthetic
-cache-structure controls without caller policies passed on [macOS, Linux and Windows](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41526176567);
-a later [three-platform comparison](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41529298769)
+cache-structure controls without caller policies passed on [macOS, Linux and Windows](https://github.com/Jcstack/harnesslift/actions/runs/41526176567);
+a later [three-platform comparison](https://github.com/Jcstack/harnesslift/actions/runs/41529298769)
 also retained the prompt fields and cache key with an explicit direct policy,
 using a candidate that combines this guard with the separate browser-state
 experiment. No browser-state content appeared in that comparison.
@@ -104,7 +104,7 @@ succeeded. The same temporary ingress and CA survived rollback, and a locked
 Claude client continued its synthetic conversation across a subsequent
 baseline-to-candidate handoff. The two fixture bundles use a mocked source
 lock; this is not provenance verification or a live-session rollout test.
-The same handoff and locked-client fixture also passed on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41526902170).
+The same handoff and locked-client fixture also passed on [three platforms](https://github.com/Jcstack/harnesslift/actions/runs/41526902170).
 
 This narrower candidate deliberately leaves the existing `strict: false`
 translation and dropped `input_examples` unchanged. A fake invalid strict
@@ -196,7 +196,7 @@ case was refused by the fixture's exponent limit before validation. This is a
 deliberate fixture-policy comparison, not a claim that the library or the
 suite is wrong. The selected cases omit many files, optional and remote-reference
 scenarios; the separate regexp counterexample below demonstrates why the zero
-false-acceptance count does not establish complete safety. The [full observation run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41522713263)
+false-acceptance count does not establish complete safety. The [full observation run](https://github.com/Jcstack/harnesslift/actions/runs/41522713263)
 passed on all three platforms.
 
 The default Go regexp engine adds another concrete incompatibility. In the
@@ -228,7 +228,7 @@ and refusal of external schema references. A deliberately hanging child was
 canceled after an explicit readiness signal, a waiting second call timed out,
 and a later call reused the released slot; oversized synthetic output was
 discarded. The process receives a minimal environment and test-only data; a
-synthetic unrelated secret variable was not inherited in the control on [three platforms](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41523801706).
+synthetic unrelated secret variable was not inherited in the control on [three platforms](https://github.com/Jcstack/harnesslift/actions/runs/41523801706).
 This fixture has no hard memory or CPU quota, process-tree sandbox, production
 protocol, streamed tool handling, or deployed integration; it does not solve
 the known regex and format differences.
@@ -243,7 +243,7 @@ formats or other keywords are refused. Cases cover interleaved valid
 calls, an invalid parallel call, missing or changed terminal data, duplicate
 identities, late deltas, cancellation, an oversized argument and a different
 request's call. The fixture and its worker passed a local Go race-detector run,
-and the [validator-only gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41524490404)
+and the [validator-only gate](https://github.com/Jcstack/harnesslift/actions/runs/41524490404)
 passed on three platforms.
 
 This is an abstract, sequential event model: it does not parse actual Responses
@@ -269,10 +269,10 @@ from the active runtime and send no user prompts or credentials.
 
 The [manually dispatched workflow](.github/workflows/tool-contract-observation.yml)
 builds the isolated candidate from pinned public source on macOS, Linux and
-Windows. The [first three-platform observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41519344980)
+Windows. The [first three-platform observation](https://github.com/Jcstack/harnesslift/actions/runs/41519344980)
 passed the preflight, native-executor and existing tool-contract checks; it did
 not include the subsequently added standalone validator fixture. The [later
-three-platform observation](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41520836559)
+three-platform observation](https://github.com/Jcstack/harnesslift/actions/runs/41520836559)
 also passed the separate validator fixture and its dependency checks. On all
 three platforms, the fixture still observed an unknown format being accepted;
 it did not include the subsequently added real-client MCP effect controls.

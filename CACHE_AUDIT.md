@@ -68,10 +68,10 @@ real accounts.
 The executor fixture has also been extended to add a deferred tool that was
 absent from the first request, reveal it, and then remove it. Its new controls
 check the cache key, prefix bytes, discovery, and removal separately. The
-[executor build and test steps](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41478669731)
+[executor build and test steps](https://github.com/Jcstack/harnesslift/actions/runs/41478669731)
 passed on macOS, Linux and Windows. That workflow was canceled as superseded
 after its Linux and Windows contract jobs passed; its macOS contract job did
-not complete. The [later candidate gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41480503513)
+not complete. The [later candidate gate](https://github.com/Jcstack/harnesslift/actions/runs/41480503513)
 passed on all three platforms. This fixture does not run a Claude client or
 test provider cache hits.
 
@@ -85,12 +85,12 @@ the resumed first input retained the final pre-resume input as a prefix. The
 fixture reports booleans without returning keys or request bodies. This is one
 synthetic resume with a stale tool description, not proof of a provider cache
 hit, correct plugin semantics, real subscription behavior, fork behavior or
-cross-account isolation. The [same-resume structural gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41492286977)
+cross-account isolation. The [same-resume structural gate](https://github.com/Jcstack/harnesslift/actions/runs/41492286977)
 passed on macOS, Windows and Linux.
 An additional local synthetic `--fork-session` continuation produced a
 different session ID and cache key while retaining the compared input prefix
 and unchanged sampled tools and instructions. The stale description remained
-visible in this fork. The [resume-and-fork structural gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41492617631)
+visible in this fork. The [resume-and-fork structural gate](https://github.com/Jcstack/harnesslift/actions/runs/41492617631)
 passed on macOS, Windows and Linux. A distinct key does not prove provider-side isolation,
 cache misses or hits, correct plugin behavior, or real-account separation.
 Correct current tool semantics take priority over preserving a cache prefix.
@@ -242,7 +242,7 @@ the fake cache-read token count. This does not show that Claude Code sends that
 nonstandard request field, that a real provider supports or rejects diagnostic
 comparisons, or that every future translator has the same behavior. No model,
 account credential or running bridge service was used. The [three-platform
-cache observation run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41514331615)
+cache observation run](https://github.com/Jcstack/harnesslift/actions/runs/41514331615)
 reported the same synthetic result for the reviewed translator on macOS,
 Windows and Linux. It also ran the separate synthetic resume/fork observations.
 
@@ -328,7 +328,7 @@ even though the fake service supplied no lifetime. The [reproducible probe](test
 uses a temporary home and no provider. Its optional `--hud-dir` path pipes
 the real client's synthetic status through the bridge adapter and the reviewed
 HUD, then checks the displayed fraction and the absence of a timer. This full
-chain passed on macOS and Linux in the [HUD gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41456511723),
+chain passed on macOS and Linux in the [HUD gate](https://github.com/Jcstack/harnesslift/actions/runs/41456511723),
 and locally with the installed HUD package. These are fake responses and do not
 establish the values in a real session. Windows console behavior remains
 unverified; the Windows job covers non-interactive synthetic rendering.
@@ -342,7 +342,7 @@ report is not proof that caching is off. These values describe counters
 reported to Claude for the main conversation, not a provider-wide hit rate, a
 guaranteed cache lifetime, or a bill. A continuing session can span account or
 model changes, so the counters do not establish account-level cache isolation.
-The shared preference passed the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41455750069)
+The shared preference passed the [three-platform source gate](https://github.com/Jcstack/harnesslift/actions/runs/41455750069)
 and was installed and enabled locally without restarting the origin, ingress,
 or Claude clients. It applies on the next status-line refresh for existing and
 future subscription sessions. An explicit per-session environment setting
@@ -351,7 +351,7 @@ record an explicit `0`. The installed adapter now checks the inherited session
 environment before the shared preference. If the client strips that environment
 value, it cannot be recovered from an older profile. An isolated real-client
 positive and negative control reproduced the former behavior and verified the
-new behavior with a fake enabled preference. The [HUD gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41459059115)
+new behavior with a fake enabled preference. The [HUD gate](https://github.com/Jcstack/harnesslift/actions/runs/41459059115)
 passed on three platforms, with the interactive flow on macOS and Linux. The
 installed adapter and HUD also passed that synthetic flow on this Mac.
 `claude-codex cache telemetry status` reports the shared choice; `disable` turns
@@ -432,8 +432,8 @@ Same-user manipulation and the local filesystem remain outside this diagnostic's
 guarantees. [Claude's status-line documentation](https://code.claude.com/docs/en/statusline)
 describes the session ID and cache fields delivered to a status-line command;
 the synthetic real-client and HUD test exercises this bridge's own filtering.
-The [three-platform unit gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41669020246)
-and [HUD gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41669020717)
+The [three-platform unit gate](https://github.com/Jcstack/harnesslift/actions/runs/41669020246)
+and [HUD gate](https://github.com/Jcstack/harnesslift/actions/runs/41669020717)
 passed. The reviewed helper and adapter were installed dependency-first on the
 active Mac with a private rollback and no service or session restart. Copies of
 the installed sources passed 57 synthetic checks and a staged locked-client/HUD

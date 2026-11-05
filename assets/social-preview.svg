@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="HarnessLift: run Claude Code with your Codex models">
+<rect width="1280" height="640" fill="#101923"/>
+<g transform="translate(60 54)">  <rect width="128" height="128" rx="30" fill="#101923"/>
+  <g fill="none" stroke="#8be0c2" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 94V36M32 66H88M88 94V23"/>
+    <path d="M69 42L88 23L107 42" stroke="#ffad8e"/>
+  </g>
+</g>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="222" y="124" fill="#edf2f6" font-size="68" font-weight="700">HarnessLift</text>
+<text x="226" y="176" fill="#8be0c2" font-size="25" font-weight="400">Your harness. Your models.</text>
+<text x="72" y="298" fill="#edf2f6" font-size="50" font-weight="700">Run Claude Code with</text>
+<text x="72" y="359" fill="#edf2f6" font-size="50" font-weight="700">your Codex models.</text>
+<rect x="72" y="424" width="348" height="101" rx="18" fill="#192632"/>
+<text x="95" y="467" fill="#8be0c2" font-size="28" font-weight="700">Claude Code</text>
+<text x="95" y="503" fill="#9eb0bf" font-size="20" font-weight="400">Local tools + permissions</text>
+<rect x="466" y="424" width="348" height="101" rx="18" fill="#192632"/>
+<text x="489" y="467" fill="#8be0c2" font-size="28" font-weight="700">Local bridge</text>
+<text x="489" y="503" fill="#9eb0bf" font-size="20" font-weight="400">Private HTTP translation</text>
+<rect x="860" y="424" width="348" height="101" rx="18" fill="#192632"/>
+<text x="883" y="467" fill="#8be0c2" font-size="28" font-weight="700">Codex models</text>
+<text x="883" y="503" fill="#9eb0bf" font-size="20" font-weight="400">Inference via OpenAI</text>
+<path d="M434 470h17m-6-6 6 6-6 6" fill="none" stroke="#ffad8e" stroke-width="3"/>
+<path d="M828 470h17m-6-6 6 6-6 6" fill="none" stroke="#ffad8e" stroke-width="3"/>
+<text x="72" y="587" fill="#9eb0bf" font-size="22" font-weight="400">DEVELOPER PREVIEW  /  macOS · Linux · Windows</text>
+</g>
+</svg>

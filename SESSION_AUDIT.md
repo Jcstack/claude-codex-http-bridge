@@ -54,9 +54,9 @@ before sharing. It is not automatically saved or committed.
   input tokens, not request hit rate, throughput, subscription allowance or
   billing. Cached input still occupies context; cumulative input is not a
   context window. Child durations can overlap.
-  The [three-platform session-metadata gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41488570288)
+  The [three-platform session-metadata gate](https://github.com/Jcstack/harnesslift/actions/runs/41488570288)
   passed before the updated audit module was installed locally. The [full
-  source-and-install run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41488563596)
+  source-and-install run](https://github.com/Jcstack/harnesslift/actions/runs/41488563596)
   also passed on all three platforms. An installed
   synthetic check confirmed both summaries, privacy and read-only behavior;
   the origin, ingress, and existing session processes were not restarted.
@@ -91,7 +91,7 @@ before sharing. It is not automatically saved or committed.
   error without exporting the result text, task IDs or arguments. Other errors
   remain unclassified, and truncated error text is counted separately. A text
   match does not establish ownership, task liveness, or a common root cause.
-  The [three-platform unit-test steps](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41461635515)
+  The [three-platform unit-test steps](https://github.com/Jcstack/harnesslift/actions/runs/41461635515)
   passed, and the exact audit file was installed locally without restarting any
   service. See [NESTED_AGENTS.md](NESTED_AGENTS.md).
 - Proxy logs are shared across conversations. Origin and relay observations
@@ -108,14 +108,14 @@ before sharing. It is not automatically saved or committed.
   observations, not inference-failure counts, proof of a network connection,
   or a cross-process correlation. General transport mentions can include the
   same lines, so do not add the categories together. The
-  [three-platform metadata gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41643621189)
+  [three-platform metadata gate](https://github.com/Jcstack/harnesslift/actions/runs/41643621189)
   passed, including out-of-order timestamps, and the module was installed
   locally with a private rollback and no service restart.
 - The managed-log filter must retain an incomplete-stream sentinel even when
   no HTTP access record or general transport keyword exists. Oversized lines
   also need visible coverage because their timestamps and content are unknown.
   A synthetic regression checks both cases without returning the lines, tags,
-  paths or keys. The unit-test steps in the [three-platform run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41457409921)
+  paths or keys. The unit-test steps in the [three-platform run](https://github.com/Jcstack/harnesslift/actions/runs/41457409921)
   passed, and the fix was installed locally without restarting any service.
   Other jobs in that run may still be in progress.
 
@@ -254,7 +254,7 @@ It reports only a unique match, marks reused tags as ambiguous, and emits no
 tag, raw error, URL, or body. The wider window helps observe a later completion
 but increases the chance of an unrelated tag reuse. Treat it as correlation,
 not proof of retry behavior or complete response delivery.
-After the [three-platform source gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41409393314)
+After the [three-platform source gate](https://github.com/Jcstack/harnesslift/actions/runs/41409393314)
 passed, the updated diagnostic module was installed atomically and its
 read-only command passed a local smoke check. The original and managed service
 states were unchanged; no running process was restarted.

@@ -1,6 +1,7 @@
 """Exercise wrapper Python startup using temporary, synthetic configuration."""
 
 import json
+from itertools import product
 import os
 from pathlib import Path
 import subprocess
@@ -82,8 +83,8 @@ print(json.dumps({"ignore_python_env":bool(sys.flags.ignore_environment),
 
     @unittest.skipIf(os.name == "nt", "The tmux wrapper is POSIX-only")
     def test_tmux_wrapper_keeps_exit_status_and_restores_automatic_rename(self):
-        for exit_code in (0, 7):
-            with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory(prefix="bridge-tmux-fixture-") as temporary:
+        for exit_code, command_name in product((0, 7), ("claude-codex", "harnesslift", "untrusted\nname")):
+            with self.subTest(exit_code=exit_code, command_name=command_name), tempfile.TemporaryDirectory(prefix="bridge-tmux-fixture-") as temporary:
                 root = Path(temporary)
                 bin_dir = root / "bin"
                 bin_dir.mkdir()
@@ -106,11 +107,14 @@ esac
                 environment = {key: os.environ[key] for key in ("TMPDIR", "LANG") if key in os.environ}
                 environment.update(PATH=str(bin_dir) + os.pathsep + os.defpath, HOME=str(root), TMUX_PANE="%fixture",
                     CLAUDE_CODEX_BRIDGE_HOME=str(root), CLAUDE_CODEX_PYTHON_BIN=sys.executable,
+                    CLAUDE_CODEX_COMMAND_NAME=command_name,
                     FIXTURE_TMUX_STATE=str(state), FIXTURE_TMUX_RESTORED=str(restored))
                 result = subprocess.run(["/bin/bash", str(SOURCE / "run-claude-codex.sh")], env=environment,
                                         capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, exit_code)
                 self.assertEqual(restored.read_text(encoding="utf-8"), "on")
+                self.assertEqual(state.read_text(encoding="utf-8"),
+                                 "harnesslift" if command_name == "harnesslift" else "claude-codex")
 
 
 if __name__ == "__main__":
