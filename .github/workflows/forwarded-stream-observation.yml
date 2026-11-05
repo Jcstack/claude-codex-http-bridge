@@ -95,4 +95,4 @@ jobs:
         run: |
           set -euo pipefail
           python runtime_bundle.py --proxy "observed-${{ matrix.binary }}" --ingress bridge-ingress --output observation-bundle
-          CLAUDE_CODEX_STREAM_DIAGNOSTICS=1 python tests/smoke_managed_runtime.py observation-bundle --claude-client
+          CLAUDE_CODEX_STREAM_DIAGNOSTICS=1 python tests/smoke_managed_runtime.py observation-bundle --claude-client --previous-proxy "baseline-${{ matrix.binary }}"

@@ -79,10 +79,13 @@ def persistent_claude(root, value, base_runtime, base, *, background=False, tran
     if not claude: raise RuntimeError("Claude fixture binary is required")
     config = root / "claude-config"; runtime_bundle.private_dir(config)
     work = root / "workspace"; work.mkdir()
+    temporary = root / "client-tmp"; runtime_bundle.private_dir(temporary)
     env = isolated_environment(root)
     env.update({"CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_DEFAULT_SONNET_MODEL": MODEL,
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL": MODEL, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-                "CLAUDE_CODE_ATTRIBUTION_HEADER": "0", "DISABLE_TELEMETRY": "1"})
+                "CLAUDE_CODE_ATTRIBUTION_HEADER": "0", "DISABLE_TELEMETRY": "1",
+                "CLAUDE_CODE_TMPDIR": str(temporary), "TMPDIR": str(temporary),
+                "TMP": str(temporary), "TEMP": str(temporary)})
     env = rolling_runtime.client_environment(root, value, env, config)
     settings = config / "fixture-settings.json"
     api_profile.write_private(settings, json.dumps({"modelPicker": {"options": [{"model": MODEL, "label": "Fixture",
@@ -217,7 +220,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path); parser.add_argument("--claude-client", action="store_true")
     parser.add_argument("--background-client", action="store_true")
+    parser.add_argument("--previous-proxy", type=Path, help="Use a synthetic-source-lock old binary for the first generation")
     args = parser.parse_args()
+    if args.previous_proxy and (not args.claude_client or args.background_client or
+                                os.environ.get("CLAUDE_CODEX_STREAM_DIAGNOSTICS") != "1"):
+        parser.error("The old-to-observed handoff requires the isolated Claude client and observer flag")
     Upstream.requests = []; Upstream.admitted.clear(); Upstream.release.clear()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
@@ -230,7 +237,21 @@ def main():
                 api_profile.write_private(source / name, text)
             base = {"process_identity": process_identity.stamp(os.getpid()), "pid": os.getpid(), "port": server.server_port, "session": source.name}
             with patch.object(launcher, "ROOT", root):
-                runtime_bundle.activate(root, args.bundle.resolve())
+                candidate = args.bundle.resolve()
+                if args.previous_proxy:
+                    manifest, _ = runtime_bundle.verify(candidate)
+                    if runtime_bundle.file_hash(args.previous_proxy.resolve()) == manifest["binaries"]["proxy"]["sha256"]:
+                        raise RuntimeError("The old and candidate proxy binaries must differ")
+                    ingress = candidate / manifest["binaries"]["ingress"]["file"]
+                    previous_bundle = root / "synthetic-previous-bundle"
+                    synthetic_lock = {"synthetic_only": True, "files": {"gateway/process_identity.go": "synthetic"}}
+                    # The old-binary bundle is fixture-only; its source lock is
+                    # mocked rather than claimed to describe the actual build.
+                    with patch.object(runtime_bundle, "source_lock", return_value=synthetic_lock):
+                        runtime_bundle.pack(args.previous_proxy.resolve(), ingress, previous_bundle)
+                        runtime_bundle.activate(root, previous_bundle)
+                else:
+                    runtime_bundle.activate(root, candidate)
                 value = None
                 try:
                     value = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC})
@@ -264,7 +285,21 @@ def main():
                             else: raise AssertionError("Replacement failure was hidden")
                         assert (runtime / "backend.json").read_bytes() == previous
                         assert rolling_runtime.state(root) == before_state
-                        updated = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC}, force=True)
+                        if args.previous_proxy:
+                            def transition():
+                                runtime_bundle.activate(root, candidate)
+                                return rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC}, force=True)
+                            # A second, real Claude client uses the old backend,
+                            # crosses the handoff, and continues while the first
+                            # synthetic stream is still deliberately held open.
+                            try:
+                                persistent_claude(root, value, base_runtime, base, transition=transition)
+                            except BaseException:
+                                Upstream.release.set()
+                                raise
+                            updated = rolling_runtime.state(root)
+                        else:
+                            updated = rolling_runtime.ensure(root, base_runtime, base, {MODEL: SPEC}, force=True)
                         assert updated["pid"] == value["pid"] and updated["port"] == value["port"]
                         assert len(updated["generations"]) == 2
                         started_followup = time.monotonic()
@@ -350,7 +385,7 @@ def main():
                     content, _ = stream(value["port"], key, request, ca_file=ca)
                     assert len(Upstream.requests) == count + 1, "Relay retained an obsolete origin cooldown"
                     assert "FIXTURE" == "".join(block.get("text", "") for block in content)
-                    if args.claude_client: persistent_claude(root, updated, base_runtime, base, background=args.background_client)
+                    if args.claude_client and not args.previous_proxy: persistent_claude(root, updated, base_runtime, base, background=args.background_client)
                     print(json.dumps({"mock_only": True, "stable_tls_endpoint": "pass",
                         "old_stream_drained": "pass", "active_stop_refused": "pass", "legacy_service_preserved": "pass",
                         "same_session_key_stable_different_sessions_distinct": "pass",
@@ -358,6 +393,7 @@ def main():
                         "origin_birth_and_executable_checked_before_credentials": "pass",
                         "origin_quota_preserved_and_early_reset_retried": "pass",
                         "same_claude_process_after_backend_reload": "pass" if args.claude_client else "not-run",
+                        "previous_binary_to_observed_handoff": "pass" if args.previous_proxy else "not-run",
                         "background_tls_with_warm_wrong_supervisor": "pass" if args.background_client else "not-run"}))
                 finally:
                     Upstream.release.set()
