@@ -312,8 +312,15 @@ identity. An [OpenAI Codex issue](https://github.com/openai/codex/issues/56346)
 independently reports the same in-stream error on the official route; it is a
 user report, not confirmation of the cause here. The experimental default waits
 30–60 seconds with positive jitter and supports cancellation, but performs at
-most one retry. The fake end-to-end test deliberately replaces the wait with a
-zero-delay test clock; it does not validate long real-session heartbeats. An
+most one retry. The fast fake end-to-end fixture replaces the wait with a
+zero-delay test clock. Separate fake-origin tests explicitly enabled pre-output
+keepalives on both disposable proxies and used the actual delay: one raw-client
+run waited 51.2 seconds, received 51 SSE comments and completed after one
+identical retry; a real Claude Code client waited 50.1 seconds and completed
+its owned Write exactly once. These are individual macOS observations, not
+proof of real-session liveness. The installed configurations did not set the
+keepalive options, and were not changed. A [portable fixture](tests/probe_reasoning_retry_wait.py)
+checks the raw-client case. An
 unmerged [Codex proposal](https://github.com/openai/codex/pull/31058) describes
 a longer, independently bounded policy for selected capacity errors.
 
@@ -327,8 +334,8 @@ behavior for every error shape, or a real provider quota reset.
 
 Do not deploy this experiment: atomic account binding across the existing
 two-layer origin and real OAuth account switching is unresolved; second-attempt
-error headers, long pre-output keepalives, concurrent global memory limits, raw
-EOF recovery, all server tools, and real subscription behavior remain unverified.
+error headers, real pre-output keepalives, concurrent global memory limits,
+raw EOF recovery, all server tools, and real subscription behavior remain unverified.
 Even a bounded repeat can consume more quota and
 cannot promise exactly-once effects for arbitrary model or provider behavior.
 There is no automatic recovery for the observed live failures yet.

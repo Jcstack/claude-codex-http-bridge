@@ -8,6 +8,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import time
 from unittest.mock import patch
 
 repo = Path(__file__).resolve().parents[1]
@@ -38,12 +39,22 @@ def fixture_write_text(path, data, *args, **kwargs):
     return original_write_text(path, data, *args, **kwargs)
 
 
-def emit_with_reasoning_failure(self, body, *, failure="incomplete"):
+def fixture_keepalive_write(path, data, *args, **kwargs):
+    if path.name == "config.yaml" and path.parent.name.startswith(
+        "bridge-codex-stream-fixture-"
+    ):
+        data += "\nrequests:\n  streaming:\n    keepalive-seconds: 1\n    send-keepalive-before-ft: true\n"
+    return fixture_write_text(path, data, *args, **kwargs)
+
+
+def emit_with_reasoning_failure(self, body, *, failure="incomplete", timing=None):
     records = getattr(self.server, "synthetic_bodies", None)
     if records is None:
         records = []
         self.server.synthetic_bodies = records
     records.append(json.dumps(body, sort_keys=True, separators=(",", ":")))
+    if timing is not None and len(records) in (1, 2):
+        timing[len(records)] = time.monotonic()
     if len(records) == 1:
         print(
             json.dumps(
@@ -115,7 +126,10 @@ def main():
     parser.add_argument(
         "--failure", choices=("incomplete", "overload"), default="incomplete"
     )
+    parser.add_argument("--real-wait", action="store_true")
     args = parser.parse_args()
+    if args.real_wait and (not args.origin or args.failure != "overload"):
+        parser.error("--real-wait requires --origin --failure overload")
     outer = args.baseline if args.origin else args.candidate
     inner = args.candidate if args.origin else args.baseline
     sys.argv = [
@@ -129,21 +143,48 @@ def main():
         "--case",
         "healthy",
         "--client-timeout",
-        "60",
+        "90" if args.real_wait else "60",
         "--file-output",
     ]
+
+    def environment(root):
+        env = enabled_environment(root)
+        if args.real_wait:
+            env["BRIDGE_SYNTHETIC_REAL_BACKOFF"] = "1"
+        return env
+
+    timing = {}
     with (
-        patch.object(fixture, "isolated_environment", side_effect=enabled_environment),
-        patch.object(Path, "write_text", new=fixture_write_text),
+        patch.object(fixture, "isolated_environment", side_effect=environment),
+        patch.object(
+            Path,
+            "write_text",
+            new=fixture_keepalive_write if args.real_wait else fixture_write_text,
+        ),
         patch.object(
             probe.Handler,
             "emit_responses",
             lambda handler, body: emit_with_reasoning_failure(
-                handler, body, failure=args.failure
+                handler, body, failure=args.failure, timing=timing
             ),
         ),
     ):
         probe.main()
+    if args.real_wait:
+        elapsed = timing.get(2, 0) - timing.get(1, 0)
+        if not 29.5 <= elapsed < 90:
+            raise AssertionError(
+                "Synthetic client did not observe the bounded real delay"
+            )
+        print(
+            json.dumps(
+                {
+                    "mock_only": True,
+                    "real_client": True,
+                    "elapsed_seconds": round(elapsed, 1),
+                }
+            )
+        )
 
 
 if __name__ == "__main__":

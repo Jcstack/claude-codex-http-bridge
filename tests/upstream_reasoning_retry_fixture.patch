@@ -9,7 +9,7 @@ diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runti
  	"strings"
  	"time"
  
-@@ -178,6 +179,35 @@
+@@ -178,6 +179,39 @@
  		return nil, err
  	}
  
@@ -21,6 +21,10 @@ diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runti
 +		bridgeRetrySafeTools(upstreamBody) {
 +		first := httpResp.Body
 +		reader, writer := io.Pipe()
++		overloadWait := func(ctx context.Context) error { return ctx.Err() }
++		if os.Getenv("BRIDGE_SYNTHETIC_REAL_BACKOFF") == "1" {
++			overloadWait = bridgeReasoningOverloadWait
++		}
 +		go func() {
 +			err := bridgeReasoningRetryExperimentWithWait(ctx, writer, first, func(ctx context.Context) (io.ReadCloser, error) {
 +				request := httpReq.Clone(ctx)
@@ -37,7 +41,7 @@ diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runti
 +					return bridgeReasoningRetryHTTPError(response), nil
 +				}
 +				return response.Body, nil
-+			}, func() bool { return true }, func(ctx context.Context) error { return ctx.Err() })
++			}, func() bool { return true }, overloadWait)
 +			_ = writer.CloseWithError(err)
 +		}()
 +		httpResp.Body = reader
