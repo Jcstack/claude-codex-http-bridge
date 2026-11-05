@@ -24,6 +24,15 @@ The tracked session's anonymous marker is stored locally in the private installa
 
 ## P0: Availability and investigation
 
+- [ ] Deliver safe unattended recovery for incomplete streams and structured
+  overloads without disrupting running sessions. The credential-free
+  reasoning-only experiments in [STREAMING.md](STREAMING.md#experimental-recovery-of-an-undelivered-reasoning-only-stream)
+  exercise real Claude Code and two fake translators, bounded retry and
+  cancellation, and a fake API-key selection change; they are not enabled for
+  real accounts. Real OAuth refresh/selection, safe origin migration,
+  provider-side tools, long waits, error headers and global memory limits
+  remain acceptance gates. Do not silently change models, accounts or effort.
+
 - [x] Identify the long-running main session matching the active process and inspect its main and child logs from startup, extracting only necessary structure and statistics.
 - [x] Fix stale 429 responses after usage resets: check the selected account's actual availability, release its expired account-wide cooldown, and stop duplicating the origin's rate-limit state in the translation layer.
 - [x] Add a single-instance background check and `claude-codex quota recover` without switching accounts, renewing tokens, running inference, or restarting inference services; retain genuine rate limits and authentication failures.

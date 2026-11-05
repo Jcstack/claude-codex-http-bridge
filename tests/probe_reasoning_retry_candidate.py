@@ -38,7 +38,7 @@ def fixture_write_text(path, data, *args, **kwargs):
     return original_write_text(path, data, *args, **kwargs)
 
 
-def emit_with_reasoning_failure(self, body):
+def emit_with_reasoning_failure(self, body, *, failure="incomplete"):
     records = getattr(self.server, "synthetic_bodies", None)
     if records is None:
         records = []
@@ -65,6 +65,19 @@ def emit_with_reasoning_failure(self, body):
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         item = {"id": "synthetic_reasoning", "type": "reasoning", "summary": []}
+        error = (
+            {
+                "type": "service_unavailable_error",
+                "code": "server_is_overloaded",
+                "message": "synthetic overload",
+            }
+            if failure == "overload"
+            else {
+                "type": "server_error",
+                "code": "request_timeout",
+                "message": "stream error: stream disconnected before completion: stream closed before response.completed",
+            }
+        )
         events = [
             {
                 "type": "response.created",
@@ -78,11 +91,7 @@ def emit_with_reasoning_failure(self, body):
             },
             {
                 "type": "error",
-                "error": {
-                    "type": "server_error",
-                    "code": "request_timeout",
-                    "message": "stream error: stream disconnected before completion: stream closed before response.completed",
-                },
+                "error": error,
             },
         ]
         for event in events:
@@ -98,14 +107,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("baseline", type=Path)
+    parser.add_argument(
+        "--origin",
+        action="store_true",
+        help="Put the test candidate at the credential-owning hop",
+    )
+    parser.add_argument(
+        "--failure", choices=("incomplete", "overload"), default="incomplete"
+    )
     args = parser.parse_args()
+    outer = args.baseline if args.origin else args.candidate
+    inner = args.candidate if args.origin else args.baseline
     sys.argv = [
         "probe_claude_stream_safety.py",
         "--proxy-binary",
-        str(args.candidate.resolve()),
+        str(outer.resolve()),
         "--codex-executor",
         "--codex-origin-binary",
-        str(args.baseline.resolve()),
+        str(inner.resolve()),
         "--codex-managed-policy",
         "--case",
         "healthy",
@@ -116,7 +135,13 @@ def main():
     with (
         patch.object(fixture, "isolated_environment", side_effect=enabled_environment),
         patch.object(Path, "write_text", new=fixture_write_text),
-        patch.object(probe.Handler, "emit_responses", emit_with_reasoning_failure),
+        patch.object(
+            probe.Handler,
+            "emit_responses",
+            lambda handler, body: emit_with_reasoning_failure(
+                handler, body, failure=args.failure
+            ),
+        ),
     ):
         probe.main()
 

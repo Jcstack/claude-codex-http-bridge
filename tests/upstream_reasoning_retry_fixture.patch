@@ -9,19 +9,20 @@ diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runti
  	"strings"
  	"time"
  
-@@ -178,6 +179,34 @@
+@@ -178,6 +179,35 @@
  		return nil, err
  	}
  
 +	// Temporary local-fixture wiring only. This experimental path does not
 +	// pin the upstream account and must never be included in a runtime bundle.
 +	if os.Getenv("BRIDGE_SYNTHETIC_REASONING_RETRY") == "1" &&
-+		strings.HasPrefix(baseURL, "http://127.0.0.1:") && from == sdktranslator.FormatClaude &&
++		strings.HasPrefix(baseURL, "http://127.0.0.1:") &&
++		(from == sdktranslator.FormatClaude || from == sdktranslator.FormatOpenAIResponse) &&
 +		bridgeRetrySafeTools(upstreamBody) {
 +		first := httpResp.Body
 +		reader, writer := io.Pipe()
 +		go func() {
-+			err := bridgeReasoningRetryExperiment(ctx, writer, first, func(ctx context.Context) (io.ReadCloser, error) {
++			err := bridgeReasoningRetryExperimentWithWait(ctx, writer, first, func(ctx context.Context) (io.ReadCloser, error) {
 +				request := httpReq.Clone(ctx)
 +				var err error
 +				request.Body, err = httpReq.GetBody()
@@ -36,7 +37,7 @@ diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runti
 +					return bridgeReasoningRetryHTTPError(response), nil
 +				}
 +				return response.Body, nil
-+			}, func() bool { return true })
++			}, func() bool { return true }, func(ctx context.Context) error { return ctx.Err() })
 +			_ = writer.CloseWithError(err)
 +		}()
 +		httpResp.Body = reader

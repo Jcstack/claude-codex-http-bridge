@@ -1,9 +1,9 @@
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
 new file mode 100644
-index 00000000..5e0d4fcd
+index 00000000..689c9fda
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,327 @@
 +package executor
 +
 +// This isolated experiment is not wired into production. It tests a narrow
@@ -13,11 +13,14 @@ index 00000000..5e0d4fcd
 +	"bufio"
 +	"bytes"
 +	"context"
++	"crypto/rand"
++	"encoding/binary"
 +	"errors"
 +	"io"
 +	"net/http"
 +	"strings"
 +	"sync"
++	"time"
 +
 +	"github.com/tidwall/gjson"
 +	"github.com/tidwall/sjson"
@@ -25,6 +28,54 @@ index 00000000..5e0d4fcd
 +
 +const bridgeReasoningBufferLimit = 2 << 20
 +const bridgeReasoningLineLimit = 64 << 10
++
++// Only the exact structured capacity code seen in the disposable fixture is
++// considered. Conflicting or malformed explicit statuses must fail closed.
++func bridgeReasoningOverloadBody(body []byte) bool {
++	if gjson.GetBytes(body, "error.type").String() != "service_unavailable_error" ||
++		gjson.GetBytes(body, "error.code").String() != "server_is_overloaded" {
++		return false
++	}
++	for _, key := range []string{"error.status", "error.status_code"} {
++		status := gjson.GetBytes(body, key)
++		if status.Exists() && (status.Type != gjson.Number || status.Int() != http.StatusServiceUnavailable) {
++			return false
++		}
++	}
++	return true
++}
++
++func bridgeReasoningOverloadLine(line []byte) bool {
++	trimmed := bytes.TrimSpace(line)
++	if !bytes.HasPrefix(trimmed, []byte("data:")) {
++		return false
++	}
++	data := bytes.TrimSpace(trimmed[len("data:"):])
++	if !gjson.ValidBytes(data) {
++		return false
++	}
++	body, ok := codexTerminalFailureBody(data)
++	return ok && bridgeReasoningOverloadBody(body)
++}
++
++// An isolated experimental policy, not the currently installed service. Wait
++// 30-60 seconds with positive jitter; cancellation must stop the wait. On a
++// random-source failure wait the full minute rather than retrying immediately.
++func bridgeReasoningOverloadWait(ctx context.Context) error {
++	delay := 60 * time.Second
++	var sample [8]byte
++	if _, err := rand.Read(sample[:]); err == nil {
++		delay = 30*time.Second + time.Duration(binary.BigEndian.Uint64(sample[:])%uint64(30*time.Second+1))
++	}
++	timer := time.NewTimer(delay)
++	defer timer.Stop()
++	select {
++	case <-ctx.Done():
++		return ctx.Err()
++	case <-timer.C:
++		return nil
++	}
++}
 +
 +// bridgeReasoningRetryHTTPError is an experimental in-band representation of
 +// a retry's HTTP failure. No headers or raw response are written to logs. A
@@ -95,6 +146,9 @@ index 00000000..5e0d4fcd
 +		if !ok {
 +			return false, false
 +		}
++		if bridgeReasoningOverloadBody(body) {
++			return false, true
++		}
 +		status := codexTerminalFailureStatus(body)
 +		return false, (status == 408 || status == 502) &&
 +			gjson.GetBytes(body, "error.type").String() == "server_error" &&
@@ -141,6 +195,12 @@ index 00000000..5e0d4fcd
 +// changes, and deliberately is not connected to an installed runtime.
 +func bridgeReasoningRetryExperiment(ctx context.Context, dst io.Writer, first io.ReadCloser,
 +	retry func(context.Context) (io.ReadCloser, error), sameAccount func() bool) error {
++	return bridgeReasoningRetryExperimentWithWait(ctx, dst, first, retry, sameAccount, bridgeReasoningOverloadWait)
++}
++
++func bridgeReasoningRetryExperimentWithWait(ctx context.Context, dst io.Writer, first io.ReadCloser,
++	retry func(context.Context) (io.ReadCloser, error), sameAccount func() bool,
++	overloadWait func(context.Context) error) error {
 +	current := first
 +	var currentMu sync.Mutex
 +	done := make(chan struct{})
@@ -216,6 +276,14 @@ index 00000000..5e0d4fcd
 +				}
 +				if !safe {
 +					if terminalRetry && attempts == 0 && ctx.Err() == nil && sameAccount() {
++						if bridgeReasoningOverloadLine(dataLine) {
++							if err := overloadWait(ctx); err != nil {
++								return err
++							}
++							if ctx.Err() != nil {
++								return ctx.Err()
++							}
++						}
 +						next, nextErr := retry(ctx)
 +						if nextErr == nil && next != nil {
 +							currentMu.Lock()
@@ -265,10 +333,10 @@ index 00000000..5e0d4fcd
 +}
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
 new file mode 100644
-index 00000000..88d0aa03
+index 00000000..dc12149b
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
-@@ -0,0 +1,321 @@
+@@ -0,0 +1,420 @@
 +package executor
 +
 +import (
@@ -289,6 +357,7 @@ index 00000000..88d0aa03
 +const bridgeFixtureCreated = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"output\":[]}}\n\n"
 +const bridgeFixtureReasoning = "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"summary\":[],\"encrypted_content\":\"SYNTHETIC_SIGNATURE\"}}\n\n"
 +const bridgeFixtureError = "data: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"code\":\"request_timeout\",\"message\":\"stream error: stream disconnected before completion: stream closed before response.completed\"}}\n\n"
++const bridgeFixtureOverload = "data: {\"type\":\"error\",\"error\":{\"type\":\"service_unavailable_error\",\"code\":\"server_is_overloaded\",\"message\":\"synthetic overload\"}}\n\n"
 +const bridgeFixtureSuccess = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"second\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"SYNTHETIC\"}\n\n"
 +
 +func TestBridgeReasoningRetryExperiment(t *testing.T) {
@@ -303,6 +372,104 @@ index 00000000..88d0aa03
 +		func() bool { return true })
 +	if err != nil || attempts != 1 || out.String() != bridgeFixtureSuccess {
 +		t.Fatalf("single safe retry failed: error=%v attempts=%d output_matches=%t", err, attempts, out.String() == bridgeFixtureSuccess)
++	}
++}
++
++func TestBridgeReasoningRetryOverloadIsExactBoundedAndWaits(t *testing.T) {
++	for name, tail := range map[string]string{
++		"event error":     bridgeFixtureOverload,
++		"response failed": "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"type\":\"service_unavailable_error\",\"code\":\"server_is_overloaded\",\"status_code\":503}}}\n\n",
++	} {
++		t.Run(name, func(t *testing.T) {
++			var out bytes.Buffer
++			waits, retries := 0, 0
++			err := bridgeReasoningRetryExperimentWithWait(context.Background(), &out,
++				io.NopCloser(strings.NewReader(bridgeFixtureCreated+bridgeFixtureReasoning+tail)),
++				func(context.Context) (io.ReadCloser, error) {
++					retries++
++					return io.NopCloser(strings.NewReader(bridgeFixtureSuccess)), nil
++				},
++				func() bool { return true }, func(context.Context) error { waits++; return nil })
++			if err != nil || waits != 1 || retries != 1 || out.String() != bridgeFixtureSuccess {
++				t.Fatal("synthetic overload did not wait for its bounded retry")
++			}
++		})
++	}
++	for name, tail := range map[string]string{
++		"wrong code":       strings.Replace(bridgeFixtureOverload, "server_is_overloaded", "different_error", 1),
++		"wrong type":       strings.Replace(bridgeFixtureOverload, "service_unavailable_error", "rate_limit_error", 1),
++		"quota status":     strings.Replace(bridgeFixtureOverload, `"code":`, `"status_code":429,"code":`, 1),
++		"malformed status": strings.Replace(bridgeFixtureOverload, `"code":`, `"status_code":"503","code":`, 1),
++	} {
++		t.Run(name, func(t *testing.T) {
++			initial := bridgeFixtureCreated + tail
++			var out bytes.Buffer
++			waits, retries := 0, 0
++			err := bridgeReasoningRetryExperimentWithWait(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++				func(context.Context) (io.ReadCloser, error) { retries++; return nil, nil },
++				func() bool { return true }, func(context.Context) error { waits++; return nil })
++			if err != nil || waits != 0 || retries != 0 || out.String() != initial {
++				t.Fatal("different error must pass through unchanged")
++			}
++		})
++	}
++}
++
++func TestBridgeReasoningRetryOverloadWaitIsCancellable(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	waiting := make(chan struct{})
++	done := make(chan error, 1)
++	retries := 0
++	go func() {
++		done <- bridgeReasoningRetryExperimentWithWait(ctx, io.Discard,
++			io.NopCloser(strings.NewReader(bridgeFixtureCreated+bridgeFixtureOverload)),
++			func(context.Context) (io.ReadCloser, error) { retries++; return nil, nil },
++			func() bool { return true }, func(ctx context.Context) error { close(waiting); <-ctx.Done(); return ctx.Err() })
++	}()
++	<-waiting
++	cancel()
++	if err := <-done; !errors.Is(err, context.Canceled) || retries != 0 {
++		t.Fatal("cancellation must stop the capacity wait before retry")
++	}
++	cancelled, cancelImmediately := context.WithCancel(context.Background())
++	cancelImmediately()
++	if err := bridgeReasoningOverloadWait(cancelled); !errors.Is(err, context.Canceled) {
++		t.Fatal("the default jittered delay must be cancellation-aware")
++	}
++}
++
++func TestBridgeReasoningRetryOverloadStopsAtObservableEventsAndAttemptLimit(t *testing.T) {
++	for name, visible := range map[string]string{
++		"text":    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"synthetic\"}\n\n",
++		"tool":    "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\"}}\n\n",
++		"unknown": "data: {\"type\":\"unknown.future.event\"}\n\n",
++	} {
++		t.Run(name, func(t *testing.T) {
++			initial := bridgeFixtureCreated + visible + bridgeFixtureOverload
++			var out bytes.Buffer
++			waits, retries := 0, 0
++			err := bridgeReasoningRetryExperimentWithWait(context.Background(), &out,
++				io.NopCloser(strings.NewReader(initial)),
++				func(context.Context) (io.ReadCloser, error) { retries++; return nil, nil },
++				func() bool { return true }, func(context.Context) error { waits++; return nil })
++			if err != nil || waits != 0 || retries != 0 || out.String() != initial {
++				t.Fatal("overload after an observable event must not be replayed")
++			}
++		})
++	}
++	initial := bridgeFixtureCreated + bridgeFixtureOverload
++	var out bytes.Buffer
++	waits, retries := 0, 0
++	err := bridgeReasoningRetryExperimentWithWait(context.Background(), &out,
++		io.NopCloser(strings.NewReader(initial)),
++		func(context.Context) (io.ReadCloser, error) {
++			retries++
++			return io.NopCloser(strings.NewReader(initial)), nil
++		},
++		func() bool { return true }, func(context.Context) error { waits++; return nil })
++	if err != nil || waits != 1 || retries != 1 || out.String() != initial {
++		t.Fatal("the second overload must be surfaced without another retry")
 +	}
 +}
 +

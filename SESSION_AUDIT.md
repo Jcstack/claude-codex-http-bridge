@@ -98,6 +98,9 @@ before sharing. It is not automatically saved or committed.
   are not additive. An HTTP 200 can precede an SSE failure; both stream-failure
   mentions in proxy logs and API-error categories in transcripts are retained.
   Neither is automatically a count of distinct failed inference requests.
+- The session audit labels fixed overload-message/code patterns as
+  `server_overloaded`; it does not infer an HTTP status, provider, cause, or
+  quota condition from that text. Raw errors remain private.
 - `background_event_mentions` separately recognizes the pinned upstream's
   Antigravity version-refresh failure marker and groups timeout-shaped and
   other mentions. It exports only fixed categories, counts and last timestamps;

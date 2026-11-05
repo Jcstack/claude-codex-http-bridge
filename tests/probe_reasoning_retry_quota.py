@@ -87,7 +87,10 @@ def main():
     parser.add_argument("candidate", type=Path)
     parser.add_argument("baseline", type=Path)
     parser.add_argument("--keepalive", action="store_true")
+    parser.add_argument("--origin", action="store_true")
     args = parser.parse_args()
+    outer = args.baseline if args.origin else args.candidate
+    inner = args.candidate if args.origin else args.baseline
     server = ThreadingHTTPServer(("127.0.0.1", 0), Origin)
     server.attempts, server.keepalive = 0, args.keepalive
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -103,12 +106,12 @@ def main():
         ):
             inner_port, inner_key, _ = stack.enter_context(
                 fixture.temporary_codex_translator(
-                    args.baseline.resolve(), server.server_port
+                    inner.resolve(), server.server_port
                 )
             )
             port, key, _ = stack.enter_context(
                 fixture.temporary_codex_translator(
-                    args.candidate.resolve(),
+                    outer.resolve(),
                     inner_port,
                     upstream_prefix="/v1",
                     upstream_key=inner_key,

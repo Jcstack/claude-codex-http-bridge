@@ -24,6 +24,18 @@ def write_records(path, records):
 
 
 class SessionAuditTests(unittest.TestCase):
+    def test_overload_category_does_not_export_error_content_or_infer_status(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "session.jsonl"
+            write_records(path, [{"type": "assistant", "isApiErrorMessage": True,
+                                  "message": {"content": [{"type": "text", "text":
+                                      "API Error: Our servers are currently overloaded. PRIVATE_SECRET"}]}}])
+            report = audit.scan(path, None, audit.Usage())
+            self.assertEqual(report["api_error_category_mentions"], {"server_overloaded": 1})
+            self.assertEqual(report["api_error_status_mentions"], {})
+            self.assertNotIn("PRIVATE", json.dumps(report))
+            self.assertEqual(audit.error_labels("server_is_overloaded"), ["server_overloaded"])
+
     def test_recent_thinking_counts_only_metadata_after_last_request_marker(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "PRIVATE_SESSION.jsonl"

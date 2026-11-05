@@ -265,9 +265,10 @@ used by this installation.
 ### Experimental recovery of an undelivered reasoning-only stream
 
 The [isolated experiment](tests/upstream_reasoning_retry_experiment.patch)
-buffers a bounded initial Responses SSE stream and permits one retry of the
-exact incomplete-stream sentinel only when every complete event so far is
-allowlisted and the request declares no server-executed tools. Text, client or
+buffers a bounded initial Responses SSE stream and permits one retry for the
+exact incomplete-stream sentinel or a narrowly structured in-stream
+`service_unavailable_error` / `server_is_overloaded` only when every complete
+event so far is allowlisted and the request declares no server-executed tools. Text, client or
 server tool items, quota or moderation metadata, unknown or malformed events,
 and the buffer limit release the original stream without replay. The fixture
 preserves the full synthetic model request, including effort, tool definitions,
@@ -285,9 +286,26 @@ how an account can change after a simple check and before retry selection.
 For an alternative placement inside the credential-owning origin executor, a
 synthetic HTTP test switched a fake selected account after the first attempt;
 cloning that attempt's request retained both its original fake authorization
-and account header on retry. This illustrates a possible same-account boundary,
-not a test of real OAuth refresh, revocation, the current two-layer route, or
-safe migration of the running origin service.
+and account header on retry. A separate two-layer [client fixture](tests/probe_reasoning_retry_account_switch.py)
+changed a disposable fake API-key configuration while a request was in flight;
+the retry used the original fake key, the following request selected the new
+fake key, and the owned tool executed once. These illustrate a possible
+same-account boundary for the tested fake route, not a test of real OAuth
+refresh, revocation, a live subscription route, or safe migration of the
+running origin service.
+
+The overload case was added after an actual session reported the same structured
+type and code; a coincident origin access record returned HTTP 200. The session
+had four retained empty signed thinking blocks before the error, but the
+transcript cannot establish all raw upstream events or a cross-layer request
+identity. An [OpenAI Codex issue](https://github.com/openai/codex/issues/56346)
+independently reports the same in-stream error on the official route; it is a
+user report, not confirmation of the cause here. The experimental default waits
+30–60 seconds with positive jitter and supports cancellation, but performs at
+most one retry. The fake end-to-end test deliberately replaces the wait with a
+zero-delay test clock; it does not validate long real-session heartbeats. An
+unmerged [Codex proposal](https://github.com/openai/codex/pull/31058) describes
+a longer, independently bounded policy for selected capacity errors.
 
 The test-only wiring now converts a second-attempt HTTP rejection into a
 bounded in-band error, preserving its status and valid error object rather than
@@ -298,9 +316,9 @@ pre-output comments already sent it observed HTTP 200 with an in-band
 behavior for every error shape, or a real provider quota reset.
 
 Do not deploy this experiment: atomic account binding across the existing
-two-layer origin and account switching is unresolved; second-attempt error
-headers, long pre-output keepalives, concurrent global memory limits, raw EOF
-recovery, all server tools, and real subscription behavior remain unverified.
+two-layer origin and real OAuth account switching is unresolved; second-attempt
+error headers, long pre-output keepalives, concurrent global memory limits, raw
+EOF recovery, all server tools, and real subscription behavior remain unverified.
 Even a bounded repeat can consume more quota and
 cannot promise exactly-once effects for arbitrary model or provider behavior.
 There is no automatic recovery for the observed live failures yet.

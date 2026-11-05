@@ -288,6 +288,7 @@ def error_labels(text: str) -> list[str]:
     for label, needles in (
             ("quota_or_rate_limit", ("usage limit", "usage_limit", "rate limit", "rate_limit", "model_cooldown")),
             ("connection_closed", ("connection closed",)),
+            ("server_overloaded", ("servers are currently overloaded", "overloaded_error", "server_is_overloaded")),
             ("incomplete_stream", ("stream disconnected before completion", "stream closed before response.completed")),
             ("incomplete_tool_call", ("upstream ended before a client tool call was complete",)),
             ("tls_handshake", ("tls handshake",)),
