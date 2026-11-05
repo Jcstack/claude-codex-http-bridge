@@ -33,6 +33,33 @@ SPEC = {"context_window": 872000, "input_modalities": ["text", "image"], "suppor
         "supported_reasoning_levels": [{"effort": e} for e in ("low", "medium", "high", "xhigh", "max")]}
 
 
+class FixtureDirectory(tempfile.TemporaryDirectory):
+    """Bounded cleanup retry for Windows image or scanner locks; never ignore failure."""
+
+    def cleanup(self):
+        for attempt in range(20):
+            try:
+                return super().cleanup()
+            except PermissionError:
+                if os.name != "nt" or attempt == 19:
+                    raise
+                time.sleep(.25)
+
+
+def wait_for_fixture_processes(processes):
+    """Reap only processes started by this fixture and surface a failed stop."""
+    stuck = False
+    for process in processes:
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            stuck = True
+            process.kill()
+            process.wait(timeout=5)
+    if stuck:
+        raise RuntimeError("A synthetic managed process remained alive after stop")
+
+
 class Upstream(BaseHTTPRequestHandler):
     requests = []
     quota_mode = False
@@ -229,14 +256,19 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
     try:
-        with tempfile.TemporaryDirectory(prefix="bridge-managed-probe-") as temporary:
+        with FixtureDirectory(prefix="bridge-managed-probe-") as temporary:
             root = Path(temporary); runtime_bundle.private_dir(root)
             base_runtime = root / "runtime"; runtime_bundle.private_dir(base_runtime)
             source = base_runtime / "session-fixture"; runtime_bundle.private_dir(source)
             for name, text in (("config.yaml", "synthetic"), ("key", "a" * 64), ("proxy.log", "")):
                 api_profile.write_private(source / name, text)
             base = {"process_identity": process_identity.stamp(os.getpid()), "pid": os.getpid(), "port": server.server_port, "session": source.name}
-            with patch.object(launcher, "ROOT", root):
+            processes, start = [], rolling_runtime.start
+            def start_fixture(*args, **kwargs):
+                process = start(*args, **kwargs)
+                processes.append(process)
+                return process
+            with patch.object(launcher, "ROOT", root), patch.object(rolling_runtime, "start", side_effect=start_fixture):
                 candidate = args.bundle.resolve()
                 if args.previous_proxy:
                     manifest, _ = runtime_bundle.verify(candidate)
@@ -397,7 +429,10 @@ def main():
                         "background_tls_with_warm_wrong_supervisor": "pass" if args.background_client else "not-run"}))
                 finally:
                     Upstream.release.set()
-                    if rolling_runtime.state(root) is not None: rolling_runtime.stop(root)
+                    try:
+                        if rolling_runtime.state(root) is not None: rolling_runtime.stop(root)
+                    finally:
+                        wait_for_fixture_processes(processes)
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=2)
 

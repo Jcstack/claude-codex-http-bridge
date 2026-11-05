@@ -44,6 +44,15 @@ this client and fixture, not a measurement of actual model work, billing, or
 the events in another session. A growing terminal counter alone cannot prove
 useful reasoning progress or establish final provider usage.
 
+One [Windows workflow rerun](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/42035283391)
+reported the synthetic draining handoff as passing, then failed while deleting
+the temporary proxy executable with `WinError 5`. The log alone does not show
+whether an exiting fixture process or an external file lock was responsible.
+The fixture now retains and waits for its own spawned processes after stop; a
+process that remains alive fails the test. Temporary-directory cleanup retries
+Windows permission errors for a bounded period and still fails if the lock
+persists. This is a test-cleanup change, not proof of a production fix.
+
 In a read-only review of one tracked session and its children on 2026-11-04,
 one main-session incomplete-stream record and one managed-backend error with
 the same sentinel occurred in the same minute. No cross-layer request ID was
