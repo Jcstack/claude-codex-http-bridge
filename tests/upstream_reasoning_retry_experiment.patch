@@ -1,9 +1,9 @@
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
 new file mode 100644
-index 00000000..689c9fda
+index 00000000..f5619230
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
-@@ -0,0 +1,327 @@
+@@ -0,0 +1,413 @@
 +package executor
 +
 +// This isolated experiment is not wired into production. It tests a narrow
@@ -15,6 +15,7 @@ index 00000000..689c9fda
 +	"context"
 +	"crypto/rand"
 +	"encoding/binary"
++	"encoding/json"
 +	"errors"
 +	"io"
 +	"net/http"
@@ -28,6 +29,60 @@ index 00000000..689c9fda
 +
 +const bridgeReasoningBufferLimit = 2 << 20
 +const bridgeReasoningLineLimit = 64 << 10
++const bridgeReasoningRequestLimit = 16 << 20
++
++// Reject duplicate JSON object keys and deeply nested frames. Distinct JSON
++// readers can disagree on duplicate keys, including tool type and error code.
++func bridgeReasoningJSONSafe(data []byte) bool {
++	decoder := json.NewDecoder(bytes.NewReader(data))
++	var value func(int) bool
++	value = func(depth int) bool {
++		if depth > 64 {
++			return false
++		}
++		token, err := decoder.Token()
++		if err != nil {
++			return false
++		}
++		delim, isDelim := token.(json.Delim)
++		if !isDelim {
++			return true
++		}
++		switch delim {
++		case '{':
++			seen := make(map[string]struct{})
++			for decoder.More() {
++				keyToken, keyErr := decoder.Token()
++				key, ok := keyToken.(string)
++				if keyErr != nil || !ok {
++					return false
++				}
++				if _, duplicate := seen[key]; duplicate {
++					return false
++				}
++				seen[key] = struct{}{}
++				if !value(depth + 1) {
++					return false
++				}
++			}
++		case '[':
++			for decoder.More() {
++				if !value(depth + 1) {
++					return false
++				}
++			}
++		default:
++			return false
++		}
++		end, endErr := decoder.Token()
++		return endErr == nil && ((delim == '{' && end == json.Delim('}')) || (delim == '[' && end == json.Delim(']')))
++	}
++	if !value(0) {
++		return false
++	}
++	_, err := decoder.Token()
++	return errors.Is(err, io.EOF)
++}
 +
 +// Only the exact structured capacity code seen in the disposable fixture is
 +// considered. Conflicting or malformed explicit statuses must fail closed.
@@ -38,7 +93,19 @@ index 00000000..689c9fda
 +	}
 +	for _, key := range []string{"error.status", "error.status_code"} {
 +		status := gjson.GetBytes(body, key)
-+		if status.Exists() && (status.Type != gjson.Number || status.Int() != http.StatusServiceUnavailable) {
++		if status.Exists() && (status.Type != gjson.Number || status.Num != float64(http.StatusServiceUnavailable)) {
++			return false
++		}
++	}
++	return true
++}
++
++// The normalizer extracts an error object and can discard outer status fields.
++// Reject conflicting or malformed explicit outer statuses before replay.
++func bridgeReasoningOuterStatusAllows(data []byte, first, second int) bool {
++	for _, key := range []string{"status", "status_code", "response.status_code"} {
++		status := gjson.GetBytes(data, key)
++		if status.Exists() && (status.Type != gjson.Number || (status.Num != float64(first) && status.Num != float64(second))) {
 +			return false
 +		}
 +	}
@@ -51,11 +118,11 @@ index 00000000..689c9fda
 +		return false
 +	}
 +	data := bytes.TrimSpace(trimmed[len("data:"):])
-+	if !gjson.ValidBytes(data) {
++	if !gjson.ValidBytes(data) || !bridgeReasoningJSONSafe(data) {
 +		return false
 +	}
 +	body, ok := codexTerminalFailureBody(data)
-+	return ok && bridgeReasoningOverloadBody(body)
++	return ok && bridgeReasoningOverloadBody(body) && bridgeReasoningOuterStatusAllows(data, http.StatusServiceUnavailable, http.StatusServiceUnavailable)
 +}
 +
 +// An isolated experimental policy, not the currently installed service. Wait
@@ -98,8 +165,17 @@ index 00000000..689c9fda
 +}
 +
 +func bridgeRetrySafeTools(body []byte) bool {
-+	if !gjson.ValidBytes(body) {
++	if len(body) > bridgeReasoningRequestLimit || !gjson.ValidBytes(body) || !bridgeReasoningJSONSafe(body) {
 +		return false
++	}
++	if !gjson.ParseBytes(body).IsObject() {
++		return false
++	}
++	for _, key := range []string{"background", "store"} {
++		option := gjson.GetBytes(body, key)
++		if option.Exists() && option.Type != gjson.False {
++			return false
++		}
 +	}
 +	choice := gjson.GetBytes(body, "tool_choice")
 +	if choice.Exists() {
@@ -137,7 +213,7 @@ index 00000000..689c9fda
 +		return false, false
 +	}
 +	data := bytes.TrimSpace(trimmed[len("data:"):])
-+	if !gjson.ValidBytes(data) {
++	if !gjson.ValidBytes(data) || !bridgeReasoningJSONSafe(data) {
 +		return false, false
 +	}
 +	typ := gjson.GetBytes(data, "type").String()
@@ -146,17 +222,21 @@ index 00000000..689c9fda
 +		if !ok {
 +			return false, false
 +		}
-+		if bridgeReasoningOverloadBody(body) {
++		if bridgeReasoningOverloadBody(body) && bridgeReasoningOuterStatusAllows(data, http.StatusServiceUnavailable, http.StatusServiceUnavailable) {
 +			return false, true
 +		}
 +		status := codexTerminalFailureStatus(body)
 +		return false, (status == 408 || status == 502) &&
++			bridgeReasoningOuterStatusAllows(data, 408, 502) &&
 +			gjson.GetBytes(body, "error.type").String() == "server_error" &&
 +			gjson.GetBytes(body, "error.code").String() == "request_timeout" &&
 +			gjson.GetBytes(body, "error.message").String() == codexIncompleteStreamMessage
 +	}
 +	switch typ {
 +	case "response.created", "response.in_progress":
++		if !gjson.GetBytes(data, "response").IsObject() {
++			return false, false
++		}
 +		status := gjson.GetBytes(data, "response.status")
 +		if status.Exists() && status.String() != "queued" && status.String() != "in_progress" {
 +			return false, false
@@ -276,6 +356,7 @@ index 00000000..689c9fda
 +				}
 +				if !safe {
 +					if terminalRetry && attempts == 0 && ctx.Err() == nil && sameAccount() {
++						proceed := true
 +						if bridgeReasoningOverloadLine(dataLine) {
 +							if err := overloadWait(ctx); err != nil {
 +								return err
@@ -283,21 +364,26 @@ index 00000000..689c9fda
 +							if ctx.Err() != nil {
 +								return ctx.Err()
 +							}
++							// A check after waiting narrows, but does not eliminate, the
++							// race before the caller actually starts a new request.
++							proceed = sameAccount()
 +						}
-+						next, nextErr := retry(ctx)
-+						if nextErr == nil && next != nil {
-+							currentMu.Lock()
-+							if ctx.Err() != nil {
++						if proceed {
++							next, nextErr := retry(ctx)
++							if nextErr == nil && next != nil {
++								currentMu.Lock()
++								if ctx.Err() != nil {
++									currentMu.Unlock()
++									_ = next.Close()
++									return ctx.Err()
++								}
++								old := current
++								current = next
 +								currentMu.Unlock()
-+								_ = next.Close()
-+								return ctx.Err()
++								_ = old.Close()
++								attempts++
++								break
 +							}
-+							old := current
-+							current = next
-+							currentMu.Unlock()
-+							_ = old.Close()
-+							attempts++
-+							break
 +						}
 +					}
 +					if _, e := dst.Write(held.Bytes()); e != nil {
@@ -333,10 +419,10 @@ index 00000000..689c9fda
 +}
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
 new file mode 100644
-index 00000000..e95a7147
+index 00000000..43967323
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
-@@ -0,0 +1,500 @@
+@@ -0,0 +1,536 @@
 +package executor
 +
 +import (
@@ -401,10 +487,13 @@ index 00000000..e95a7147
 +		})
 +	}
 +	for name, tail := range map[string]string{
-+		"wrong code":       strings.Replace(bridgeFixtureOverload, "server_is_overloaded", "different_error", 1),
-+		"wrong type":       strings.Replace(bridgeFixtureOverload, "service_unavailable_error", "rate_limit_error", 1),
-+		"quota status":     strings.Replace(bridgeFixtureOverload, `"code":`, `"status_code":429,"code":`, 1),
-+		"malformed status": strings.Replace(bridgeFixtureOverload, `"code":`, `"status_code":"503","code":`, 1),
++		"wrong code":         strings.Replace(bridgeFixtureOverload, "server_is_overloaded", "different_error", 1),
++		"wrong type":         strings.Replace(bridgeFixtureOverload, "service_unavailable_error", "rate_limit_error", 1),
++		"quota status":       strings.Replace(bridgeFixtureOverload, `"code":`, `"status_code":429,"code":`, 1),
++		"malformed status":   strings.Replace(bridgeFixtureOverload, `"code":`, `"status_code":"503","code":`, 1),
++		"outer quota status": strings.Replace(bridgeFixtureOverload, `"type":"error",`, `"type":"error","status_code":429,`, 1),
++		"fractional status":  strings.Replace(bridgeFixtureOverload, `"code":`, `"status_code":503.5,"code":`, 1),
++		"duplicate status":   strings.Replace(bridgeFixtureOverload, `"code":`, `"status_code":503,"status_code":429,"code":`, 1),
 +	} {
 +		t.Run(name, func(t *testing.T) {
 +			initial := bridgeFixtureCreated + tail
@@ -417,6 +506,18 @@ index 00000000..e95a7147
 +				t.Fatal("different error must pass through unchanged")
 +			}
 +		})
++	}
++}
++
++func TestBridgeReasoningRetryOverloadChecksAccountAgainAfterWaiting(t *testing.T) {
++	initial := bridgeFixtureCreated + bridgeFixtureOverload
++	var out bytes.Buffer
++	same, waits, retries := true, 0, 0
++	err := bridgeReasoningRetryExperimentWithWait(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++		func(context.Context) (io.ReadCloser, error) { retries++; return nil, nil },
++		func() bool { return same }, func(context.Context) error { waits++; same = false; return nil })
++	if err != nil || waits != 1 || retries != 0 || out.String() != initial {
++		t.Fatal("account change during capacity wait must preserve the original failure")
 +	}
 +}
 +
@@ -489,6 +590,9 @@ index 00000000..e95a7147
 +		"quota metadata":      `{"type":"codex.rate_limits","rate_limits":{}}`,
 +		"moderation metadata": `{"type":"response.metadata","metadata":{}}`,
 +		"malformed":           `{malformed`,
++		"invalid created":     `{"type":"response.created","response":"synthetic"}`,
++		"duplicate tool type": `{"type":"response.output_item.done","item":{"type":"reasoning","type":"function_call","summary":[]}}`,
++		"excessive nesting":   `{"type":"keepalive","extra":` + strings.Repeat("[", 65) + "0" + strings.Repeat("]", 65) + `}`,
 +		"completed":           `{"type":"response.completed"}`,
 +	}
 +	for name, payload := range cases {
@@ -508,6 +612,7 @@ index 00000000..e95a7147
 +func TestBridgeReasoningRetryFailClosed(t *testing.T) {
 +	cases := map[string]string{
 +		"conflicting quota status": strings.Replace(bridgeFixtureError, `"type":"server_error"`, `"status":429,"type":"server_error"`, 1),
++		"outer quota status":       strings.Replace(bridgeFixtureError, `"type":"error",`, `"type":"error","status_code":429,`, 1),
 +		"other failure":            strings.Replace(bridgeFixtureError, "request_timeout", "other_error", 1),
 +		"unterminated":             strings.TrimSuffix(bridgeFixtureError, "\n"),
 +		"multiple data lines":      strings.Replace(bridgeFixtureError, "\n\n", "\ndata: {\"type\":\"other\"}\n\n", 1),
@@ -639,21 +744,38 @@ index 00000000..e95a7147
 +	cases := map[string]bool{
 +		`{}`:           true,
 +		`{"tools":[]}`: true,
-+		`{"tools":[{"type":"function","name":"fixture"}]}`: true,
-+		`{"tools":[],"tool_choice":"auto"}`:                true,
-+		`{"tools":[],"tool_choice":{"type":"web_search"}}`: false,
-+		`{"tools":[],"tool_choice":"unknown"}`:             false,
-+		`{"tools":[{"type":"web_search"}]}`:                false,
-+		`{"tools":[{"type":"mcp"}]}`:                       false,
-+		`{"tools":[{"type":"computer"}]}`:                  false,
-+		`{"tools":null}`:                                   false,
-+		`{"tools":[{}]}`:                                   false,
-+		`{broken`:                                          false,
++		`{"tools":[{"type":"function","name":"fixture"}]}`:                true,
++		`{"tools":[],"tool_choice":"auto"}`:                               true,
++		`{"tools":[],"tool_choice":{"type":"web_search"}}`:                false,
++		`{"tools":[],"tool_choice":"unknown"}`:                            false,
++		`{"tools":[{"type":"web_search"}]}`:                               false,
++		`{"tools":[{"type":"mcp"}]}`:                                      false,
++		`{"tools":[{"type":"computer"}]}`:                                 false,
++		`{"tools":null}`:                                                  false,
++		`{"tools":[{}]}`:                                                  false,
++		`{"tools":[{"type":"function"}],"tools":[{"type":"web_search"}]}`: false,
++		`{"tools":[{"type":"function","type":"web_search"}]}`:             false,
++		`{"tool_choice":"none","tool_choice":"auto"}`:                     false,
++		`{broken`: false,
 +	}
 +	for input, want := range cases {
 +		if got := bridgeRetrySafeTools([]byte(input)); got != want {
 +			t.Fatalf("tool allowlist mismatch for fixture")
 +		}
++	}
++	for input, want := range map[string]bool{
++		`[]`:                                 false,
++		`{"background":true}`:                false,
++		`{"store":true}`:                     false,
++		`{"background":false,"store":false}`: true,
++	} {
++		if got := bridgeRetrySafeTools([]byte(input)); got != want {
++			t.Fatal("synthetic request side-effect boundary mismatch")
++		}
++	}
++	oversized := `{"padding":"` + strings.Repeat("a", bridgeReasoningRequestLimit) + `"}`
++	if bridgeRetrySafeTools([]byte(oversized)) {
++		t.Fatal("oversized request must bypass experimental recovery")
 +	}
 +}
 +

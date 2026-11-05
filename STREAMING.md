@@ -270,7 +270,13 @@ exact incomplete-stream sentinel or a narrowly structured in-stream
 `service_unavailable_error` / `server_is_overloaded` only when every complete
 event so far is allowlisted and the request declares no server-executed tools. Text, client or
 server tool items, quota or moderation metadata, unknown or malformed events,
-and the buffer limit release the original stream without replay. The fixture
+duplicate JSON keys, conflicting status fields, background or stored requests,
+and the buffer limits release the original stream without replay. The
+experimental request classifier also declines to retry inputs above 16 MiB or
+with JSON nesting deeper than 64 levels; these limits affect only the test
+candidate, not the installed runtime. Buffering also withholds initial thinking
+events from the client until a response is released; responsiveness and
+keepalive behavior require real-world assessment. The fixture
 preserves the full synthetic model request, including effort, tool definitions,
 input and cache key; this does not measure a real provider cache hit.
 
