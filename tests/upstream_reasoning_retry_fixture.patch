@@ -1,0 +1,47 @@
+diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runtime/executor/codex_executor_stream.go
+--- a/internal/runtime/executor/codex_executor_stream.go
++++ b/internal/runtime/executor/codex_executor_stream.go
+@@ -5,6 +5,7 @@
+ 	"context"
+ 	"io"
+ 	"net/http"
++	"os"
+ 	"strings"
+ 	"time"
+ 
+@@ -178,6 +179,35 @@
+ 		return nil, err
+ 	}
+ 
++	// Temporary local-fixture wiring only. This experimental path does not
++	// pin the upstream account and must never be included in a runtime bundle.
++	if os.Getenv("BRIDGE_SYNTHETIC_REASONING_RETRY") == "1" &&
++		strings.HasPrefix(baseURL, "http://127.0.0.1:") && from == sdktranslator.FormatClaude &&
++		bridgeRetrySafeTools(upstreamBody) {
++		first := httpResp.Body
++		reader, writer := io.Pipe()
++		go func() {
++			err := bridgeReasoningRetryExperiment(ctx, writer, first, func(ctx context.Context) (io.ReadCloser, error) {
++				request := httpReq.Clone(ctx)
++				var err error
++				request.Body, err = httpReq.GetBody()
++				if err != nil {
++					return nil, err
++				}
++				response, err := doCodexRequest(httpClient, request, upstreamBody, prepareHeaders, nil)
++				if err != nil {
++					return nil, err
++				}
++				if response.StatusCode < 200 || response.StatusCode >= 300 {
++					_ = response.Body.Close()
++					return nil, statusErr{code: response.StatusCode, msg: "synthetic retry HTTP error"}
++				}
++				return response.Body, nil
++			}, func() bool { return true })
++			_ = writer.CloseWithError(err)
++		}()
++		httpResp.Body = reader
++	}
+ 	bufferedFrames := 0
+ 	bufferedBytes := 0
+ 	budgetExhausted := false

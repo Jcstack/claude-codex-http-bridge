@@ -262,6 +262,35 @@ explicitly excludes the `background` field. That limitation applies to its
 documented public API flow, not automatically to the different Codex backend
 used by this installation.
 
+### Experimental recovery of an undelivered reasoning-only stream
+
+The [isolated experiment](tests/upstream_reasoning_retry_experiment.patch)
+buffers a bounded initial Responses SSE stream and permits one retry of the
+exact incomplete-stream sentinel only when every complete event so far is
+allowlisted and the request declares no server-executed tools. Text, client or
+server tool items, quota or moderation metadata, unknown or malformed events,
+and the buffer limit release the original stream without replay. The fixture
+preserves the full synthetic model request, including effort, tool definitions,
+input and cache key; this does not measure a real provider cache hit.
+
+On macOS, a locked Claude Code client, two disposable translators, and a fake
+Responses origin completed a synthetic task after an initial signature-only
+failure. The origin saw the same first and second request, the client received
+the successful attempt, and an owned Write tool ran once and returned its result.
+The [reproducible fixture](tests/probe_reasoning_retry_candidate.py) exercises
+only fake credentials and network endpoints. Its test-only integration patch
+uses a deliberately unsafe always-true account check, and is **not a runtime
+bundle or an available production setting**. A separate race test reproduces
+how an account can change after a simple check and before retry selection.
+
+Do not deploy this experiment: atomic account binding across the existing
+two-layer origin and account switching is unresolved; a rejected second HTTP
+attempt can hide its specific status; long pre-output keepalives, concurrent
+global memory limits, raw EOF recovery, all server tools, and real subscription
+behavior remain unverified. Even a bounded repeat can consume more quota and
+cannot promise exactly-once effects for arbitrary model or provider behavior.
+There is no automatic recovery for the observed live failures yet.
+
 Claude Code's [StopFailure hook](https://code.claude.com/docs/en/hooks#stopfailure)
 can observe an API-failed turn, but its output and exit code do not direct a
 retry. It is not an official way to resume a partial model stream. Reissuing a

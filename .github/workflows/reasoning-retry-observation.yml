@@ -1,0 +1,69 @@
+name: reasoning-retry-observation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            binary: cli-proxy-api
+          - os: ubuntu-latest
+            binary: cli-proxy-api
+          - os: windows-latest
+            binary: cli-proxy-api.exe
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install the integrity-locked synthetic client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+          python tests/claude_fixture.py
+      - name: Build disposable baseline and synthetic-only retry fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          for patch in 12d97cf-inline-tools-backport 12d97cf-deferred-tools web-search-replay loopback-tls url-citations native-compaction-v2 incomplete-tool-guard effort-downgrade-guard midconversation-effort; do
+            git -C upstream-source apply "../upstream/patches/${patch}.patch"
+          done
+          cd upstream-source
+          go mod verify
+          go build -o "../baseline-${{ matrix.binary }}" ./cmd/server
+          git apply ../upstream/patches/forwarded-incomplete-stream-candidate.patch
+          git apply ../upstream/patches/codex-stream-observation-candidate.patch
+          git apply --check ../tests/upstream_reasoning_retry_experiment.patch
+          git apply ../tests/upstream_reasoning_retry_experiment.patch
+          git apply --check ../tests/upstream_reasoning_retry_fixture.patch
+          git apply ../tests/upstream_reasoning_retry_fixture.patch
+          go test -count=1 -timeout 180s -run '^TestBridgeReasoningRetry' ./internal/runtime/executor
+          go build -o "../synthetic-retry-${{ matrix.binary }}" ./cmd/server
+      - name: Exercise two owned translators and real Claude with a fake origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_reasoning_retry_candidate.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"

@@ -1,0 +1,531 @@
+diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
+new file mode 100644
+index 00000000..dc725ff1
+--- /dev/null
++++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
+@@ -0,0 +1,237 @@
++package executor
++
++// This isolated experiment is not wired into production. It tests a narrow
++// pre-delivery recovery boundary without retaining request or response data.
++
++import (
++	"bufio"
++	"bytes"
++	"context"
++	"errors"
++	"io"
++	"strings"
++	"sync"
++
++	"github.com/tidwall/gjson"
++)
++
++const bridgeReasoningBufferLimit = 2 << 20
++const bridgeReasoningLineLimit = 64 << 10
++
++func bridgeRetrySafeTools(body []byte) bool {
++	if !gjson.ValidBytes(body) {
++		return false
++	}
++	choice := gjson.GetBytes(body, "tool_choice")
++	if choice.Exists() {
++		if choice.Type == gjson.String {
++			if choice.String() != "auto" && choice.String() != "none" && choice.String() != "required" {
++				return false
++			}
++		} else if !choice.IsObject() || choice.Get("type").String() != "function" {
++			return false
++		}
++	}
++	tools := gjson.GetBytes(body, "tools")
++	if !tools.Exists() {
++		return true
++	}
++	if !tools.IsArray() {
++		return false
++	}
++	for _, tool := range tools.Array() {
++		if !tool.IsObject() || tool.Get("type").String() != "function" {
++			return false
++		}
++	}
++	return true
++}
++
++// bridgeReasoningLine returns safe, terminalRetry. Unknown or potentially
++// substantive events force immediate pass-through; they are never replayed.
++func bridgeReasoningLine(line []byte) (bool, bool) {
++	trimmed := bytes.TrimSpace(line)
++	if len(trimmed) == 0 || bytes.HasPrefix(trimmed, []byte(":")) || bytes.HasPrefix(trimmed, []byte("event:")) {
++		return true, false
++	}
++	if !bytes.HasPrefix(trimmed, []byte("data:")) {
++		return false, false
++	}
++	data := bytes.TrimSpace(trimmed[len("data:"):])
++	if !gjson.ValidBytes(data) {
++		return false, false
++	}
++	typ := gjson.GetBytes(data, "type").String()
++	if typ == "error" || typ == "response.failed" {
++		body, ok := codexTerminalFailureBody(data)
++		if !ok {
++			return false, false
++		}
++		status := codexTerminalFailureStatus(body)
++		return false, (status == 408 || status == 502) &&
++			gjson.GetBytes(body, "error.type").String() == "server_error" &&
++			gjson.GetBytes(body, "error.code").String() == "request_timeout" &&
++			gjson.GetBytes(body, "error.message").String() == codexIncompleteStreamMessage
++	}
++	switch typ {
++	case "response.created", "response.in_progress":
++		status := gjson.GetBytes(data, "response.status")
++		if status.Exists() && status.String() != "queued" && status.String() != "in_progress" {
++			return false, false
++		}
++		for _, key := range []string{"response.error", "response.incomplete_details"} {
++			value := gjson.GetBytes(data, key)
++			if value.Exists() && value.Type != gjson.Null {
++				return false, false
++			}
++		}
++		output := gjson.GetBytes(data, "response.output")
++		return !output.Exists() || (output.IsArray() && len(output.Array()) == 0), false
++	case "response.output_item.added", "response.output_item.done":
++		item := gjson.GetBytes(data, "item")
++		if item.Get("type").String() != "reasoning" {
++			return false, false
++		}
++		for _, name := range []string{"summary", "content"} {
++			v := item.Get(name)
++			if v.Exists() && (!v.IsArray() || len(v.Array()) != 0) {
++				return false, false
++			}
++		}
++		return true, false
++	case "keepalive":
++		return true, false
++	default:
++		return false, false
++	}
++}
++
++// bridgeReasoningRetryExperiment sends no initial response bytes until it is
++// sure they cannot be discarded. Retry is bounded to one, and the caller owns
++// account-identity validation and downstream keepalives. This function does
++// not establish safe behavior for unlisted provider-side tools or account
++// changes, and deliberately is not connected to an installed runtime.
++func bridgeReasoningRetryExperiment(ctx context.Context, dst io.Writer, first io.ReadCloser,
++	retry func(context.Context) (io.ReadCloser, error), sameAccount func() bool) error {
++	current := first
++	var currentMu sync.Mutex
++	done := make(chan struct{})
++	go func() {
++		select {
++		case <-ctx.Done():
++			currentMu.Lock()
++			body := current
++			currentMu.Unlock()
++			_ = body.Close()
++		case <-done:
++		}
++	}()
++	defer func() {
++		close(done)
++		currentMu.Lock()
++		body := current
++		currentMu.Unlock()
++		_ = body.Close()
++	}()
++	attempts := 0
++	for {
++		reader := bufio.NewReaderSize(current, bridgeReasoningLineLimit)
++		var held bytes.Buffer
++		var event bytes.Buffer
++		var dataLine []byte
++		dataCount := 0
++		eventName := ""
++		invalidField := false
++		for {
++			line, err := reader.ReadSlice('\n')
++			if ctx.Err() != nil {
++				return ctx.Err()
++			}
++			if errors.Is(err, bufio.ErrBufferFull) || held.Len()+event.Len()+len(line) > bridgeReasoningBufferLimit {
++				if _, e := dst.Write(held.Bytes()); e != nil {
++					return e
++				}
++				if _, e := dst.Write(event.Bytes()); e != nil {
++					return e
++				}
++				if _, e := dst.Write(line); e != nil {
++					return e
++				}
++				_, e := io.Copy(dst, reader)
++				return e
++			}
++			event.Write(line)
++			trimmed := bytes.TrimSpace(line)
++			if len(trimmed) != 0 {
++				switch {
++				case bytes.HasPrefix(trimmed, []byte(":")):
++				case bytes.HasPrefix(trimmed, []byte("data:")):
++					dataCount++
++					dataLine = bytes.Clone(line)
++				case bytes.HasPrefix(trimmed, []byte("event:")) && eventName == "":
++					eventName = strings.TrimSpace(string(trimmed[len("event:"):]))
++				default:
++					invalidField = true
++				}
++			} else if len(line) > 0 {
++				safe, terminalRetry := true, false
++				if invalidField || dataCount > 1 || (dataCount == 0 && eventName != "") {
++					safe = false
++				} else if dataCount == 1 {
++					safe, terminalRetry = bridgeReasoningLine(dataLine)
++					if eventName != "" {
++						data := bytes.TrimSpace(bytes.TrimSpace(dataLine)[len("data:"):])
++						if eventName != gjson.GetBytes(data, "type").String() {
++							safe, terminalRetry = false, false
++						}
++					}
++				}
++				if !safe {
++					if terminalRetry && attempts == 0 && ctx.Err() == nil && sameAccount() {
++						next, nextErr := retry(ctx)
++						if nextErr == nil && next != nil {
++							currentMu.Lock()
++							if ctx.Err() != nil {
++								currentMu.Unlock()
++								_ = next.Close()
++								return ctx.Err()
++							}
++							old := current
++							current = next
++							currentMu.Unlock()
++							_ = old.Close()
++							attempts++
++							break
++						}
++					}
++					if _, e := dst.Write(held.Bytes()); e != nil {
++						return e
++					}
++					if _, e := dst.Write(event.Bytes()); e != nil {
++						return e
++					}
++					_, e := io.Copy(dst, reader)
++					return e
++				}
++				held.Write(event.Bytes())
++				event.Reset()
++				dataLine, dataCount, eventName, invalidField = nil, 0, "", false
++			}
++			if err != nil {
++				if _, e := dst.Write(held.Bytes()); e != nil {
++					return e
++				}
++				if _, e := dst.Write(event.Bytes()); e != nil {
++					return e
++				}
++				if errors.Is(err, io.EOF) {
++					return nil
++				}
++				return err
++			}
++			if ctx.Err() != nil {
++				return ctx.Err()
++			}
++		}
++	}
++}
+diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
+new file mode 100644
+index 00000000..d27cbc85
+--- /dev/null
++++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
+@@ -0,0 +1,282 @@
++package executor
++
++import (
++	"bytes"
++	"context"
++	"errors"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++)
++
++const bridgeFixtureCreated = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"output\":[]}}\n\n"
++const bridgeFixtureReasoning = "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"summary\":[],\"encrypted_content\":\"SYNTHETIC_SIGNATURE\"}}\n\n"
++const bridgeFixtureError = "data: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"code\":\"request_timeout\",\"message\":\"stream error: stream disconnected before completion: stream closed before response.completed\"}}\n\n"
++const bridgeFixtureSuccess = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"second\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"SYNTHETIC\"}\n\n"
++
++func TestBridgeReasoningRetryExperiment(t *testing.T) {
++	initial := bridgeFixtureCreated + bridgeFixtureReasoning + bridgeFixtureError
++	var out bytes.Buffer
++	attempts := 0
++	err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++		func(context.Context) (io.ReadCloser, error) {
++			attempts++
++			return io.NopCloser(strings.NewReader(bridgeFixtureSuccess)), nil
++		},
++		func() bool { return true })
++	if err != nil || attempts != 1 || out.String() != bridgeFixtureSuccess {
++		t.Fatalf("single safe retry failed: error=%v attempts=%d output_matches=%t", err, attempts, out.String() == bridgeFixtureSuccess)
++	}
++}
++
++func TestBridgeReasoningRetryStopsAtObservableOrUnknownEvents(t *testing.T) {
++	cases := map[string]string{
++		"visible text":        `{"type":"response.output_text.delta","delta":"text"}`,
++		"visible summary":     `{"type":"response.reasoning_summary_text.delta","delta":"thought"}`,
++		"client tool":         `{"type":"response.output_item.added","item":{"type":"function_call","arguments":""}}`,
++		"server tool":         `{"type":"response.output_item.added","item":{"type":"web_search_call"}}`,
++		"reasoning summary":   `{"type":"response.output_item.done","item":{"type":"reasoning","summary":[{"text":"thought"}]}}`,
++		"unknown":             `{"type":"new.provider.event"}`,
++		"quota metadata":      `{"type":"codex.rate_limits","rate_limits":{}}`,
++		"moderation metadata": `{"type":"response.metadata","metadata":{}}`,
++		"malformed":           `{malformed`,
++		"completed":           `{"type":"response.completed"}`,
++	}
++	for name, payload := range cases {
++		t.Run(name, func(t *testing.T) {
++			initial := bridgeFixtureCreated + "data: " + payload + "\n\n" + bridgeFixtureError
++			var out bytes.Buffer
++			attempts := 0
++			err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++				func(context.Context) (io.ReadCloser, error) { attempts++; return nil, nil }, func() bool { return true })
++			if err != nil || attempts != 0 || out.String() != initial {
++				t.Fatalf("observable event was not preserved")
++			}
++		})
++	}
++}
++
++func TestBridgeReasoningRetryFailClosed(t *testing.T) {
++	cases := map[string]string{
++		"conflicting quota status": strings.Replace(bridgeFixtureError, `"type":"server_error"`, `"status":429,"type":"server_error"`, 1),
++		"other failure":            strings.Replace(bridgeFixtureError, "request_timeout", "other_error", 1),
++		"unterminated":             strings.TrimSuffix(bridgeFixtureError, "\n"),
++		"multiple data lines":      strings.Replace(bridgeFixtureError, "\n\n", "\ndata: {\"type\":\"other\"}\n\n", 1),
++		"conflicting event name":   "event: other\n" + bridgeFixtureError,
++	}
++	for name, tail := range cases {
++		t.Run(name, func(t *testing.T) {
++			initial := bridgeFixtureCreated + bridgeFixtureReasoning + tail
++			var out bytes.Buffer
++			attempts := 0
++			err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++				func(context.Context) (io.ReadCloser, error) { attempts++; return nil, nil }, func() bool { return true })
++			if err != nil || attempts != 0 || out.String() != initial {
++				t.Fatal("unrecognized or incomplete stream was not preserved")
++			}
++		})
++	}
++}
++
++func TestBridgeReasoningRetryAccountAndAttemptBound(t *testing.T) {
++	initial := bridgeFixtureCreated + bridgeFixtureReasoning + bridgeFixtureError
++	for _, sameAccount := range []bool{false, true} {
++		var out bytes.Buffer
++		attempts := 0
++		err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++			func(context.Context) (io.ReadCloser, error) {
++				attempts++
++				return io.NopCloser(strings.NewReader(initial)), nil
++			},
++			func() bool { return sameAccount })
++		want := 0
++		if sameAccount {
++			want = 1
++		}
++		if err != nil || attempts != want || out.String() != initial {
++			t.Fatal("account guard or retry bound failed")
++		}
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	var out bytes.Buffer
++	attempts := 0
++	err := bridgeReasoningRetryExperiment(ctx, &out, io.NopCloser(strings.NewReader(initial)),
++		func(context.Context) (io.ReadCloser, error) { attempts++; return nil, nil }, func() bool { return true })
++	if !errors.Is(err, context.Canceled) || attempts != 0 {
++		t.Fatal("cancelled request retried")
++	}
++}
++
++func TestBridgeReasoningRetryPreservesSecondQuotaStream(t *testing.T) {
++	initial := bridgeFixtureCreated + bridgeFixtureReasoning + bridgeFixtureError
++	quota := "data: {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"code\":\"rate_limit_exceeded\",\"status_code\":429}}\n\n"
++	var out bytes.Buffer
++	attempts := 0
++	err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++		func(context.Context) (io.ReadCloser, error) {
++			attempts++
++			return io.NopCloser(strings.NewReader(quota)), nil
++		},
++		func() bool { return true })
++	if err != nil || attempts != 1 || out.String() != quota {
++		t.Fatal("second-attempt quota stream was not preserved")
++	}
++}
++
++func TestBridgeReasoningRetryAccountCheckAloneCannotPinAccount(t *testing.T) {
++	// A passing test reproduces a safety gap: a switch can occur after a plain
++	// boolean check but before the new request selects its credential. It is
++	// therefore NOT evidence of production-safe account preservation.
++	initial := bridgeFixtureCreated + bridgeFixtureReasoning + bridgeFixtureError
++	selected, retriedWith := "synthetic-a", ""
++	var out bytes.Buffer
++	err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++		func(context.Context) (io.ReadCloser, error) {
++			retriedWith = selected
++			return io.NopCloser(strings.NewReader(bridgeFixtureSuccess)), nil
++		}, func() bool {
++			wasOriginal := selected == "synthetic-a"
++			selected = "synthetic-b" // the selection changes after the comparison
++			return wasOriginal
++		})
++	if err != nil || retriedWith != "synthetic-b" {
++		t.Fatal("the synthetic account-switch race was not reproduced")
++	}
++}
++
++func TestBridgeReasoningRetryLeavesFirstFailureWhenRetryCannotStart(t *testing.T) {
++	initial := bridgeFixtureCreated + bridgeFixtureReasoning + bridgeFixtureError
++	var out bytes.Buffer
++	attempts := 0
++	err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++		func(context.Context) (io.ReadCloser, error) {
++			attempts++
++			return nil, errors.New("synthetic network failure")
++		},
++		func() bool { return true })
++	if err != nil || attempts != 1 || out.String() != initial {
++		t.Fatal("original error was not preserved")
++	}
++}
++
++func TestBridgeReasoningRetryToolAllowlist(t *testing.T) {
++	cases := map[string]bool{
++		`{}`:           true,
++		`{"tools":[]}`: true,
++		`{"tools":[{"type":"function","name":"fixture"}]}`: true,
++		`{"tools":[],"tool_choice":"auto"}`:                true,
++		`{"tools":[],"tool_choice":{"type":"web_search"}}`: false,
++		`{"tools":[],"tool_choice":"unknown"}`:             false,
++		`{"tools":[{"type":"web_search"}]}`:                false,
++		`{"tools":[{"type":"mcp"}]}`:                       false,
++		`{"tools":[{"type":"computer"}]}`:                  false,
++		`{"tools":null}`:                                   false,
++		`{"tools":[{}]}`:                                   false,
++		`{broken`:                                          false,
++	}
++	for input, want := range cases {
++		if got := bridgeRetrySafeTools([]byte(input)); got != want {
++			t.Fatalf("tool allowlist mismatch for fixture")
++		}
++	}
++}
++
++func TestBridgeReasoningRetryReleasesOnSizeBound(t *testing.T) {
++	large := "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"summary\":[],\"encrypted_content\":\"" + strings.Repeat("A", bridgeReasoningLineLimit) + "\"}}\n\n"
++	cases := map[string]string{
++		"line":  bridgeFixtureCreated + large + bridgeFixtureError,
++		"total": bridgeFixtureCreated + strings.Repeat(bridgeFixtureReasoning, bridgeReasoningBufferLimit/len(bridgeFixtureReasoning)+2) + bridgeFixtureError,
++	}
++	for name, initial := range cases {
++		t.Run(name, func(t *testing.T) {
++			var out bytes.Buffer
++			attempts := 0
++			err := bridgeReasoningRetryExperiment(context.Background(), &out, io.NopCloser(strings.NewReader(initial)),
++				func(context.Context) (io.ReadCloser, error) { attempts++; return nil, nil }, func() bool { return true })
++			if err != nil || attempts != 0 || out.String() != initial {
++				t.Fatal("bounded stream was not preserved")
++			}
++		})
++	}
++}
++
++func TestBridgeReasoningRetryCancellationClosesBlockedReader(t *testing.T) {
++	reader, writer := io.Pipe()
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	defer writer.Close()
++	result := make(chan error, 1)
++	attempts := 0
++	go func() {
++		result <- bridgeReasoningRetryExperiment(ctx, io.Discard, reader,
++			func(context.Context) (io.ReadCloser, error) { attempts++; return nil, nil }, func() bool { return true })
++	}()
++	cancel()
++	select {
++	case err := <-result:
++		if !errors.Is(err, context.Canceled) || attempts != 0 {
++			t.Fatal("blocked stream cancellation failed")
++		}
++	case <-time.After(2 * time.Second):
++		t.Fatal("blocked upstream reader was not closed")
++	}
++}
++
++func TestBridgeReasoningRetryHTTPPreservesSyntheticRequest(t *testing.T) {
++	var mu sync.Mutex
++	var bodies []string
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		body, err := io.ReadAll(r.Body)
++		if err != nil {
++			t.Error("fixture request read failed")
++			return
++		}
++		if r.Header.Get("Authorization") != "Bearer synthetic-fixture" {
++			t.Error("fixture authorization changed")
++		}
++		mu.Lock()
++		bodies = append(bodies, string(body))
++		attempt := len(bodies)
++		mu.Unlock()
++		w.Header().Set("Content-Type", "text/event-stream")
++		if attempt == 1 {
++			_, _ = io.WriteString(w, bridgeFixtureCreated+bridgeFixtureReasoning+bridgeFixtureError)
++			return
++		}
++		_, _ = io.WriteString(w, bridgeFixtureSuccess)
++	}))
++	defer server.Close()
++	payload := `{"model":"gpt-fixture","reasoning":{"effort":"xhigh"},"prompt_cache_key":"synthetic-session","tools":[{"type":"function","name":"fixture"}],"input":[{"role":"user","content":"synthetic"}]}`
++	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL, strings.NewReader(payload))
++	if err != nil {
++		t.Fatal(err)
++	}
++	request.Header.Set("Authorization", "Bearer synthetic-fixture")
++	first, err := server.Client().Do(request)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var out bytes.Buffer
++	err = bridgeReasoningRetryExperiment(request.Context(), &out, first.Body, func(ctx context.Context) (io.ReadCloser, error) {
++		again := request.Clone(ctx)
++		again.Body, err = request.GetBody()
++		if err != nil {
++			return nil, err
++		}
++		response, requestErr := server.Client().Do(again)
++		if requestErr != nil {
++			return nil, requestErr
++		}
++		return response.Body, nil
++	}, func() bool { return true })
++	mu.Lock()
++	defer mu.Unlock()
++	if err != nil || out.String() != bridgeFixtureSuccess || len(bodies) != 2 || bodies[0] != payload || bodies[1] != payload {
++		t.Fatal("synthetic HTTP replay did not preserve the request and response boundary")
++	}
++}

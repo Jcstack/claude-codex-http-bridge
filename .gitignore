@@ -91,6 +91,8 @@
 !tests/translator_incomplete_fixture.go
 !tests/upstream_keepalive_fixture.patch
 !tests/upstream_keepalive_delay_fixture.patch
+!tests/upstream_reasoning_retry_experiment.patch
+!tests/upstream_reasoning_retry_fixture.patch
 !tests/claude-client/
 !tests/claude-client/package.json
 !tests/claude-client/package-lock.json
@@ -153,3 +155,4 @@
 !.github/workflows/usage-environment-gate.yml
 !.github/workflows/capability-snapshot-gate.yml
 !.github/workflows/forwarded-stream-observation.yml
+!.github/workflows/reasoning-retry-observation.yml
