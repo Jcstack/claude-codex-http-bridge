@@ -291,7 +291,9 @@ uses the process name to select Node, so launching its canonical binary under
 the shim name produced no HUD output. The compatibility patch now preserves
 `node` as `argv[0]` on POSIX while still executing the checked canonical file;
 Windows keeps the previous launch options. A synthetic relay regression fails
-without this change. On the affected Mac, a no-network, temporary-home test
+without this change. The [HUD gate](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41943656248)
+passed on macOS, Linux and Windows; the new shim-specific regression runs on
+POSIX. On the affected Mac, a no-network, temporary-home test
 using the existing selector, Bun, and Volta rendered a synthetic HUD. The local
 file was then replaced atomically with a private rollback copy; the running
 session's tmux pane showed its model and context again without a restart.

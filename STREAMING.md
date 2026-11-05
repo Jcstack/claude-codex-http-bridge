@@ -141,6 +141,11 @@ is useful background but does not cover every terminal-error path. No
 user-generated prompt, transcript, error body, or credential is needed in the
 observer output.
 
+An independent [Codex Desktop report](https://github.com/openai/codex/issues/59377)
+also describes intermittent stream and compaction failures on macOS with a
+proxy. Its proxy-mode change and later successful requests were not a controlled
+comparison; it does not identify the cause of this bridge's HTTP stream closure.
+
 [Issue 6856](https://github.com/router-for-me/CLIProxyAPI/issues/6856)
 describes one distinct bootstrap-buffering failure involving a moderation
 metadata event. Its fix is present in the pinned source and precedes the
@@ -169,6 +174,10 @@ retention and resume semantics are unverified. Do not infer them from the
 separately billed API documentation or enable background storage implicitly.
 Safe adoption would also need ordered deduplication, cancellation and tool-effect
 tests, cache behavior, privacy review, and a user-selected supported route.
+The separately authorized public [ChatGPT plan usage preview](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+explicitly excludes the `background` field. That limitation applies to its
+documented public API flow, not automatically to the different Codex backend
+used by this installation.
 
 Claude Code's [StopFailure hook](https://code.claude.com/docs/en/hooks#stopfailure)
 can observe an API-failed turn, but its output and exit code do not direct a
