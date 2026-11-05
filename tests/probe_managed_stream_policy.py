@@ -15,6 +15,7 @@ import ssl
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from unittest.mock import patch
@@ -30,11 +31,40 @@ import rolling_runtime
 import runtime_bundle
 
 
-def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, observe: bool):
+class GapHandler(Handler):
+    """Hold the first fake upstream stream open briefly before its EOF."""
+
+    def emit_responses(self, body):
+        if self.server.requests:
+            return super().emit_responses(body)
+        original = self.wfile
+
+        class DelayedWriter:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+                self.flushes = 0
+
+            def __getattr__(self, name):
+                return getattr(self.wrapped, name)
+
+            def flush(self):
+                self.wrapped.flush()
+                self.flushes += 1
+                if self.flushes == 3:
+                    time.sleep(0.3)
+
+        self.wfile = DelayedWriter(original)
+        try:
+            return super().emit_responses(body)
+        finally:
+            self.wfile = original
+
+
+def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, observe: bool, gap_check: bool = False):
     with tempfile.TemporaryDirectory(prefix="bridge-managed-stream-policy-") as temporary:
         root = Path(temporary)
         runtime_bundle.private_dir(root)
-        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), GapHandler if gap_check else Handler)
         server.requests = []
         server.mode = "eof_partial_arguments"
         server.responses = True
@@ -110,6 +140,9 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, ob
                             raise AssertionError("Managed observation exposed synthetic private input")
                         if observe and not any(item["outcome"] == "terminal_event" for item in observations):
                             raise AssertionError("The opted-in managed observer did not record the synthetic failure")
+                        if gap_check and not any(item["outcome"] == "terminal_event" and
+                                                 (item.get("max_read_gap_ms") or 0) >= 150 for item in observations):
+                            raise AssertionError("The observer did not retain the synthetic read gap")
                         if not observe and observations:
                             raise AssertionError("The disabled managed observer recorded a failure")
                         return rows
@@ -127,10 +160,15 @@ def main():
     parser.add_argument("backend", type=Path)
     parser.add_argument("ingress", type=Path)
     parser.add_argument("--observe", action="store_true", help="Enable bounded metadata in the disposable backend")
+    parser.add_argument("--gap-check", action="store_true", help="Check a synthetic delay before EOF")
     args = parser.parse_args()
-    rows = check(args.origin.resolve(), args.backend.resolve(), args.ingress.resolve(), observe=args.observe)
+    if args.gap_check and not args.observe:
+        parser.error("--gap-check requires --observe")
+    rows = check(args.origin.resolve(), args.backend.resolve(), args.ingress.resolve(),
+                 observe=args.observe, gap_check=args.gap_check)
     print(json.dumps({"mock_only": True, "actual_generated_managed_config": True,
-                      "tls_ingress": True, "observer_enabled": args.observe, "requests": rows}))
+                      "tls_ingress": True, "observer_enabled": args.observe,
+                      "synthetic_gap_checked": args.gap_check, "requests": rows}))
 
 
 if __name__ == "__main__":

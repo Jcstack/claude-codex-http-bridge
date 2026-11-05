@@ -78,6 +78,7 @@ jobs:
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "baseline-${{ matrix.binary }}" bridge-ingress
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "fixed-${{ matrix.binary }}" bridge-ingress
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe
+          python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --gap-check
           python tests/probe_response_resume_route.py "baseline-${{ matrix.binary }}"
           python tests/probe_response_resume_route.py "fixed-${{ matrix.binary }}"
       - name: Check real Claude client against a fake Codex upstream

@@ -59,6 +59,11 @@ proof of the hop or event that caused the closure. This is a separate symptom
 from the HUD launch failure and does not establish that the stream issue is
 fixed.
 
+A read-only macOS unified-log query for Surge messages around that minute found
+no matching ChatGPT, timeout, reset, or EOF entries. Its narrow process, time,
+and message filters do not prove that every network event was logged or that
+the network path was healthy. No raw system log was retained in the repository.
+
 A separate credential-free reproduction shows a distinct recovery defect when
 the pinned two-layer translator uses its default cooldown policy. When the fake origin closes early, the executor's
 locally synthesized failure is request-scoped and a later request can reach the
@@ -116,6 +121,10 @@ cannot acquire observation retroactively.
 On 2026-11-05 the updated candidate was built locally on macOS from the pinned
 proxy source and reviewed patches with a checksum-verified Go toolchain. Its
 observer unit tests and generated managed TLS-ingress failure fixture passed.
+An additional local fake-upstream case introduced a 300 ms delay before EOF;
+the managed observer recorded a maximum read gap of at least 150 ms and a
+later independent request completed. This tests the instrumentation, not the
+duration or cause of the real 08:06 interruption.
 Another isolated test overlaid the installed controller sources with the
 proposed observer-aware runtime controller and candidate source lock; a held
 old stream drained and a persistent Claude client continued on the candidate.
@@ -178,6 +187,17 @@ An independent [Codex Desktop report](https://github.com/openai/codex/issues/593
 also describes intermittent stream and compaction failures on macOS with a
 proxy. Its proxy-mode change and later successful requests were not a controlled
 comparison; it does not identify the cause of this bridge's HTTP stream closure.
+
+In [CLIProxyAPI issue 5545](https://github.com/router-for-me/CLIProxyAPI/issues/5545),
+an operator reported Astra and Terra streams ending after approximately 30-second
+silent phases. The maintainer attributed those reports to the upstream service,
+but the report does not establish the cause of this installation's failures.
+The 25-second gap from the last recorded client thinking block to the 08:06
+error is not an upstream event or byte-idle measurement. Compare bounded
+event-gap observations across failures and successful controls before acting
+on this hypothesis. A separate [issue 6534](https://github.com/router-for-me/CLIProxyAPI/issues/6534)
+concerns streams that remain open without progress and was closed as not
+planned; a silent hang is not equivalent to the observed terminal error.
 
 [Issue 6856](https://github.com/router-for-me/CLIProxyAPI/issues/6856)
 describes one distinct bootstrap-buffering failure involving a moderation
