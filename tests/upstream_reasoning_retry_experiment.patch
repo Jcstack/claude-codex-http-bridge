@@ -1,9 +1,9 @@
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
 new file mode 100644
-index 00000000..dc725ff1
+index 00000000..5e0d4fcd
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment.go
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,259 @@
 +package executor
 +
 +// This isolated experiment is not wired into production. It tests a narrow
@@ -15,14 +15,36 @@ index 00000000..dc725ff1
 +	"context"
 +	"errors"
 +	"io"
++	"net/http"
 +	"strings"
 +	"sync"
 +
 +	"github.com/tidwall/gjson"
++	"github.com/tidwall/sjson"
 +)
 +
 +const bridgeReasoningBufferLimit = 2 << 20
 +const bridgeReasoningLineLimit = 64 << 10
++
++// bridgeReasoningRetryHTTPError is an experimental in-band representation of
++// a retry's HTTP failure. No headers or raw response are written to logs. A
++// bounded, valid error object is retained; otherwise a fixed message carries
++// the authoritative HTTP status. Header fidelity remains a deployment gate.
++func bridgeReasoningRetryHTTPError(response *http.Response) io.ReadCloser {
++	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
++	_ = response.Body.Close()
++	result := []byte(`{"type":"response.failed","response":{"status":"failed","error":{"type":"api_error","message":"Retry request returned an HTTP error"}}}`)
++	if err == nil && len(raw) <= 1<<20 && gjson.ValidBytes(raw) {
++		value := gjson.GetBytes(raw, "error")
++		if value.IsObject() {
++			result, _ = sjson.SetRawBytes(result, "response.error", []byte(value.Raw))
++		}
++	}
++	result, _ = sjson.SetBytes(result, "response.error.status_code", response.StatusCode)
++	frame := append([]byte("data: "), result...)
++	frame = append(frame, '\n', '\n')
++	return io.NopCloser(bytes.NewReader(frame))
++}
 +
 +func bridgeRetrySafeTools(body []byte) bool {
 +	if !gjson.ValidBytes(body) {
@@ -243,10 +265,10 @@ index 00000000..dc725ff1
 +}
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
 new file mode 100644
-index 00000000..d27cbc85
+index 00000000..9e0a35d0
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
-@@ -0,0 +1,282 @@
+@@ -0,0 +1,310 @@
 +package executor
 +
 +import (
@@ -260,6 +282,8 @@ index 00000000..d27cbc85
 +	"sync"
 +	"testing"
 +	"time"
++
++	"github.com/tidwall/gjson"
 +)
 +
 +const bridgeFixtureCreated = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"output\":[]}}\n\n"
@@ -374,6 +398,32 @@ index 00000000..d27cbc85
 +		func() bool { return true })
 +	if err != nil || attempts != 1 || out.String() != quota {
 +		t.Fatal("second-attempt quota stream was not preserved")
++	}
++}
++
++func TestBridgeReasoningRetryHTTPErrorPreservesStatus(t *testing.T) {
++	cases := []struct {
++		status   int
++		body     string
++		wantCode string
++		hidden   string
++	}{
++		{429, `{"error":{"type":"rate_limit_error","code":"usage_limit_reached","message":"synthetic"}}`, "usage_limit_reached", ""},
++		{401, `{"error":{"type":"authentication_error","code":"invalid_api_key"}}`, "invalid_api_key", ""},
++		{429, `malformed PRIVATE_SYNTHETIC`, "", "PRIVATE_SYNTHETIC"},
++	}
++	for _, tc := range cases {
++		response := &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body))}
++		frame, err := io.ReadAll(bridgeReasoningRetryHTTPError(response))
++		if err != nil || !bytes.HasPrefix(frame, []byte("data: ")) {
++			t.Fatal("synthetic HTTP failure was not framed")
++		}
++		payload := bytes.TrimSpace(bytes.TrimPrefix(frame, []byte("data: ")))
++		if int(gjson.GetBytes(payload, "response.error.status_code").Int()) != tc.status ||
++			gjson.GetBytes(payload, "response.error.code").String() != tc.wantCode ||
++			(tc.hidden != "" && bytes.Contains(payload, []byte(tc.hidden))) {
++			t.Fatal("synthetic HTTP failure status or redaction was not preserved")
++		}
 +	}
 +}
 +

@@ -283,11 +283,19 @@ uses a deliberately unsafe always-true account check, and is **not a runtime
 bundle or an available production setting**. A separate race test reproduces
 how an account can change after a simple check and before retry selection.
 
+The test-only wiring now converts a second-attempt HTTP rejection into a
+bounded in-band error, preserving its status and valid error object rather than
+returning the earlier stream error. A [two-layer synthetic quota fixture](tests/probe_reasoning_retry_quota.py)
+observed HTTP 429 when no keepalive had committed the response; with two
+pre-output comments already sent it observed HTTP 200 with an in-band
+`rate_limit_error`. This does not establish lossless HTTP-header handling,
+behavior for every error shape, or a real provider quota reset.
+
 Do not deploy this experiment: atomic account binding across the existing
-two-layer origin and account switching is unresolved; a rejected second HTTP
-attempt can hide its specific status; long pre-output keepalives, concurrent
-global memory limits, raw EOF recovery, all server tools, and real subscription
-behavior remain unverified. Even a bounded repeat can consume more quota and
+two-layer origin and account switching is unresolved; second-attempt error
+headers, long pre-output keepalives, concurrent global memory limits, raw EOF
+recovery, all server tools, and real subscription behavior remain unverified.
+Even a bounded repeat can consume more quota and
 cannot promise exactly-once effects for arbitrary model or provider behavior.
 There is no automatic recovery for the observed live failures yet.
 

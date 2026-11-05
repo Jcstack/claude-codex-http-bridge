@@ -67,3 +67,5 @@ jobs:
         run: |
           set -euo pipefail
           python tests/probe_reasoning_retry_candidate.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"
+          python tests/probe_reasoning_retry_quota.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"
+          python tests/probe_reasoning_retry_quota.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}" --keepalive
