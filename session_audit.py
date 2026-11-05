@@ -344,6 +344,7 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
     calls, completed_tools, compactions = {}, set(), []
     recent_errors, error_categories, tool_error_categories = deque(maxlen=12), Counter(), Counter()
     first = last = last_request = None
+    recent_thinking = None
     api_errors = unpaired_results = 0
     try:
         for record in records(path, coverage):
@@ -376,6 +377,9 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
                 modes[mode] += 1
                 if at is not None and (last_request is None or at.isoformat() >= last_request["at"]):
                     last_request = {"at": at.isoformat(), "model": model, "effort": effort}
+                    recent_thinking = {"recorded_blocks": 0, "empty_text_blocks": 0,
+                                       "empty_text_with_signature": 0, "nonempty_text_blocks": 0,
+                                       "invalid_text_blocks": 0, "last_block_at": None}
             if kind == "system" and record.get("subtype") == "compact_boundary":
                 cache_patterns.compact_boundary()
                 meta = record.get("compactMetadata")
@@ -423,6 +427,23 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
             for part in content:
                 if not isinstance(part, dict):
                     continue
+                if (kind == "assistant" and record.get("isApiErrorMessage") is not True
+                        and part.get("type") == "thinking" and recent_thinking is not None
+                        and at is not None and at.isoformat() >= last_request["at"]):
+                    recent_thinking["recorded_blocks"] += 1
+                    thought = part.get("thinking")
+                    if not isinstance(thought, str):
+                        recent_thinking["invalid_text_blocks"] += 1
+                    elif thought:
+                        recent_thinking["nonempty_text_blocks"] += 1
+                    else:
+                        recent_thinking["empty_text_blocks"] += 1
+                        signature = part.get("signature")
+                        if isinstance(signature, str) and signature:
+                            recent_thinking["empty_text_with_signature"] += 1
+                    current = at.isoformat()
+                    if recent_thinking["last_block_at"] is None or current > recent_thinking["last_block_at"]:
+                        recent_thinking["last_block_at"] = current
                 if kind == "assistant" and part.get("type") == "tool_use":
                     key = identity(part.get("id"))
                     if key is None or key in calls:
@@ -454,6 +475,7 @@ def scan(path: Path, since: datetime | None, aggregate: Usage) -> dict:
     seconds = [item["seconds"] for item in compactions if item["seconds"] is not None]
     return {"session_tag": tag(path.stem), "first_activity": first.isoformat() if first else None,
         "last_activity": last.isoformat() if last else None, "last_request": last_request,
+        "thinking_after_last_request_marker": recent_thinking,
         "request_modes": [{"model": model, "effort": effort, "records": count} for (model, effort), count in sorted(modes.items())],
         "api_error_records": api_errors, "api_error_status_mentions": dict(statuses),
         "api_error_category_mentions": dict(error_categories), "last_api_error_records": list(recent_errors),

@@ -34,6 +34,12 @@ before sharing. It is not automatically saved or committed.
 - Each file is read only up to its initial byte extent. Concurrent appends,
   truncation, unterminated tails, malformed data and skipped oversized lines
   appear in coverage. Undated metadata is included only in lifetime scans.
+- `thinking_after_last_request_marker` counts retained thinking blocks after
+  the most recent request marker in file order, including empty text with a
+  nonempty signature. It returns only counts and the latest block timestamp;
+  it does not expose text or signatures. Records can repeat or interleave,
+  and timestamps are not a cross-layer request identity. Empty text does not
+  prove model inactivity, useful progress, or actual provider token usage.
 - Lifecycle session lines are bounded at 16 MiB. Lightweight session and proxy
   scans use a separate two-million-character line limit. Usage/tool identities
   and compaction details have explicit limits; up to 256 child logs per main log

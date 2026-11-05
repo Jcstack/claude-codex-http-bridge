@@ -24,6 +24,28 @@ def write_records(path, records):
 
 
 class SessionAuditTests(unittest.TestCase):
+    def test_recent_thinking_counts_only_metadata_after_last_request_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "PRIVATE_SESSION.jsonl"
+            def request(at):
+                return {"timestamp": at, "type": "api-request", "params": {
+                    "model": "gpt-6-astra", "output_config": {"effort": "xhigh"}}}
+            def thinking(at, text, signature):
+                return {"timestamp": at, "type": "assistant", "message": {"id": "PRIVATE_ID", "content": [
+                    {"type": "thinking", "thinking": text, "signature": signature}]}}
+            older, newer, later = "2026-01-02T12:00:00Z", "2026-01-02T12:01:00Z", "2026-01-02T12:02:00Z"
+            write_records(path, [request(older), thinking(older, "", "PRIVATE_OLD_SIGNATURE"), request(newer),
+                thinking(newer, "", "PRIVATE_SIGNATURE"), thinking(later, "", ""),
+                thinking(later, "PRIVATE_THOUGHT", "PRIVATE_SIGNATURE"), thinking(later, None, "PRIVATE_SIGNATURE"),
+                thinking(older, "", "PRIVATE_STALE"),
+                {**thinking(later, "", "PRIVATE_ERROR"), "isApiErrorMessage": True}])
+            report = audit.scan(path, None, audit.Usage())
+            self.assertEqual(report["thinking_after_last_request_marker"], {
+                "recorded_blocks": 4, "empty_text_blocks": 2, "empty_text_with_signature": 1,
+                "nonempty_text_blocks": 1, "invalid_text_blocks": 1,
+                "last_block_at": "2026-01-02T12:02:00+00:00"})
+            self.assertNotIn("PRIVATE", json.dumps(report))
+
     def test_counter_patterns_are_bounded_metadata_not_duplicate_detection(self):
         timeline = audit.CacheCounterPatterns()
         def add(ident, value, model="PRIVATE_MODEL"):
