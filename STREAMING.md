@@ -41,6 +41,15 @@ proof of which network hop ended the stream. A recorded 301-second origin
 request in the same sample does not establish a universal timeout. The logs do
 not measure the longest period without upstream bytes or model events.
 
+A later read-only session sample recorded several assistant thinking blocks
+between the preceding request record and an incomplete-stream error; the last
+recorded block preceded the error by about 16 seconds. Another same-time origin
+access entry and the managed failure had matching approximate durations. This
+is evidence of recorded partial client output, not a shared request identifier
+or an upstream network-silence measurement. A pre-first-output bootstrap retry
+does not by itself recover this observed pattern, and replay could repeat
+effects in other interrupted turns.
+
 A separate credential-free reproduction shows a distinct recovery defect when
 the pinned two-layer translator uses its default cooldown policy. When the fake origin closes early, the executor's
 locally synthesized failure is request-scoped and a later request can reach the
