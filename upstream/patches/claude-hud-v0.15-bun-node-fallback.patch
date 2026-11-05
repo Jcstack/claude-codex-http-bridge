@@ -1,6 +1,8 @@
+diff --git a/hud.mjs b/hud.mjs
+index b982040..4df9562 100644
 --- a/hud.mjs
 +++ b/hud.mjs
-@@ -247,8 +247,26 @@
+@@ -247,14 +247,34 @@ export async function runCage({ stdin = null, now = Date.now(), probes = async (
  
  // Bun has no permission model, so logic always runs on Node: hand the whole run to `node`, found the
  // way the collector finds git (on Windows, only in absolute PATH entries, never the repo's folder).
@@ -28,3 +30,12 @@
    return new Promise((resolve) => {
      if (!node) {
        print([upgradeLine(`Bun ${process.versions.bun}`)]);
+       return resolve();
+     }
+-    const child = spawn(node, [path.join(ROOT, 'hud.mjs'), ...argv.slice(2)], { stdio: 'inherit' });
++    // Version-manager shims select Node from argv[0], even after path canonicalization.
++    const options = process.platform === 'win32' ? { stdio: 'inherit' } : { stdio: 'inherit', argv0: 'node' };
++    const child = spawn(node, [path.join(ROOT, 'hud.mjs'), ...argv.slice(2)], options);
+     child.on('error', () => resolve(print([upgradeLine(`Bun ${process.versions.bun}`)])));
+     child.on('close', (code) => {
+       if (code) process.exitCode = code;

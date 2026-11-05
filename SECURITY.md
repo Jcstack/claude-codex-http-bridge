@@ -286,6 +286,17 @@ reviewable. An official update can overwrite these local patches; verify the
 new version before restoring Git. Older versions must keep the ordinary Git
 setting disabled.
 
+A later Bun launch resolved an absolute `node` symlink to a Volta shim. Volta
+uses the process name to select Node, so launching its canonical binary under
+the shim name produced no HUD output. The compatibility patch now preserves
+`node` as `argv[0]` on POSIX while still executing the checked canonical file;
+Windows keeps the previous launch options. A synthetic relay regression fails
+without this change. On the affected Mac, a no-network, temporary-home test
+using the existing selector, Bun, and Volta rendered a synthetic HUD. The local
+file was then replaced atomically with a private rollback copy; the running
+session's tmux pane showed its model and context again without a restart.
+This does not validate every version manager or future HUD update.
+
 Upstream 0.15.0 writes its most recent status-line input to a local heartbeat
 file for its diagnostic commands, with private POSIX file mode in the tested
 fixture. The input can contain session metadata and paths; it is not included in

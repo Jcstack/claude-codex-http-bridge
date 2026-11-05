@@ -50,6 +50,15 @@ or an upstream network-silence measurement. A pre-first-output bootstrap retry
 does not by itself recover this observed pattern, and replay could repeat
 effects in other interrupted turns.
 
+A further screenshot-confirmed failure at 08:06 on 2026-11-05 aligned with a
+managed incomplete-stream record and an origin Responses access record ending
+in the same second, after roughly 392 and 391 seconds respectively. A recorded
+thinking block preceded the failure by about 25 seconds; the session continued
+afterward. HTTP 200 and similar timings are not a shared request identifier or
+proof of the hop or event that caused the closure. This is a separate symptom
+from the HUD launch failure and does not establish that the stream issue is
+fixed.
+
 A separate credential-free reproduction shows a distinct recovery defect when
 the pinned two-layer translator uses its default cooldown policy. When the fake origin closes early, the executor's
 locally synthesized failure is request-scoped and a later request can reach the
@@ -96,8 +105,11 @@ after that backend process starts, even if it remains running; events ending
 after the window are not recorded. The clock starts after
 response headers, and intervals include processing and backpressure; they are
 not measurements of upstream network silence. A [manual three-platform workflow](.github/workflows/forwarded-stream-observation.yml)
-uses synthetic traffic and no account credentials. Further validation and a
-draining managed-backend handoff are required before any activation. The flag
+uses synthetic traffic and no account credentials. Its [updated run](https://github.com/Jcstack/claude-codex-http-bridge/actions/runs/41939124084)
+passed on macOS, Linux and Windows, including a draining old-to-candidate
+handoff with an owned TLS ingress and a fake provider. It does not establish
+live-installation or provider behavior. Further validation is required before
+activation. The flag
 is accepted only for a newly created backend, so an existing in-flight stream
 cannot acquire observation retroactively.
 
