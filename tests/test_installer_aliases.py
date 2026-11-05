@@ -66,9 +66,21 @@ class InstallerAliasesTest(unittest.TestCase):
             for name in install.COMMAND_NAMES:
                 with self.subTest(name=name):
                     command, _ = install.command_spec(root, bin_dir, name=name)
-                    run = ([environment["COMSPEC"], "/d", "/c", str(command)] if os.name == "nt" else [str(command)])
-                    result = subprocess.run([*run, "--model", "synthetic model"], env=environment,
-                                            capture_output=True, text=True, encoding="utf-8", timeout=20, check=True)
+                    if os.name == "nt":
+                        # /s /c removes an outer quote pair. Python's default
+                        # list quoting targets the C runtime, not CMD's parser.
+                        # Keep both the spaced path and the spaced argument.
+                        # https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd
+                        prefix = subprocess.list2cmdline([environment["COMSPEC"], "/d", "/v:off", "/s", "/c"])
+                        run = prefix + f' ""{command}" --model "synthetic model""'
+                    else:
+                        run = [str(command), "--model", "synthetic model"]
+                    result = subprocess.run(run, env=environment, capture_output=True, text=True,
+                                            encoding="utf-8", timeout=20)
+                    self.assertEqual(result.returncode, 0, json.dumps({
+                        "command_not_found": "not recognized" in result.stderr.lower(),
+                        "path_not_found": "cannot find" in result.stderr.lower(),
+                        "python_path_error": "can't open file" in result.stderr.lower()}))
                     value = json.loads(result.stdout)
                     self.assertEqual(value["root"], str(root))
                     self.assertEqual(value["arguments"], ["--model", "synthetic model"])
