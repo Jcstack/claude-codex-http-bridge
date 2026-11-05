@@ -319,6 +319,19 @@ Headers can also be unavailable if a response commits before selection. Never
 expose the index in logs or use it alone to authorize a retry; a real solution
 needs a private account-identity check coordinated with selection and switching.
 
+The origin-placement fixtures above disabled automatic image-tool injection on
+both fake hops. The installed managed hop explicitly uses passthrough, while
+the original service configuration leaves this option unset. In the pinned
+source, an unset origin can automatically add `image_generation` for eligible
+non-free, non-lite, non-spark requests. The actual provider-bound request has
+not been captured, so this does not establish whether a particular live request
+contained that tool. A [negative two-hop fixture](tests/probe_reasoning_retry_origin_image_guard.py)
+left the fake origin at its default, observed the injected image tool, and
+verified that the experiment passed through the failure without replay. Thus
+the positive origin tests do not establish that recovery would apply to the
+current default. Do not silently disable image generation to widen retries;
+safe recovery with provider-executed tools needs its own evidence.
+
 The overload case was added after an actual session reported the same structured
 type and code; a coincident origin access record returned HTTP 200. The session
 had four retained empty signed thinking blocks before the error, but the

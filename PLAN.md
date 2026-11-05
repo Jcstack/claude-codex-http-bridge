@@ -44,6 +44,12 @@ The tracked session's anonymous marker is stored locally in the private installa
   process crash. Establish a bound on how long account switching can be blocked.
   Test both legacy direct and managed clients separately, and do not enable a
   fallback that sends a request before verifying its intended account.
+- [ ] Reconcile the original origin's default image-tool injection with safe
+  recovery. The positive fake-origin fixtures disabled injection on both hops;
+  the installed origin leaves its setting unset. The default-injection negative
+  fixture correctly refuses replay when the hosted image tool is present.
+  Preserve image capability, avoid assuming unobserved provider effects, and
+  verify provider-supported idempotency or another safe strategy before retrying.
 
 - [x] Identify the long-running main session matching the active process and inspect its main and child logs from startup, extracting only necessary structure and statistics.
 - [x] Fix stale 429 responses after usage resets: check the selected account's actual availability, release its expired account-wide cooldown, and stop duplicating the origin's rate-limit state in the translation layer.

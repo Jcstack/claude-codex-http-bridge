@@ -77,3 +77,4 @@ jobs:
           python tests/probe_reasoning_retry_account_switch.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"
           python tests/probe_reasoning_retry_wait.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"
           python tests/probe_origin_trace_selection.py "baseline-${{ matrix.binary }}"
+          python tests/probe_reasoning_retry_origin_image_guard.py "synthetic-retry-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"
