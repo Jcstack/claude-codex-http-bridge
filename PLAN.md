@@ -32,6 +32,18 @@ The tracked session's anonymous marker is stored locally in the private installa
   real accounts. Real OAuth refresh/selection, safe origin migration,
   provider-side tools, long waits, error headers and global memory limits
   remain acceptance gates. Do not silently change models, accounts or effort.
+- [ ] Assess whether the existing origin can expose a safe retry boundary
+  without moving its listener or creating a second OAuth refresh owner. The
+  origin trace index alone is insufficient: it can be absent, a file-backed
+  index can survive replacement by a different account, and the management
+  file list need not include API-key credentials. If a candidate combines
+  private identity observations with the account switch lock, verify the
+  account selected by the actual initial request and the retry, simultaneous
+  switches and relogin, same-path replacement, refresh, missing or conflicting
+  metadata, timeout and cancellation while acquiring or holding the lock, and
+  process crash. Establish a bound on how long account switching can be blocked.
+  Test both legacy direct and managed clients separately, and do not enable a
+  fallback that sends a request before verifying its intended account.
 
 - [x] Identify the long-running main session matching the active process and inspect its main and child logs from startup, extracting only necessary structure and statistics.
 - [x] Fix stale 429 responses after usage resets: check the selected account's actual availability, release its expired account-wide cooldown, and stop duplicating the origin's rate-limit state in the translation layer.
