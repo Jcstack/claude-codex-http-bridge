@@ -113,6 +113,39 @@ activation. The flag
 is accepted only for a newly created backend, so an existing in-flight stream
 cannot acquire observation retroactively.
 
+On 2026-11-05 the updated candidate was built locally on macOS from the pinned
+proxy source and reviewed patches with a checksum-verified Go toolchain. Its
+observer unit tests and generated managed TLS-ingress failure fixture passed.
+Another isolated test overlaid the installed controller sources with the
+proposed observer-aware runtime controller and candidate source lock; a held
+old stream drained and a persistent Claude client continued on the candidate.
+The active controller and services were not changed by those tests.
+
+An isolated candidate backend then completed a short synthetic subscription
+request through the existing origin and a temporary TLS ingress. The reusable
+[subscription probe](tests/live_observer_subscription.py) also passed with a
+bounded response, reassembled SSE text, an `end_turn` and `message_stop`. It
+uses the existing localhost client key in a private temporary directory, not an
+OAuth file; a handled exit removes that directory. It consumes subscription
+quota and is not run by ordinary unit tests. An earlier exploratory request had
+HTTP 200 and `message_stop` but a raw-byte marker check failed; that check did
+not distinguish split events from an unexpected answer and is not counted as a
+pass. The later test only proves the healthy short-stream path. It does not
+induce or diagnose a real interruption, verify a real long-running cache hit,
+or prove that replacing an active backend is free of all effects. The observer
+remains uninstalled and disabled in the active service.
+
+To repeat the explicit live check with binaries you have independently reviewed:
+
+```sh
+python tests/live_observer_subscription.py --proxy PRIVATE_PROXY_BINARY --ingress PRIVATE_INGRESS_BINARY --root PRIVATE_BRIDGE_INSTALLATION
+```
+
+The probe binds the supplied binaries to the current source-lock metadata; it
+does not independently prove how those binaries were built. On an unhandled
+process termination, inspect the private temporary directory before removing
+it; automatic cleanup applies to handled exits.
+
 After an observer-capable runtime and controller have been selected, a POSIX
 shell can request one bounded observation window for newly routed requests:
 
