@@ -125,10 +125,19 @@ claude-codex bridge stop              # after background work has finished
 Inside Claude Code:
 
 - `/model` lists the eligible text models discovered from the local bridge's `/v1/models` catalog when this session started. Use the arrow keys and press **s** to switch for this session only. Enter saves the model to Claude Code's user settings and may affect a later plain `claude` launch. `claude-codex models` checks the current catalog; an already running session's picker is not automatically refreshed.
-- `/effort` selects `low`, `medium`, `high`, `xhigh`, or `max`. `/effort ultracode` enables Claude Code's own dynamic workflows; it is not Codex Ultra.
+- `/effort` selects `low`, `medium`, `high`, `xhigh`, or `max`. With Claude Code 2.1.284 or later, `/effort ultracode` enables Claude Code's dynamic workflows without changing the selected effort; `/effort ultracode off` turns them off. Launching with `--effort ultracode` starts at `xhigh`. This is Claude Code's orchestration, not Codex Ultra.
 - `/autocompact` shows the configured window for the selected model. The launcher supplies a per-model setting, so `/model` switches also switch that setting. Claude reserves space internally and may compact earlier. Its higher-priority launch setting cannot currently be changed by `/autocompact` within that session.
 
 The model list, context windows, compaction settings and HUD mapping come from an authenticated **local proxy** catalog at session start. In the pinned proxy source, Codex subscription registrations select models by a recorded plan type from the proxy's catalog; an unknown plan falls back to its Pro catalog. Catalog data can be embedded, cached or refreshed from the proxy project's community-maintained sources. A successful local authenticated lookup does not prove a fresh OpenAI account-specific entitlement list or verify every advertised limit. Discovery uses a valid `max_context_window`, preserves `context_window` as the default, and otherwise uses the declared default. New sessions refresh the local snapshot; running sessions retain their startup settings. The proxy release itself stays pinned until its checksum and compatibility have been reviewed. See [catalog provenance](OPERATIONS.md#subscription-model-catalog-provenance).
+
+For Codex catalog rows advertising Ultra, `claude-codex models` also shows a
+model's advertised multi-agent base effort when provided. That field is a
+catalog hint, not a Claude Code effort setting or proof that an account can use
+Ultra. In the inspected Codex 0.166.0 catalog, Astra, 6.1 Sol and 6.1 Terra
+advertised `xhigh` as the base; Codex adds its own subagent orchestration.
+The value can vary with the model and catalog. Claude Code's `xhigh` plus its
+own ultracode workflow is a similar configuration, not an implementation or
+benchmark of Codex Ultra. See [the effort details](CAPABILITY_AUDIT.md#reasoning-effort-and-ultra).
 
 With an activated [reviewed runtime bundle](RUNTIME.md), new launches use the stable TLS endpoint automatically. Existing direct sessions retain their original service. `bridge reload` keeps the TLS listener and active model streams; replacing that listener or the legacy origin itself is a separate migration. `diagnostics` reports origin and managed backend logs separately, without reading keys or summing duplicate layer counts.
 

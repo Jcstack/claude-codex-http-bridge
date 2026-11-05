@@ -23,6 +23,17 @@ isolated end-to-end test before changing the active runtime.
 
 ### Forwarded incomplete-stream failures
 
+A credential-free [two-layer fixture](tests/probe_opaque_reasoning_stream.py)
+sent three synthetic Responses reasoning items with opaque content and no
+visible summary, followed by an incomplete stream. The pinned translators
+produced three empty Claude `thinking` blocks with signatures and an error;
+three synthetic SSE comments produced no such blocks. The
+[translator](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/translator/codex/claude/codex_claude_response.go)
+has a signature-only reasoning path consistent with the fixture. Empty
+thinking text alone therefore does not measure useful model progress, prove
+upstream silence, or identify a real stream's upstream events. Preserving
+opaque reasoning state does not require exposing or decoding it.
+
 In a read-only review of one tracked session and its children on 2026-11-04,
 one main-session incomplete-stream record and one managed-backend error with
 the same sentinel occurred in the same minute. No cross-layer request ID was

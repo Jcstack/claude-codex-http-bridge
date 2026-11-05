@@ -253,6 +253,22 @@ def eligible(row: dict) -> bool:
     )
 
 
+def advertised_ultra_base(row: dict) -> str | None:
+    """Describe catalog metadata, without guessing Codex's fallback or access."""
+    levels = row.get("supported_reasoning_levels")
+    if not isinstance(levels, list):
+        return None
+    efforts = {entry["effort"] for entry in levels if isinstance(entry, dict)
+               and isinstance(entry.get("effort"), str)}
+    if "ultra" not in efforts:
+        return None
+    base = row.get("multi_agent_reasoning_effort")
+    if (isinstance(base, str) and base != "ultra" and base in efforts
+            and re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", base)):
+        return base
+    return "unknown"
+
+
 def catalog_snapshot(chat: dict) -> dict:
     """Capture metadata used to prepare and reconcile managed sessions."""
     fields = ("context_window", "supported_reasoning_levels", "supports_search_tool", "input_modalities")
@@ -381,14 +397,19 @@ def main() -> int:
             window = compact_window(row)
             state = "catalog-ok" if eligible(row) else "metadata-incomplete"
             alias = next((name for name, target in choices.items() if target == slug), "")
+            ultra = advertised_ultra_base(row) if os.environ.get("CODEX_BRIDGE_ROUTE") != "api" else None
+            ultra_hint = f" ultra-advertised-base={ultra}" if ultra is not None else ""
             print(
                 f"  {slug:<18} context={row.get('context_window', '?'):<7} "
-                f"compact={window or '?':<7} {state} {alias}"
+                f"compact={window or '?':<7} {state} {alias}{ultra_hint}"
             )
         if images:
             print("Image-only API models (not Claude Code base models): " + ", ".join(images))
         print("Catalog listing does not verify inference access to every model; selection checks access on first request.")
         print("Claude Code effort: low, medium, high, xhigh, max. Codex Ultra is a separate client mode.")
+        if os.environ.get("CODEX_BRIDGE_ROUTE") != "api":
+            print("Ultra bases are catalog hints for Codex's multi-agent mode, not verified account access "
+                  "or Claude Code settings; unknown does not imply unsupported.")
         return 0
     if len(sys.argv) != 3:
         print("Specify one model ID or sol/astra/terra/luna.", file=sys.stderr)

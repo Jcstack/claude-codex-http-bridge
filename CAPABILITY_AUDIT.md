@@ -91,9 +91,37 @@ The optional [native pack](NATIVE_TOOLS.md) now provides a reviewed, explicitly 
 | Web/search and tool use | Function/custom tools and web search were exercised. Native subscription image generation returned a real PNG, with a requested-versus-actual size mismatch. Claude-side image/PDF/Realtime tools and scoped desktop are now implemented in the [native pack](NATIVE_TOOLS.md), with per-feature evidence. File search, interpreter, connectors and native tool search still need integration/execution checks. Earlier SIWC-based blanket exclusions did not establish this backend's entitlement. [Correction and measurements](OPERATIONS.md). |
 | Subscription quota | The optional status-line bridge calls Codex's documented `account/rateLimits/read` through native Codex app-server, only when the native Codex account ID matches the single bridge OAuth account ID. It reads actual window durations and never invents 5-hour or weekly values. Current account returned a weekly window and no 5-hour window. [App-server RPC](https://learn.chatgpt.com/docs/app-server). API-key rate limits and spend are separate. |
 
-## Community project review
+## Reasoning effort and Ultra
 
-The local proxy catalog also advertises `ultra`. OpenAI's [client model guide](https://learn.chatgpt.com/docs/models#choose-a-model) describes Ultra as a subagent orchestration mode, while the [Sol API specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol) lists `low`, `medium`, `high`, `xhigh` and `max` as wire reasoning efforts. This bridge does not silently replace `max` with `ultra` or claim that a model endpoint carries Codex's orchestration. Claude Code retains its own Agent/subagent loop; reproducing or evaluating Codex Ultra's orchestration in that harness is a separate remaining task.
+Claude Code's `low`, `medium`, `high`, `xhigh`, and `max` are distinct model
+request levels on the tested path. The [round-trip fixture](tests/probe_effort_roundtrip.py)
+checks their values through a real Claude Code client and translator against a
+fake Responses server. Similar labels across model families do not imply equal
+reasoning work, and a fake server does not establish actual model access.
+
+The subscription catalog can also advertise `ultra`. OpenAI's [model guide](https://learn.chatgpt.com/docs/models#choose-a-model)
+describes Ultra as using subagents; the [Sol API specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+lists `low`, `medium`, `high`, `xhigh`, and `max` as model request levels.
+In the inspected Codex 0.166.0 bundled catalog, Astra, GPT-6.1 Sol and GPT-6.1
+Terra each advertise `multi_agent_reasoning_effort: xhigh`. That version's
+[resolver](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/protocol/src/openai_models/reasoning_effort.rs)
+maps Ultra to the advertised supported multi-agent base for an ordinary model
+request; if the field is absent or invalid it uses its own fallbacks. The
+catalog and resolver can change, and a local catalog is not a verified live
+account entitlement list. The `models` command displays the advertised base
+when present, without guessing the fallback or changing any request.
+
+Claude Code has its own independent [ultracode setting](https://code.claude.com/docs/en/model-config#adjust-effort-level).
+On Claude Code 2.1.284 and later, `/effort ultracode` enables dynamic workflows
+at the session's existing effort; `--effort ultracode` starts at `xhigh`.
+For a configuration similar to the inspected Codex model-request base, select
+`/effort xhigh` and enable Claude's ultracode. Claude still chooses and manages
+its own agents and workflow, and these commands do not reproduce or benchmark
+Codex Ultra's orchestration. `max` is a separate, higher single-request effort
+on models that support it; this bridge does not silently substitute either
+`max` or `ultra` for the user's selection.
+
+## Community project review
 
 Popularity was a discovery signal, not the decision rule. Checked upstream repositories, releases, documentation, and open issues on 2026-10-30:
 

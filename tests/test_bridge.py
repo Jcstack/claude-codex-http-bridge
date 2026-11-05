@@ -40,6 +40,28 @@ def model(context: int, search: bool = True) -> dict:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_ultra_base_display_follows_untrusted_model_metadata(self):
+        row = {**model(500_000), "supported_reasoning_levels": [
+            {"effort": level} for level in ("low", "medium", "high", "xhigh", "max", "ultra")],
+            "multi_agent_reasoning_effort": "xhigh"}
+        for value, expected in (("xhigh", "xhigh"), ("max", "max"), ("low", "low"),
+                                ("ultra", "unknown"), ("future", "unknown"),
+                                ("max\nsecret", "unknown"), (None, "unknown")):
+            with self.subTest(base=value):
+                self.assertEqual(bridge_models.advertised_ultra_base(
+                    {**row, "multi_agent_reasoning_effort": value}), expected)
+        self.assertIsNone(bridge_models.advertised_ultra_base(model(500_000)))
+        self.assertEqual(bridge_models.advertised_ultra_base(
+            {**row, "supported_reasoning_levels": [{"effort": "ultra"}, {"effort": []}]}), "unknown")
+        for route in ("subscription", "api"):
+            with self.subTest(route=route), patch.dict(os.environ, {"CODEX_BRIDGE_ROUTE": route}, clear=True), \
+                 patch.object(bridge_models, "discover", return_value=({"gpt-6.1-sol": row}, [])), \
+                 patch.object(sys, "argv", ["bridge_models.py", "list"]):
+                output = StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(bridge_models.main(), 0)
+                self.assertEqual("ultra-advertised-base=xhigh" in output.getvalue(), route == "subscription")
+
     def test_subscription_model_list_explains_proxy_catalog_provenance(self):
         rows = {"gpt-6.1-sol": model(500_000)}
         for route, expect_notice in (("subscription", True), ("api", False)):
