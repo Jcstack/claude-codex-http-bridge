@@ -304,6 +304,17 @@ run the OAuth refresh or account manager; it does not establish real refresh,
 revocation, a live subscription route, or safe migration of the running origin
 service.
 
+The existing origin's `X-CPA-TRACE-ID` is another candidate observation point,
+not an account-binding guarantee. A [fake-origin probe](tests/probe_origin_trace_selection.py)
+observed a stable selection index that changed when a disposable API key was
+replaced, but that fake API-key entry was absent from the management
+`auth-files` list. More importantly, the pinned origin derives an OAuth
+credential's index from its file path and type; the experiment's unit test
+confirms that replacing the account at the same path keeps the same index.
+Headers can also be unavailable if a response commits before selection. Never
+expose the index in logs or use it alone to authorize a retry; a real solution
+needs a private account-identity check coordinated with selection and switching.
+
 The overload case was added after an actual session reported the same structured
 type and code; a coincident origin access record returned HTTP 200. The session
 had four retained empty signed thinking blocks before the error, but the

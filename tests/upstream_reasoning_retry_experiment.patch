@@ -419,10 +419,10 @@ index 00000000..f5619230
 +}
 diff --git a/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
 new file mode 100644
-index 00000000..43967323
+index 00000000..3303d3a0
 --- /dev/null
 +++ b/internal/runtime/executor/codex_bridge_reasoning_retry_experiment_test.go
-@@ -0,0 +1,536 @@
+@@ -0,0 +1,548 @@
 +package executor
 +
 +import (
@@ -432,6 +432,7 @@ index 00000000..43967323
 +	"io"
 +	"net/http"
 +	"net/http/httptest"
++	"path/filepath"
 +	"strings"
 +	"sync"
 +	"sync/atomic"
@@ -957,5 +958,16 @@ index 00000000..43967323
 +		firstAttempt.body != retryAttempt.body || nextAttempt.token != "Bearer synthetic-token-b" ||
 +		nextAttempt.account != "synthetic-account-b" {
 +		t.Fatal("OAuth-shaped credential snapshot or request changed")
++	}
++}
++
++func TestBridgeReasoningRetryTraceIndexDoesNotProveOAuthAccountIdentity(t *testing.T) {
++	path := filepath.Join(t.TempDir(), "synthetic-account.json")
++	first := &cliproxyauth.Auth{Provider: "codex", Attributes: map[string]string{"path": path},
++		Metadata: map[string]any{"type": "codex", "account_id": "synthetic-account-a"}}
++	replacement := &cliproxyauth.Auth{Provider: "codex", Attributes: map[string]string{"path": path},
++		Metadata: map[string]any{"type": "codex", "account_id": "synthetic-account-b"}}
++	if first.EnsureIndex() == "" || first.EnsureIndex() != replacement.EnsureIndex() {
++		t.Fatal("synthetic OAuth file replacement did not retain its path-derived index")
 +	}
 +}
