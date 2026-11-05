@@ -83,6 +83,8 @@ jobs:
           python tests/probe_response_resume_route.py "fixed-${{ matrix.binary }}"
           python tests/probe_opaque_reasoning_stream.py "baseline-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"
           python tests/probe_opaque_reasoning_stream.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}"
+          python tests/probe_opaque_reasoning_ui.py "baseline-${{ matrix.binary }}"
+          python tests/probe_opaque_reasoning_ui.py "baseline-${{ matrix.binary }}" --comments
       - name: Check real Claude client against a fake Codex upstream
         shell: bash
         run: |

@@ -34,6 +34,16 @@ thinking text alone therefore does not measure useful model progress, prove
 upstream silence, or identify a real stream's upstream events. Preserving
 opaque reasoning state does not require exposing or decoding it.
 
+A separate [interactive client fixture](tests/probe_opaque_reasoning_ui.py)
+used the locked Claude Code 2.1.316 client, an isolated empty home, a local
+fake Responses origin, and no model account. Five synthetic signature-only
+items with 8,501 characters each caused its terminal to show `1.6k` and then
+`8.0k tokens`, despite no visible thinking text or real model tokens. A control
+with five SSE comments showed no such token counter. These are observations of
+this client and fixture, not a measurement of actual model work, billing, or
+the events in another session. A growing terminal counter alone cannot prove
+useful reasoning progress or establish final provider usage.
+
 In a read-only review of one tracked session and its children on 2026-11-04,
 one main-session incomplete-stream record and one managed-backend error with
 the same sentinel occurred in the same minute. No cross-layer request ID was
