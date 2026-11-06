@@ -29,6 +29,10 @@ describe different acceptance gates for the same reliability work. They remain
 open until their stated boundary is met; an unavailable host or provider
 capability is not a successful test.
 
+The current inventory is 18 open P0 items and 10 open P1 items after the real
+HUD display observation. Completing individual recovery gates below does not
+close the broader unattended-recovery acceptance item.
+
 1. Diagnose the recurring incomplete-stream failure before expanding other
    features. Follow the current incident session and its children, preserve
    the former private audit target, and compare failed streams with completed
@@ -38,8 +42,9 @@ capability is not a successful test.
    error-file review also found the same sentinel on a nonstream request;
    buffered execution now has bounded metadata in the active managed backend.
    Coverage before successful HTTP response headers remains a separate gate.
-2. Correct foreign error categories at the Claude Messages boundary so the
-   harness can apply its own native retry policy. Keep this separate from
+2. The native error-category correction is selected. Complete repeated-failure,
+   exhaustion, cancellation and overall-budget acceptance for the harness's
+   native retry policy. Keep this separate from
    experimental gateway replay and from the physical cause of disconnection.
    Establish additional recovery inside a verified account boundary, including OAuth
    refresh, selection changes, hosted tools, second-attempt error semantics,
@@ -104,6 +109,24 @@ capability is not a successful test.
   optional skips) and the Go race-enabled Claude handler suite passed.
   Cross-platform recovery and installed rollout remain separate gates. See
   [STREAMING.md](STREAMING.md#native-claude-error-compatibility-2026-11-07).
+- [x] Pass the [native recovery gate](https://github.com/Jcstack/harnesslift/actions/runs/42268092997)
+  on macOS, Linux and Windows, then select the verified source-locked Mac
+  bundle using the managed upgrade. A 68-check installed-source overlay and
+  persistent-client handoff passed beforehand. Origin state/process, ingress
+  identity/port, client key and account remained unchanged. One short synthetic
+  subscription request through the installed stable endpoint completed as
+  valid nonstream JSON with the exact marker, `end_turn` and a buffered
+  completion observation. This is a healthy-route control, not an induced real
+  provider failure. In-flight old-generation requests and legacy direct
+  sessions keep their original translator; new managed requests get the fix.
+- [x] Check repeated native failures and explicit exhaustion locally with owned
+  fake upstreams and Claude Code 2.1.316. Two consecutive reasoning-only EOFs
+  recovered with a single write and retained result; persistent EOFs stopped
+  after three attempts under a two-retry fixture budget, with no write and
+  unchanged compared semantics. No user-session retry setting was changed.
+  The [three-platform budget gate](.github/workflows/native-retry-budget.yml)
+  is a separate check; overall deadlines, cancellation and provider effects
+  remain open.
 
 - [ ] Deliver safe unattended recovery for incomplete streams and structured
   overloads without disrupting running sessions. The credential-free
@@ -220,7 +243,7 @@ This remains a priority. The real session provides evidence of cache reads and a
 - [x] Add a separate explicit quota-presence scope to that one-shot observation. It retains Boolean shapes only and does not initiate a provider request; cache-field opt-outs remain effective. Synthetic account, stale and expired-window controls passed the [three-platform unit gate](https://github.com/Jcstack/harnesslift/actions/runs/41672790901). The [HUD gate](https://github.com/Jcstack/harnesslift/actions/runs/41672789680) passed on three platforms; its real-client fixture with a fake gateway, fake quota and reviewed HUD displayed both synthetic windows on macOS and Linux. On the active Mac the helper and adapter were installed dependency-first with a private rollback after isolated tests, without restarting sessions or services. This does not establish real-provider or downstream-session behavior.
 - [x] Stop forwarding individual quota windows from a fresh local snapshot after their recorded reset time. Synthetic tests retain a still-valid second window and reject malformed values. The [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41673623335) passed, and the file was atomically installed on the active Mac with a private rollback and no restart after staged checks. The normal five-minute refresh schedule remains unchanged, so a reset window may be temporarily absent; this display change does not resolve a 429 or prove current provider data.
 - [x] Recheck the selected account after reading a quota snapshot, discarding it if the identity changed. Synthetic controls cover account replacement and disappearance during the read; a later switch or a change away and back between checks remains outside this protection. The [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41674090372) and installed-source staging passed. The Mac helper was replaced atomically with a private rollback, without restarting services or sessions; a post-install synthetic check passed.
-- [ ] Observe the real downstream HUD receive and display the reported cache fraction. A short read-only sample did not find its label in the accessible tmux panes, and the default-location HUD heartbeat was absent; this does not identify the terminal or establish a plugin failure. Do not infer provider TTL, warmth, account isolation or future cache reuse from the display.
+- [x] Observe a real downstream HUD display the reported cache fraction. A read-only current tmux frame contained the standalone `Reported cache-read input (main)` percentage line, together with context and quota HUD shapes. The check retained Boolean matches only, without terminal content, paths or numeric usage. This supersedes the earlier sample that did not find the label. It establishes the visible display, not a process-authenticated association with the tracked session, exact counter provenance, provider TTL, warmth, account isolation or future cache reuse.
 - [x] Check current official caching documentation and the installed translator. Cache read/write counters are translated, but routes handle cache-control fields differently; field names alone do not establish availability.
 - [x] Assess OpenAI's Responses cache-comparison diagnostics and observe both current Mac translator binaries against a fake API-profile upstream. Synthetic streamed and nonstreamed messages retained cache-read counts but did not forward a nonstandard comparison option or the upstream diagnostic. The [reviewed-translator observation](https://github.com/Jcstack/harnesslift/actions/runs/41514331615) reported the same outcome on all three platforms. This is not a Claude client, subscription backend, or real provider test; see [CACHE_AUDIT.md](CACHE_AUDIT.md#provider-cache-diagnostics-and-route-boundary).
 - [ ] Determine whether cache-comparison diagnostics can be supported without losing model/session/account binding or violating privacy. Verify the exact subscription backend and translator behavior first; do not turn on the separate paid Project API or issue extra requests implicitly.

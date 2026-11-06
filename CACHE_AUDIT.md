@@ -12,6 +12,18 @@ them from fresh input to avoid double-counting. It also handles the upstream
 `cache_creation_tokens` alias. A reported zero write counter is not proof of a
 pricing policy, and a cached-token fraction is not a request hit rate.
 
+On 2026-11-07 a read-only current tmux frame showed the standalone
+`Reported cache-read input (main)` percentage line from the reviewed HUD,
+together with context and quota display shapes. Only Boolean shape matches
+were retained, without terminal content, paths or numeric usage. This confirms
+a visible downstream display, not exact counter provenance, a
+process-authenticated link to the tracked session, provider warmth, TTL,
+account isolation or future reuse. The
+[native error recovery gate](STREAMING.md#native-claude-error-compatibility-2026-11-07)
+also compares the requested prompt cache key, instructions, input and tools
+across its synthetic reasoning retry; structural preservation is distinct from
+a real provider cache hit.
+
 A small requested `gpt-6.1-sol` control kept a fixed reference and cache key,
 then changed the lookup question. Every answer was correct:
 

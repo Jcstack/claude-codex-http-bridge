@@ -177,3 +177,4 @@
 !.github/workflows/forwarded-stream-observation.yml
 !.github/workflows/reasoning-retry-observation.yml
 !.github/workflows/claude-error-recovery.yml
+!.github/workflows/native-retry-budget.yml

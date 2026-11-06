@@ -510,3 +510,23 @@ one demonstrated reason a client stops; it cannot promise recovery from every
 visible-output interruption, exhausted retry budget or provider-side effect.
 The [local findings and separate platform gates](STREAMING.md#native-claude-error-compatibility-2026-11-07)
 record that distinction.
+
+An earlier upstream [408 classification report](https://github.com/router-for-me/CLIProxyAPI/issues/6298)
+was closed by [the status-mapping fix](https://github.com/router-for-me/CLIProxyAPI/pull/6308).
+That report concerned plain-text incomplete-stream errors being classified as
+invalid requests. The pinned status mapper already recognizes 408; the new
+local reproduction concerns a JSON body's foreign type overriding that native
+mapping. An earlier closed issue therefore does not establish that the later
+two-hop case is fixed.
+
+The current official [retry reference](https://code.claude.com/docs/en/errors#tune-retry-behavior)
+also exposes a native attempt budget and an optional unattended watchdog.
+Those settings support targeted client tests rather than another gateway retry
+actor. The new local controls exercise two consecutive failures and explicit
+budget exhaustion without accounts. No watchdog was enabled for user sessions:
+its capacity-wait budget and Claude-specific usage rechecks do not establish a
+general Codex deadline or provider-tool safety. The separate
+[silent-connection report](https://github.com/anthropics/claude-code/issues/91502)
+is another reason to distinguish first-header waits, body idle time and
+missing-terminal errors, without copying short timeout settings into real
+long-reasoning sessions.

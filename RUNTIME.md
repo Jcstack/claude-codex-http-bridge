@@ -56,6 +56,20 @@ No model inference was run as part of this activation. Legacy sessions connected
 directly to the original endpoint do not receive these managed-runtime patches.
 The separate experimental system-message fidelity patch was not selected.
 
+On 2026-11-07 the [Claude error compatibility patch](upstream/patches/claude-error-compat.patch)
+was selected for the managed translator after its
+[three-platform native-client recovery gate](https://github.com/Jcstack/harnesslift/actions/runs/42268092997)
+passed. It restores native error categories for two foreign server-error
+names, allowing the tested Claude client to make its own retry decision. No
+gateway replay loop was enabled. An installed-source overlay, 68 checks and
+persistent-client handoff passed locally before upgrade. Original state/process,
+ingress process/port, client key and account were preserved. A short synthetic
+subscription control through the installed endpoint completed as nonstream
+JSON with the expected marker, `end_turn` and a completion observation. New
+managed requests receive the patch; already admitted requests and direct legacy
+sessions retain their original translator. The physical upstream failure and
+broader unattended-recovery limits remain open; see [STREAMING.md](STREAMING.md#native-claude-error-compatibility-2026-11-07).
+
 An isolated Claude Code 2.1.316 probe found a possible future migration path:
 when its user settings file changed, an ordinary long-running client completed
 an already-started fake HTTP stream, then used a new authenticated fake HTTPS

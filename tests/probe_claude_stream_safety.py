@@ -122,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
         first = count == 1
         mode = self.server.mode.removeprefix("eof_").removeprefix("failed_").removeprefix("max_")
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
-        if first and mode == "reasoning_only":
+        if mode == "reasoning_only" and count <= getattr(self.server, "reasoning_failures", 1):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
@@ -231,6 +231,10 @@ def main():
                         help="Hold an owned synthetic reasoning-only response before EOF")
     parser.add_argument("--fixture-model", choices=("gpt-6.1-sol", "gpt-6-astra"), default="gpt-6.1-sol")
     parser.add_argument("--fixture-behaves-as", choices=("claude-sonnet-5-5", "claude-opus-5-5"), default="claude-sonnet-5-5")
+    parser.add_argument("--reasoning-failures", type=int, choices=range(1, 21), default=1,
+                        help="Number of owned reasoning-only requests to end with EOF")
+    parser.add_argument("--client-retries", type=int, choices=range(1, 4),
+                        help="Set a small native Claude retry budget in the isolated fixture only")
     args = parser.parse_args()
     if (args.codex_observation or args.codex_executor) and args.proxy_binary is None:
         parser.error("The Codex executor requires --proxy-binary")
@@ -300,6 +304,7 @@ else:
             server.work = work
             server.target_name = "blocked.txt" if mode == "denied_target" else "owned.txt"
             server.reasoning_delay = args.reasoning_delay_seconds
+            server.reasoning_failures = args.reasoning_failures
             server.reasoning_release = threading.Event()
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -308,6 +313,8 @@ else:
                 ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
                 ANTHROPIC_DEFAULT_SONNET_MODEL=args.fixture_model, ANTHROPIC_DEFAULT_HAIKU_MODEL=args.fixture_model,
                 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
+            if args.client_retries is not None:
+                env["CLAUDE_CODE_MAX_RETRIES"] = str(args.client_retries)
             command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                 "--settings", str(settings), "--permission-mode", "dontAsk", "--output-format", "json",
                 "--model", args.fixture_model, "--tools", "Write",
@@ -378,6 +385,7 @@ else:
                 hooks = marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
                 target = work / "owned.txt"
                 succeeded = result.returncode == 0 and final.get("is_error") is False
+                reasoning_semantics_preserved = False
                 try:
                     assert server.requests, "Client never reached the synthetic endpoint"
                     if mode == "healthy":
@@ -386,6 +394,13 @@ else:
                         assert succeeded, "The real client did not recover from the synthetic failure"
                     if args.require_failure:
                         assert not succeeded, "The baseline unexpectedly recovered from the synthetic failure"
+                    if mode == "eof_reasoning_only":
+                        attempts = server.request_semantics[:args.reasoning_failures + 1]
+                        reasoning_semantics_preserved = len(attempts) >= 2 and all(attempt == attempts[0] for attempt in attempts[1:])
+                        if args.require_failure and args.client_retries is not None:
+                            assert len(server.requests) == args.client_retries + 1, "The client did not stop at its explicit native retry budget"
+                            assert not hooks and not target.exists(), "Exhausted reasoning retries executed a tool"
+                            assert reasoning_semantics_preserved, "Exhausted retries changed the requested semantics"
                     if mode == "denied_target":
                         assert not succeeded and not target.exists() and not (work / "blocked.txt").exists() and not hooks, "Scoped handler did not deny the other target"
                     assert len(hooks) <= 1, "A stream interruption executed the same logical write twice"
@@ -397,7 +412,7 @@ else:
                         assert len(hooks) == 1 and target.read_text(encoding="utf-8") == "SYNTHETIC", "Client reported success without completing the owned write"
                         assert any(request["has_tool_result"] for request in server.requests[1:]), "Continuation lost the committed tool result"
                         if mode == "eof_reasoning_only":
-                            assert len(server.request_semantics) >= 2 and server.request_semantics[0] == server.request_semantics[1], "Reasoning recovery changed the model, effort, tools, input or cache key"
+                            assert reasoning_semantics_preserved, "Reasoning recovery changed the model, effort, tools, input or cache key"
                             assert json.loads(server.request_semantics[0])["model"] == args.fixture_model, "Recovery silently substituted the requested model"
                     else:
                         assert final.get("is_error") is True or result.returncode != 0, "Client termination was ambiguous"
@@ -422,7 +437,9 @@ else:
                 metrics.append({"cut_after": mode, "reported_success": succeeded, "requests": len(server.requests),
                     "write_hook_count": len(hooks), "followup_has_tool_result": any(request["has_tool_result"] for request in server.requests[1:]),
                     "tool_write_at_most_once": True,
-                    "reasoning_retry_semantics_preserved": mode == "eof_reasoning_only" and succeeded,
+                    "reasoning_retry_semantics_preserved": reasoning_semantics_preserved,
+                    "synthetic_reasoning_failures": args.reasoning_failures if mode == "eof_reasoning_only" else 0,
+                    "explicit_native_retry_budget": args.client_retries,
                     "synthetic_reasoning_delay_seconds": args.reasoning_delay_seconds if mode == "eof_reasoning_only" else 0})
             finally:
                 server.reasoning_release.set()

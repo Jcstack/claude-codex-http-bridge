@@ -1,0 +1,74 @@
+name: native-retry-budget
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            binary: cli-proxy-api
+          - os: ubuntu-latest
+            binary: cli-proxy-api
+          - os: windows-latest
+            binary: cli-proxy-api.exe
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install the integrity-locked native client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+          python tests/claude_fixture.py
+      - name: Reconstruct the selected source profile without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          python - <<'PY'
+          import subprocess
+          import runtime_bundle
+          for name in runtime_bundle.PATCHES:
+              patch = runtime_bundle.SOURCE / 'upstream' / 'patches' / name
+              subprocess.run(['git', '-C', 'upstream-source', 'apply', str(patch)], check=True)
+          PY
+          cd upstream-source
+          go mod verify
+          go test -timeout 180s ./sdk/api/handlers/claude
+          go build -o "../${{ matrix.binary }}" ./cmd/server
+      - name: Recover twice without changing request semantics or repeating the tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "${{ matrix.binary }}" --codex-managed-policy --case eof_reasoning_only --reasoning-failures 2 --client-retries 3 --require-recovery --client-timeout 90 --file-output
+          python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "${{ matrix.binary }}" --codex-managed-policy --fixture-model gpt-6-astra --fixture-behaves-as claude-opus-5-5 --case eof_reasoning_only --reasoning-failures 2 --client-retries 3 --require-recovery --client-timeout 90 --file-output
+      - name: Stop at the explicit native retry budget with no tool effects
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "${{ matrix.binary }}" --codex-managed-policy --case eof_reasoning_only --reasoning-failures 20 --client-retries 2 --require-failure --client-timeout 90 --file-output
+          python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "${{ matrix.binary }}" --codex-managed-policy --fixture-model gpt-6-astra --fixture-behaves-as claude-opus-5-5 --case eof_reasoning_only --reasoning-failures 20 --client-retries 2 --require-failure --client-timeout 90 --file-output

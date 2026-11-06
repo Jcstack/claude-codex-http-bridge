@@ -61,7 +61,17 @@ The [three-platform recovery gate](.github/workflows/claude-error-recovery.yml)
 compares binaries differing only by this patch, checks a delayed Astra/Opus
 mapping and tests draining managed handoff. Interactive terminal checks are
 explicitly skipped on Windows; its native headless client is still tested.
-Local results and cloud results are separate acceptance gates.
+The [run](https://github.com/Jcstack/harnesslift/actions/runs/42268092997)
+passed on all three platforms. After a 68-check installed-source overlay and
+persistent-client handoff passed locally, the source-locked Mac bundle was
+selected through the managed upgrade. Origin state/process, ingress
+identity/port, client key and account were preserved; Claude sessions were not
+restarted. A short synthetic subscription control through the installed stable
+endpoint returned complete nonstream JSON with the exact expected marker,
+`end_turn` and a buffered completion observation. This checks the healthy route,
+not recovery from an induced real provider failure. Already admitted old
+requests finish on their original generation; legacy direct sessions do not
+receive this managed-runtime patch.
 
 Claude Code remains responsible for retry decisions. The managed translator's
 request retry stays zero, and the separate experimental bridge replay below
@@ -73,6 +83,25 @@ still need their own acceptance evidence. A stream error after HTTP 200 must
 be handled as a stream error, as the official
 [streaming guide](https://platform.claude.com/docs/en/build-with-claude/streaming)
 explains; ordinary HTTP retry behavior alone is insufficient.
+
+#### Native retry budgets
+
+The official [Claude Code retry reference](https://code.claude.com/docs/en/errors#tune-retry-behavior)
+documents `CLAUDE_CODE_MAX_RETRIES` and a separate unattended watchdog.
+The [budget fixture](.github/workflows/native-retry-budget.yml) sets a small
+native budget only inside a disposable client. Local two-hop controls recovered
+after two consecutive reasoning-only EOFs with one owned write and retained
+result. A persistent-failure control with two permitted retries stopped after
+three requests, performed no write and preserved the compared request semantics.
+This checks both recovery and a finite stop condition. Cloud results remain a
+separate gate until recorded below.
+
+No retry settings were changed in running user sessions. The watchdog is not
+enabled automatically: its documented maximum-wait setting covers 429/529
+waits, not every transient error, and its usage-limit recheck is specific to
+Claude account limits. It cannot be assigned Codex semantics by inference.
+Neither an attempt count nor a successful synthetic retry proves an overall
+provider deadline, cancellation safety or hosted-tool idempotency.
 
 ### Forwarded incomplete-stream failures
 
