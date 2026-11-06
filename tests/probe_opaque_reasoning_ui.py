@@ -6,6 +6,7 @@ Interactive terminal behavior is not exercised on Windows.
 """
 
 import argparse
+from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -28,8 +29,13 @@ class Fixture(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        self.server.requests += 1
-        self.rfile.read(int(self.headers["Content-Length"]))
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        recovery_check = getattr(self.server, "recovery_check", False)
+        main = not recovery_check or any(isinstance(tool, dict) and (
+            tool.get("name") == "Read" or isinstance(tool.get("function"), dict) and tool["function"].get("name") == "Read")
+            for tool in body.get("tools", []))
+        if main:
+            self.server.requests += 1
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "close")
@@ -40,6 +46,19 @@ class Fixture(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
+            if recovery_check and (not main or self.server.requests > 1):
+                text = "FIXTURE_RECOVERED" if main else "Synthetic auxiliary"
+                item = {"type": "message", "id": "synthetic-message", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": text, "annotations": []}]}
+                event({"type": "response.created", "response": {"id": "fixture", "model": "gpt-6.1-sol"}})
+                event({"type": "response.output_item.added", "output_index": 0, "item": {**item, "content": []}})
+                event({"type": "response.content_part.added", "output_index": 0, "content_index": 0,
+                       "part": {"type": "output_text", "text": ""}})
+                event({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": text})
+                event({"type": "response.output_item.done", "output_index": 0, "item": item})
+                event({"type": "response.completed", "response": {"id": "fixture", "model": "gpt-6.1-sol",
+                       "status": "completed", "output": [item], "usage": {"input_tokens": 1000, "output_tokens": 4}}})
+                return
             event(
                 {
                     "type": "response.created",
@@ -72,7 +91,8 @@ class Fixture(BaseHTTPRequestHandler):
                     self.wfile.flush()
                 self.server.items += 1
                 time.sleep(1)
-            self.server.release.wait(30)
+            if not recovery_check:
+                self.server.release.wait(30)
         except OSError:
             pass
         self.close_connection = True
@@ -82,6 +102,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("proxy_binary", type=Path)
     parser.add_argument("--comments", action="store_true")
+    parser.add_argument("--origin-binary", type=Path, help="Use an owned second proxy hop")
+    recovery = parser.add_mutually_exclusive_group()
+    recovery.add_argument("--require-recovery", action="store_true")
+    recovery.add_argument("--require-failure", action="store_true")
     args = parser.parse_args()
     if os.name == "nt":
         print(
@@ -104,6 +128,7 @@ def main():
     server.items = 0
     server.mode = "comments" if args.comments else "opaque"
     server.release = threading.Event()
+    server.recovery_check = args.require_recovery or args.require_failure
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     baseline = args.proxy_binary.resolve()
@@ -150,11 +175,18 @@ def main():
             ALL_PROXY="http://127.0.0.1:9",
             NO_PROXY="127.0.0.1,localhost",
         )
-        with temporary_codex_translator(baseline, server.server_port) as (port, key, _):
+        with ExitStack() as stack:
+            if args.origin_binary:
+                inner_port, inner_key, _ = stack.enter_context(temporary_codex_translator(args.origin_binary.resolve(), server.server_port))
+                port, key, _ = stack.enter_context(temporary_codex_translator(baseline, inner_port, upstream_prefix="/v1",
+                                                                            upstream_key=inner_key, managed_policy=True))
+            else:
+                port, key, _ = stack.enter_context(temporary_codex_translator(baseline, server.server_port))
             env.update(
                 ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}",
                 ANTHROPIC_AUTH_TOKEN=key,
                 ANTHROPIC_DEFAULT_SONNET_MODEL=model,
+                ANTHROPIC_DEFAULT_HAIKU_MODEL=model,
             )
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 42, 140, 0, 0))
@@ -211,11 +243,19 @@ def main():
                     raise RuntimeError(
                         "Synthetic stream did not reach the local client"
                     )
+                recovered = "FIXTURE_RECOVERED" in clean
+                if args.require_recovery and (not recovered or server.requests < 2):
+                    raise RuntimeError("The interactive client did not recover from the owned failure")
+                if args.require_failure and (recovered or server.requests != 1 or "API Error" not in clean):
+                    raise RuntimeError("The baseline interactive failure was not reproduced")
                 print(
                     json.dumps(
                         {
                             "synthetic_only": True,
                             "mode": server.mode,
+                            "two_layers": bool(args.origin_binary),
+                            "recovery_check": server.recovery_check,
+                            "ui_recovered": recovered,
                             "empty_reasoning_items": 5
                             if server.mode == "opaque"
                             else 0,

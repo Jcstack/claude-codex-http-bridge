@@ -21,10 +21,11 @@ import launcher
 @contextmanager
 def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_prefix: str = "",
                                upstream_key: str = "fixture-upstream", managed_policy: bool = False,
-                               local_key: str = "fixture-local"):
+                               local_key: str = "fixture-local", model: str = "gpt-6.1-sol"):
     if (type(upstream_port) is not int or not 1 <= upstream_port <= 65535 or not binary.is_file()
             or upstream_prefix not in ("", "/v1") or upstream_key not in ("fixture-upstream", "fixture-local", "a" * 64)
-            or local_key not in ("fixture-local", "a" * 64) or type(managed_policy) is not bool):
+            or local_key not in ("fixture-local", "a" * 64) or type(managed_policy) is not bool
+            or model not in ("gpt-6.1-sol", "gpt-6-astra")):
         raise ValueError("Invalid synthetic translator fixture")
     with tempfile.TemporaryDirectory(prefix="bridge-codex-stream-fixture-") as temporary:
         root = Path(temporary)
@@ -47,8 +48,8 @@ api-keys:
     - name: fixture
       base-url: "http://127.0.0.1:{upstream_port}{upstream_prefix}"
       models:
-        - name: "gpt-6.1-sol"
-          alias: "gpt-6.1-sol"
+        - name: "{model}"
+          alias: "{model}"
       keys:
         - api-key: "{upstream_key}"
 ''', encoding="utf-8")
@@ -71,7 +72,7 @@ api-keys:
                     try:
                         with opener.open(request, timeout=1) as response:
                             value = json.load(response)
-                        if any(row.get("id") == "gpt-6.1-sol" for row in value.get("data", []) if isinstance(row, dict)):
+                        if any(row.get("id") == model for row in value.get("data", []) if isinstance(row, dict)):
                             break
                     except (OSError, ValueError, urllib.error.URLError):
                         pass

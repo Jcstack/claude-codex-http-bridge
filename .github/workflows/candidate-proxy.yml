@@ -79,7 +79,10 @@ jobs:
           go test -timeout 180s -run '^(TestBridgeForwardedIncompleteStreamScope|TestCodex)' ./internal/runtime/executor
           git apply --check ../upstream/patches/codex-stream-observation-candidate.patch
           git apply ../upstream/patches/codex-stream-observation-candidate.patch
-          go test -timeout 180s -run '^TestBridgeStreamObservation' ./internal/runtime/executor
+          git apply --check ../upstream/patches/claude-error-compat.patch
+          git apply ../upstream/patches/claude-error-compat.patch
+          go test -timeout 180s ./sdk/api/handlers/claude
+          go test -timeout 180s -run '^TestBridgeStreamObservation' ./internal/runtime/executor ./internal/runtime/executor/helps
           go build -o "../${{ matrix.binary }}" ./cmd/server
           # This independent system-role candidate is tested but not packed or activated.
           git apply ../upstream/patches/midconversation-system-fidelity.patch

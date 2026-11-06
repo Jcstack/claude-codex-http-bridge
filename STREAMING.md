@@ -21,6 +21,59 @@ cannot reconstruct a missing upstream terminal event. Their framing, timing,
 error handling, cancellation and interaction with safe retries still need an
 isolated end-to-end test before changing the active runtime.
 
+### Native Claude error compatibility, 2026-11-07
+
+The selected source profile now includes a narrow
+[Claude error compatibility patch](upstream/patches/claude-error-compat.patch).
+The pinned Claude Messages handler first derives a native error type from the
+HTTP status, but then replaces it with a foreign `server_error` or
+`service_unavailable_error` read from the upstream body. These are not the
+Claude error discriminators documented in the
+[Messages error reference](https://platform.claude.com/docs/en/api/errors).
+The patch retains the status-derived category for those two foreign names:
+for example, 408 becomes `timeout_error` and 502/503 becomes `api_error`.
+Existing Claude categories, unknown future types, diagnostic messages and
+existing status/header handling are preserved. No overload is fabricated.
+
+An isolated, integrity-locked Claude Code 2.1.316 client reproduced a concrete
+consequence: after empty thinking blocks containing opaque signatures,
+`server_error` ended the task, while the canonical category let the same
+client retry and continue. A two-proxy fake Codex origin reproduced the real
+missing-`response.completed` sentinel. The baseline failed the reasoning-only
+case; the patched outer handler completed it. The
+[interactive terminal fixture](tests/probe_opaque_reasoning_ui.py) also recovered
+in the same owned Claude process. No model account or user session was used.
+
+The [tool-safety fixture](tests/probe_claude_stream_safety.py) additionally
+requires successful recovery after partial arguments, completed arguments and
+a completed tool item. Each tested case performs the owned write once and
+retains its result. Reasoning-only retries must preserve the requested model,
+reasoning settings, instructions, input, tools, tool choice and prompt cache
+key. The local delayed Sol/Sonnet-mapping control held opaque reasoning for
+65 seconds before injecting EOF and passed. A separate local Astra/Opus-mapping
+control held reasoning for 485 seconds, then recovered with the same semantic
+request, one write and its retained result. Two interleaved owned tools also
+completed once each at three injected EOF boundaries. Synthetic model identifiers and
+`behavesAs` mappings exercise client protocol paths; they are not model quality
+or provider latency measurements.
+
+The [three-platform recovery gate](.github/workflows/claude-error-recovery.yml)
+compares binaries differing only by this patch, checks a delayed Astra/Opus
+mapping and tests draining managed handoff. Interactive terminal checks are
+explicitly skipped on Windows; its native headless client is still tested.
+Local results and cloud results are separate acceptance gates.
+
+Claude Code remains responsible for retry decisions. The managed translator's
+request retry stays zero, and the separate experimental bridge replay below
+remains disabled. This patch does not force a retry after arbitrary visible
+output, resume provider state, guarantee exactly-once effects for arbitrary
+tools, or prevent the physical upstream disconnection. Account refresh,
+provider-side tool effects, client retry exhaustion and other error categories
+still need their own acceptance evidence. A stream error after HTTP 200 must
+be handled as a stream error, as the official
+[streaming guide](https://platform.claude.com/docs/en/build-with-claude/streaming)
+explains; ordinary HTTP retry behavior alone is insufficient.
+
 ### Forwarded incomplete-stream failures
 
 A credential-free [two-layer fixture](tests/probe_opaque_reasoning_stream.py)

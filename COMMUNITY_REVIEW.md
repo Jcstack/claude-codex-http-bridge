@@ -483,3 +483,30 @@ This source review does not prove hosted-tool idempotency, account binding,
 lossless HTTP error forwarding, or the safety of replaying a Claude conversation.
 It neither activates the experimental bridge retry nor changes Claude Code's
 role as the harness. The recurring live failure remains open.
+
+## Claude-native error recovery, 2026-11-07
+
+The official [Claude error reference](https://platform.claude.com/docs/en/api/errors)
+uses `api_error` for 500-class internal failures, `timeout_error` for timeouts
+and `overloaded_error` for 529. OpenAI-style `server_error` is not a native
+Messages error discriminator. In the pinned
+[Claude handler](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/api/handlers/claude/code_handlers.go),
+the upstream type overwrites the initially status-derived native type. Reviewing
+the current upstream handler did not identify a correction to that boundary.
+
+This was tested rather than inferred from a similar community report. With
+the locked Claude Code 2.1.316 client and owned fake endpoints, a foreign
+`server_error` after opaque signatures ended the request. The canonical type
+allowed a native retry in both headless and interactive controls. The selected
+[patch](upstream/patches/claude-error-compat.patch) normalizes only the two known
+foreign server-error names, preserving unknown types and existing status,
+message and header handling. Native client recovery is distinct from adding a
+second gateway retry loop. No account credentials were needed for these tests.
+
+The maintained upstream [stream-reset report](https://github.com/router-for-me/CLIProxyAPI/issues/7169)
+remains useful for transport symptoms and retry boundaries, but cannot establish
+the physical cause of this installation's failures. Error compatibility fixes
+one demonstrated reason a client stops; it cannot promise recovery from every
+visible-output interruption, exhausted retry budget or provider-side effect.
+The [local findings and separate platform gates](STREAMING.md#native-claude-error-compatibility-2026-11-07)
+record that distinction.

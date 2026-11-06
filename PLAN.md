@@ -36,9 +36,12 @@ capability is not a successful test.
    original-service and ingress migration remain separate work.
    Preserve noncompletion details independently of healthy controls. A private
    error-file review also found the same sentinel on a nonstream request;
-   buffered execution has a tested metadata candidate, while its rollout and
-   pre-successful-HTTP coverage remain separate gates.
-2. Establish recovery inside a verified account boundary, including OAuth
+   buffered execution now has bounded metadata in the active managed backend.
+   Coverage before successful HTTP response headers remains a separate gate.
+2. Correct foreign error categories at the Claude Messages boundary so the
+   harness can apply its own native retry policy. Keep this separate from
+   experimental gateway replay and from the physical cause of disconnection.
+   Establish additional recovery inside a verified account boundary, including OAuth
    refresh, selection changes, hosted tools, second-attempt error semantics,
    cancellation, concurrency and total memory. Keep the experimental replay
    disabled until these gates pass. A server timeout cannot be repaired by
@@ -81,6 +84,26 @@ capability is not a successful test.
   suite (20 optional skips) passed. The stream observer remains a bounded
   opt-in, and no automatic replay is added. Cross-platform verification and
   live installation are separate acceptance gates.
+- [x] Complete the buffered observer's three-platform gate and local managed
+  rollout. The [observer gate](https://github.com/Jcstack/harnesslift/actions/runs/42257526716),
+  [metadata gate](https://github.com/Jcstack/harnesslift/actions/runs/42257534032)
+  and [full source gate](https://github.com/Jcstack/harnesslift/actions/runs/42257508235)
+  passed. An installed-source overlay, persistent-client handoff and short
+  subscription control passed before activation. Origin state, ingress, client
+  key and selected account were preserved; natural traffic subsequently
+  produced completion controls. This improves evidence without adding replay.
+- [x] Reproduce and correct a Claude Messages error-type compatibility defect.
+  The baseline's foreign `server_error` stops Claude Code 2.1.316 after opaque
+  thinking signatures; the status-derived native category permits harness-owned
+  recovery. Local headless and interactive two-hop controls passed, together
+  with one-write/result-retention checks at three tool boundaries and exact
+  reasoning-request semantic comparison. A 485-second Astra/Opus-mapping wait
+  recovered, and two interleaved tools ran once each at three EOF boundaries.
+  These are synthetic protocol tests, not provider latency measurements.
+  The 425-case offline suite (20
+  optional skips) and the Go race-enabled Claude handler suite passed.
+  Cross-platform recovery and installed rollout remain separate gates. See
+  [STREAMING.md](STREAMING.md#native-claude-error-compatibility-2026-11-07).
 
 - [ ] Deliver safe unattended recovery for incomplete streams and structured
   overloads without disrupting running sessions. The credential-free

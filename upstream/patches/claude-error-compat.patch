@@ -1,0 +1,73 @@
+diff --git a/sdk/api/handlers/claude/code_handlers.go b/sdk/api/handlers/claude/code_handlers.go
+--- a/sdk/api/handlers/claude/code_handlers.go
++++ b/sdk/api/handlers/claude/code_handlers.go
+@@ -664,7 +664,7 @@
+ 		if err := json.Unmarshal([]byte(message), &payload); err == nil {
+ 			if e, ok := payload["error"].(map[string]any); ok {
+ 				if t, ok := e["type"].(string); ok && strings.TrimSpace(t) != "" {
+-					errType = strings.TrimSpace(t)
++					errType = claudeCompatibleUpstreamErrorType(status, strings.TrimSpace(t))
+ 				}
+ 				if m, ok := e["message"].(string); ok && strings.TrimSpace(m) != "" {
+ 					message = strings.TrimSpace(m)
+@@ -673,7 +673,7 @@
+ 				}
+ 			} else {
+ 				if t, ok := payload["type"].(string); ok && strings.TrimSpace(t) != "" && strings.TrimSpace(t) != "error" {
+-					errType = strings.TrimSpace(t)
++					errType = claudeCompatibleUpstreamErrorType(status, strings.TrimSpace(t))
+ 				}
+ 				if m, ok := payload["message"].(string); ok && strings.TrimSpace(m) != "" {
+ 					message = strings.TrimSpace(m)
+@@ -734,3 +734,15 @@
+ 	}
+ 	c.Set("API_RESPONSE", bytes.Clone(data))
+ }
++
++// OpenAI server error names are not Claude Messages error discriminators.
++// Keep the status-derived Claude category so the caller can apply its own
++// retry policy. Future unknown types and genuine Claude categories stay intact.
++func claudeCompatibleUpstreamErrorType(status int, upstreamType string) string {
++	switch upstreamType {
++	case "server_error", "service_unavailable_error":
++		return claudeErrorTypeFromStatus(status)
++	default:
++		return upstreamType
++	}
++}
+diff --git a/sdk/api/handlers/claude/code_handlers_error_test.go b/sdk/api/handlers/claude/code_handlers_error_test.go
+--- a/sdk/api/handlers/claude/code_handlers_error_test.go
++++ b/sdk/api/handlers/claude/code_handlers_error_test.go
+@@ -907,3 +907,32 @@
+ 		}
+ 	})
+ }
++
++func TestBridgeClaudeForeignServerErrorUsesNativeCategory(t *testing.T) {
++	for _, tc := range []struct {
++		status        int
++		foreign, want string
++	}{
++		{408, "server_error", "timeout_error"},
++		{502, "server_error", "api_error"},
++		{503, "service_unavailable_error", "api_error"},
++		{429, "server_error", "rate_limit_error"},
++		{401, "server_error", "authentication_error"},
++		{403, "permission_error", "permission_error"},
++		{529, "overloaded_error", "overloaded_error"},
++		{500, "future_error", "future_error"},
++	} {
++		for _, nested := range []bool{false, true} {
++			var body string
++			if nested {
++				body = `{"error":{"type":"` + tc.foreign + `","message":"synthetic diagnostic"}}`
++			} else {
++				body = `{"type":"` + tc.foreign + `","message":"synthetic diagnostic"}`
++			}
++			got, message := claudeErrorDetailFromText(tc.status, body)
++			if got != tc.want || message != "synthetic diagnostic" {
++				t.Fatal("foreign error mapping changed its native category or message")
++			}
++		}
++	}
++}

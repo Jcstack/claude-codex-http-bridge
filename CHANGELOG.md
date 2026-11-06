@@ -2,6 +2,16 @@
 
 HarnessLift versions describe this wrapper and documentation, independently of the pinned CLIProxyAPI or Claude Code version.
 
+## Unreleased
+
+- Add a source-locked Claude Messages error compatibility patch: preserve the
+  status-derived native category for foreign `server_error` and
+  `service_unavailable_error` names. This enables the tested Claude client's
+  native recovery after opaque-signature stream failures without adding
+  gateway replay. Include credential-free baseline/candidate, tool-safety,
+  interactive and delayed-reasoning gates. See [STREAMING.md](STREAMING.md#native-claude-error-compatibility-2026-11-07)
+  for the verified boundary and remaining limitations.
+
 ## v0.1.0-preview.1 — 2026-11-06
 
 First public preview under the HarnessLift name. The project was previously `claude-codex-http-bridge`; Git history and existing compatibility documentation are retained.

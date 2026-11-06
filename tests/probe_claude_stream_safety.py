@@ -110,6 +110,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def emit_responses(self, body):
+        if not hasattr(self.server, "request_semantics"):
+            self.server.request_semantics = []
+        self.server.request_semantics.append(json.dumps({key: body.get(key) for key in (
+            "model", "instructions", "tools", "input", "reasoning", "tool_choice", "prompt_cache_key")},
+            sort_keys=True, separators=(",", ":")))
         results = [item for item in body.get("input", [])
                    if isinstance(item, dict) and item.get("type") == "function_call_output"]
         self.server.requests.append({"has_tool_result": bool(results), "tool_result_hints": result_hints(results)})
@@ -117,6 +122,28 @@ class Handler(BaseHTTPRequestHandler):
         first = count == 1
         mode = self.server.mode.removeprefix("eof_").removeprefix("failed_").removeprefix("max_")
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
+        if first and mode == "reasoning_only":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            try:
+                frames = [{"type": "response.created", "response": response}]
+                for i in range(3):
+                    item = {"id": f"reasoning_fixture_{i}", "type": "reasoning", "summary": []}
+                    frames.extend([
+                        {"type": "response.output_item.added", "output_index": i, "item": item},
+                        {"type": "response.output_item.done", "output_index": i,
+                         "item": {**item, "encrypted_content": "S" * 8500 + str(i)}},
+                    ])
+                for frame in frames:
+                    self.wfile.write(("data: " + json.dumps(frame) + "\n\n").encode())
+                    self.wfile.flush()
+                    if frame["type"] == "response.output_item.done":
+                        self.server.reasoning_release.wait(self.server.reasoning_delay / 3)
+                self.connection.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+            return
         incomplete_retry = self.server.mode in ("max_partial_arguments", "max_arguments_done", "max_item_incomplete",
                                                 "max_item_incomplete_then_completed") and not first
         if not incomplete_retry and (not results or not (self.server.work / "owned.txt").is_file()):
@@ -197,6 +224,13 @@ def main():
     parser.add_argument("--client-timeout", type=float, default=45, help="Maximum seconds for the disposable client")
     parser.add_argument("--debug-shapes", action="store_true", help="Classify disposable client debug lines on timeout")
     parser.add_argument("--file-output", action="store_true", help="Collect disposable client output through private files")
+    outcome = parser.add_mutually_exclusive_group()
+    outcome.add_argument("--require-recovery", action="store_true", help="Require the real client to complete after the injected failure")
+    outcome.add_argument("--require-failure", action="store_true", help="Require the baseline client to stop after the injected failure")
+    parser.add_argument("--reasoning-delay-seconds", type=float, default=0,
+                        help="Hold an owned synthetic reasoning-only response before EOF")
+    parser.add_argument("--fixture-model", choices=("gpt-6.1-sol", "gpt-6-astra"), default="gpt-6.1-sol")
+    parser.add_argument("--fixture-behaves-as", choices=("claude-sonnet-5-5", "claude-opus-5-5"), default="claude-sonnet-5-5")
     args = parser.parse_args()
     if (args.codex_observation or args.codex_executor) and args.proxy_binary is None:
         parser.error("The Codex executor requires --proxy-binary")
@@ -206,8 +240,10 @@ def main():
         parser.error("--codex-origin-binary requires the Codex executor")
     if args.codex_managed_policy and not (args.codex_observation or args.codex_executor):
         parser.error("--codex-managed-policy requires the Codex executor")
-    if not 0 < args.client_timeout <= 120:
-        parser.error("--client-timeout must be greater than zero and at most 120")
+    if not 0 < args.client_timeout <= 1200:
+        parser.error("--client-timeout must be greater than zero and at most 1200")
+    if not 0 <= args.reasoning_delay_seconds <= 900:
+        parser.error("--reasoning-delay-seconds must be between zero and nine hundred")
     claude = os.environ.get("CLAUDE_CODEX_TEST_BIN") or shutil.which("claude")
     if claude is None:
         raise RuntimeError("Install the pinned Claude fixture before running the safety gate")
@@ -218,6 +254,8 @@ def main():
               "max_item_incomplete", "max_item_incomplete_then_completed", "max_tool_item_done") if args.proxy_binary else
              ("denied_target", "healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop",
               "eof_partial_arguments", "eof_tool_block", "eof_stop_reason", "eof_message_stop"))
+    if args.codex_observation or args.codex_executor:
+        modes += ("eof_reasoning_only",)
     if args.case:
         if any(case not in modes for case in args.case):
             parser.error("Unknown synthetic stream case")
@@ -248,7 +286,7 @@ else:
 ''', encoding="utf-8")
             settings = root / "settings.json"
             settings.write_text(json.dumps({"modelPicker": {"options": [
-                {"model": "gpt-6.1-sol", "label": "Fixture", "behavesAs": "claude-sonnet-5-5"}],
+                {"model": args.fixture_model, "label": "Fixture", "behavesAs": args.fixture_behaves_as}],
                 "replaceBuiltInOptions": True}, "hooks": {event: [{"matcher": "Write", "hooks": [
                     {"type": "command", "command": sys.executable, "args": [str(hook), str(marker), str(work / "owned.txt")], "timeout": 5}]}]
                     for event in ("PreToolUse", "PostToolUse")}}), encoding="utf-8")
@@ -261,16 +299,18 @@ else:
             server.responses = bool(args.proxy_binary)
             server.work = work
             server.target_name = "blocked.txt" if mode == "denied_target" else "owned.txt"
+            server.reasoning_delay = args.reasoning_delay_seconds
+            server.reasoning_release = threading.Event()
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             env = isolated_environment(root)
             env.update(CLAUDE_CONFIG_DIR=str(config), ANTHROPIC_AUTH_TOKEN="fixture-only",
                 ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
-                ANTHROPIC_DEFAULT_SONNET_MODEL="gpt-6.1-sol", ANTHROPIC_DEFAULT_HAIKU_MODEL="gpt-6.1-sol",
+                ANTHROPIC_DEFAULT_SONNET_MODEL=args.fixture_model, ANTHROPIC_DEFAULT_HAIKU_MODEL=args.fixture_model,
                 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
             command = [claude, "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                 "--settings", str(settings), "--permission-mode", "dontAsk", "--output-format", "json",
-                "--model", "gpt-6.1-sol", "--tools", "Write",
+                "--model", args.fixture_model, "--tools", "Write",
                 "--add-dir", work.as_posix(), "--max-turns", "4",
                 "-p", "Write SYNTHETIC to owned.txt exactly once."]
             debug = root / "client-debug.log"
@@ -282,19 +322,19 @@ else:
                     spec = {"context_window": 500000, "supports_search_tool": True, "input_modalities": ["text"],
                             "supported_reasoning_levels": [{"effort": value} for value in ("low", "medium", "high", "xhigh", "max")]}
                     upstream = {"state": {"port": server.server_port}, "key": "synthetic-local-upstream",
-                                "models": {"gpt-6.1-sol": spec}}
+                                "models": {args.fixture_model: spec}}
                     if args.codex_observation or args.codex_executor:
                         if args.codex_origin_binary:
                             inner_port, inner_key, _inner_log = stack.enter_context(
-                                temporary_codex_translator(args.codex_origin_binary.resolve(), server.server_port))
+                                temporary_codex_translator(args.codex_origin_binary.resolve(), server.server_port, model=args.fixture_model))
                             port, key, proxy_log = stack.enter_context(temporary_codex_translator(
                                 args.proxy_binary.resolve(), inner_port, upstream_prefix="/v1", upstream_key=inner_key,
-                                managed_policy=args.codex_managed_policy))
+                                managed_policy=args.codex_managed_policy, model=args.fixture_model))
                         else:
                             port, key, proxy_log = stack.enter_context(temporary_codex_translator(
-                                args.proxy_binary.resolve(), server.server_port, managed_policy=args.codex_managed_policy))
+                                args.proxy_binary.resolve(), server.server_port, managed_policy=args.codex_managed_policy, model=args.fixture_model))
                     else:
-                        port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, "gpt-6.1-sol"))
+                        port, key = stack.enter_context(temporary_translator(args.proxy_binary.resolve(), upstream, args.fixture_model))
                     env.update(ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_AUTH_TOKEN=key)
                 try:
                     if args.file_output:
@@ -342,6 +382,10 @@ else:
                     assert server.requests, "Client never reached the synthetic endpoint"
                     if mode == "healthy":
                         assert succeeded, "Healthy fixture did not complete successfully"
+                    if args.require_recovery:
+                        assert succeeded, "The real client did not recover from the synthetic failure"
+                    if args.require_failure:
+                        assert not succeeded, "The baseline unexpectedly recovered from the synthetic failure"
                     if mode == "denied_target":
                         assert not succeeded and not target.exists() and not (work / "blocked.txt").exists() and not hooks, "Scoped handler did not deny the other target"
                     assert len(hooks) <= 1, "A stream interruption executed the same logical write twice"
@@ -352,6 +396,9 @@ else:
                     elif succeeded:
                         assert len(hooks) == 1 and target.read_text(encoding="utf-8") == "SYNTHETIC", "Client reported success without completing the owned write"
                         assert any(request["has_tool_result"] for request in server.requests[1:]), "Continuation lost the committed tool result"
+                        if mode == "eof_reasoning_only":
+                            assert len(server.request_semantics) >= 2 and server.request_semantics[0] == server.request_semantics[1], "Reasoning recovery changed the model, effort, tools, input or cache key"
+                            assert json.loads(server.request_semantics[0])["model"] == args.fixture_model, "Recovery silently substituted the requested model"
                     else:
                         assert final.get("is_error") is True or result.returncode != 0, "Client termination was ambiguous"
                     if args.codex_observation:
@@ -374,13 +421,17 @@ else:
                     raise
                 metrics.append({"cut_after": mode, "reported_success": succeeded, "requests": len(server.requests),
                     "write_hook_count": len(hooks), "followup_has_tool_result": any(request["has_tool_result"] for request in server.requests[1:]),
-                    "tool_write_at_most_once": True})
+                    "tool_write_at_most_once": True,
+                    "reasoning_retry_semantics_preserved": mode == "eof_reasoning_only" and succeeded,
+                    "synthetic_reasoning_delay_seconds": args.reasoning_delay_seconds if mode == "eof_reasoning_only" else 0})
             finally:
+                server.reasoning_release.set()
                 stack.close()
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
     print(json.dumps({"mock_only": True, "through_translator": bool(args.proxy_binary),
+                      "fixture_model": args.fixture_model, "fixture_behaves_as": args.fixture_behaves_as,
                       "codex_observation": args.codex_observation, "managed_policy": args.codex_managed_policy,
                       "two_layers": bool(args.codex_origin_binary), "cases": metrics}))
 
