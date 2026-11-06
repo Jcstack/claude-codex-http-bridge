@@ -98,8 +98,13 @@ This checks both recovery and a finite stop condition. The
 passed. The production revision's
 [full source-and-install run](https://github.com/Jcstack/harnesslift/actions/runs/42268027982)
 also passed all eleven jobs. A larger candidate workflow is tracked separately;
-its initial Windows job timed out while preparing a fixture's NTFS permissions,
-before its contract checks, and must not be counted as a pass.
+its [run](https://github.com/Jcstack/harnesslift/actions/runs/42268096452)
+passed all three platforms after a same-source Windows rerun. Its first Windows
+job timed out while preparing a fixture's NTFS permissions, before its contract
+checks. That failure is retained; the later pass does not identify why the
+PowerShell preparation stalled. The Mac candidate run also includes the owned
+parallel-tool Ctrl-C/resume probe. Real Windows account/login and provider-side
+cancellation remain separate acceptance boundaries.
 
 An additional local headless case closes a complete synthetic text block with
 `response.output_text.done` and `response.content_part.done`, then injects EOF
@@ -109,7 +114,8 @@ request and completed the task with one write and its result. This is the
 harness's native continuation of committed text, not an identical-request
 replay. It does not demonstrate interactive continuation. The extended budget
 workflow checks this case separately; its result is independent of the earlier
-budget run.
+budget run. The [extended run](https://github.com/Jcstack/harnesslift/actions/runs/42272951635)
+passed on macOS, Linux and Windows.
 
 No retry settings were changed in running user sessions. The watchdog is not
 enabled automatically: its documented maximum-wait setting covers 429/529
@@ -190,6 +196,15 @@ A read-only macOS unified-log query for Surge messages around that minute found
 no matching ChatGPT, timeout, reset, or EOF entries. Its narrow process, time,
 and message filters do not prove that every network event was logged or that
 the network path was healthy. No raw system log was retained in the repository.
+
+A later read-only power-log check inspected bounded windows around the reviewed
+incidents. Assertions/notification timestamps spanned the windows, but the
+entire retained sample had no recognized Sleep, Wake or DarkWake transitions,
+including no positive transition control outside those windows. Timestamp
+coverage therefore does not establish power-transition coverage or exclude
+sleep. Only Boolean shape/window results were retained locally; no raw power
+log, device details or process names were saved. Screen-lock state and any
+causal relation to the disconnection remain unknown.
 
 A separate credential-free reproduction shows a distinct recovery defect when
 the pinned two-layer translator uses its default cooldown policy. When the fake origin closes early, the executor's

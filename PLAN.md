@@ -128,18 +128,28 @@ close the broader unattended-recovery acceptance item.
   passed; overall deadlines, cancellation and provider effects remain open.
 - [x] Pass all eleven jobs of the production revision's
   [source-and-install gate](https://github.com/Jcstack/harnesslift/actions/runs/42268027982).
-  The separate broad candidate run is not a complete pass: its first Windows
-  attempt timed out in PowerShell while preparing a test directory's NTFS ACL,
-  before its contract checks. Preserve that failure and require a separate
-  retest rather than attributing it to the error patch without evidence.
+  The [broad candidate gate](https://github.com/Jcstack/harnesslift/actions/runs/42268096452)
+  also passed all three platforms after a same-source Windows rerun. The first
+  Windows attempt timed out in PowerShell while preparing a test directory's
+  NTFS ACL, before its contract checks; that failure is retained. The later
+  pass does not establish why that preparation stalled or prove real Windows
+  account/login behavior. The Mac run also includes the owned parallel-tool
+  Ctrl-C/resume probe, not cancellation of a real provider-side action.
 - [x] Compare native headless continuation after a completed text block and
   subsequent EOF. The old outer translator stopped without writing; patched
   Sol/Sonnet and Astra/Opus mappings retained the completed text in the next
   request, wrote once and retained the tool result. The synthetic stream must
   close its text part before EOF; an unfinished block is a different boundary.
   The extended [budget workflow](.github/workflows/native-retry-budget.yml)
-  adds this case. Its platform result and interactive continuation remain
-  separate gates.
+  adds this case. Its [three-platform run](https://github.com/Jcstack/harnesslift/actions/runs/42272951635)
+  passed. Interactive continuation remains a separate gate.
+- [x] Inspect retained macOS power-log metadata around the reviewed incident
+  windows. Assertions/notification timestamps spanned those windows, but the
+  entire retained sample had no recognized Sleep, Wake or DarkWake transitions,
+  including no positive transition control outside the windows. Only Boolean
+  shape/window results were retained. Timestamp coverage therefore does not
+  establish power-transition coverage, screen-lock state or absence of sleep;
+  the physical cause remains open.
 
 - [ ] Deliver safe unattended recovery for incomplete streams and structured
   overloads without disrupting running sessions. The credential-free
@@ -194,7 +204,7 @@ close the broader unattended-recovery acceptance item.
 - [x] Install only the read-only diagnostics parser on the local Mac after a [three-platform synthetic gate](https://github.com/Jcstack/harnesslift/actions/runs/41843223991). An installed-source overlay and the actual command passed privacy-limited checks, and a private rollback copy was retained. No process was restarted and the separate observer remains disabled and uninstalled.
 - [x] Extend the candidate's synthetic coverage to the actual generated managed policy, including the owned TLS ingress. The [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/41851585381) passed. With the current disabled-cooling policy, the baseline already accepted the next request; this does not establish the cause of the observed disconnection or justify deploying the separate default-cooling fix for it. The observer remains optional and uninstalled.
 - [ ] Investigate incomplete streams that recurred after an account switch. Two managed-log sentinel records correlated to HTTP 200 access records in the same log at approximately 80 and 24 seconds. The origin recorded 200 responses of similar durations at the same times, but there is no cross-layer request ID, and the sentinel can be generated or forwarded by the proxy. One tracked-session error occurred at the first time; later session requests continued. These observations do not establish a common root cause, a fixed timeout, or that an account change repairs it. Do not replay partially delivered tool effects.
-- [ ] Investigate the screenshot-confirmed 08:06 recurrence. The session's error, managed sentinel, and one origin access record ended in the same second; the access durations were approximately 392 and 391 seconds. A recorded thinking block preceded the error by about 25 seconds. Timing is not a shared request ID, and the cause and affected hop remain unknown. Later requests continued. The metadata-only observer has not been installed into the active service.
+- [ ] Investigate the screenshot-confirmed 08:06 recurrence. The session's error, managed sentinel, and one origin access record ended in the same second; the access durations were approximately 392 and 391 seconds. A recorded thinking block preceded the error by about 25 seconds. Timing is not a shared request ID, and the cause and affected hop remain unknown. Later requests continued. The subsequently activated observer cannot reconstruct this historical failure, and the bounded power-log check above does not establish its cause.
 - [ ] Evaluate the separately reported [30-second silent-phase hypothesis](https://github.com/router-for-me/CLIProxyAPI/issues/5545) with privacy-limited event-gap measurements and successful controls. The tracked session's last recorded thinking block is not an upstream silence measurement; the public report and maintainer attribution do not establish this installation's cause. Distinguish an EOF from the separate indefinitely stalled-connection scenario and do not enable automatic replay after partial effects.
 - [x] Add successful terminal-event controls to the disabled-by-default observer and fixed read-gap buckets to read-only diagnostics. Local synthetic buffered/unbuffered delayed controls and parser checks passed. A completion event is not proof of client delivery; the observer still measures its immediate upstream and retains no content. Cross-platform and active-installation results remain separate gates for this revision.
 - [x] Activate the bounded observer on the active Mac after local race, two-layer, real-client handoff, installed-module overlay and short subscription checks. Windows/Linux observation jobs passed before activation; the macOS cloud job subsequently passed in the [same three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/42233093102). The existing origin state, ingress process/port, client key and account were preserved. Natural traffic produced completion controls. The tracked audit now follows the current incident session, retaining the previous private target. This improves investigation and does not establish recovery or root cause.
