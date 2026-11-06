@@ -6,6 +6,7 @@
 !USAGE.md
 !CHANGELOG.md
 !CONTRIBUTING.md
+!LAUNCH.md
 !assets/
 !assets/README.md
 !assets/logo.svg
@@ -150,6 +151,7 @@
 !.github/ISSUE_TEMPLATE/
 !.github/ISSUE_TEMPLATE/bug_report.yml
 !.github/ISSUE_TEMPLATE/feature_request.yml
+!.github/ISSUE_TEMPLATE/trial_feedback.yml
 !.github/ISSUE_TEMPLATE/config.yml
 !.github/workflows/
 !.github/workflows/ci.yml

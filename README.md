@@ -6,6 +6,8 @@
 
 <p align="center"><strong>Run Claude Code with your Codex models.</strong></p>
 
+<p align="center">Codex-backed OpenAI models as Claude Code's model provider, through a local HTTP bridge.</p>
+
 <p align="center">
   <a href="https://github.com/Jcstack/harnesslift/actions/workflows/ci.yml"><img src="https://github.com/Jcstack/harnesslift/actions/workflows/ci.yml/badge.svg" alt="Source and install checks"></a>
   <a href="https://github.com/Jcstack/harnesslift/releases"><img src="https://img.shields.io/badge/status-developer%20preview-f2b76c" alt="Developer preview"></a>
@@ -23,6 +25,8 @@ Previously `claude-codex-http-bridge`. The `claude-codex` command remains compat
 </p>
 
 *The walkthrough uses the real Claude Code client and a scripted local model. It makes no provider calls and shows no real account, quota, prompt, or performance measurement. [Recording details](assets/README.md).*
+
+[Try the preview](#quick-start) · [Check compatibility](COMPATIBILITY.md) · [Share first-run feedback](https://github.com/Jcstack/harnesslift/issues/new?template=trial_feedback.yml)
 
 ## Why HarnessLift?
 
@@ -101,6 +105,22 @@ harnesslift tools status            Inspect optional native capabilities
 ```
 
 The local service stays available for background work. `harnesslift bridge stop` disconnects remaining requests; use it after dependent tasks finish. [Full usage guide](USAGE.md).
+
+## First-run feedback
+
+Try a small task in a disposable project with normal Claude Code permissions. Useful checks are startup, `/model`, one local tool call, and resuming the conversation. A successful check covers that configuration; it does not establish support for every command or plugin. Provider requests use your own account's available quota.
+
+[Tell us what worked or blocked you](https://github.com/Jcstack/harnesslift/issues/new?template=trial_feedback.yml), even if everything worked. The short form asks for your platform, versions, and outcome. Keep credentials, account identifiers, private paths, prompts, and logs out of public feedback.
+
+## Common questions
+
+**Can I use Codex models as Claude Code's backend?** Yes. HarnessLift supplies the model route through a local HTTP bridge. Claude Code remains responsible for the local workflow and tool permissions.
+
+**Which model is answering?** The provider is Codex/OpenAI. Model behavior and quality can differ from Claude; this integration does not establish Opus equivalence. Use the eligible catalog and [compatibility matrix](COMPATIBILITY.md) to check the current scope.
+
+**How does this compare with a Codex MCP agent?** This project routes Claude Code's model requests to Codex-backed inference. It does not launch a separate Codex coding agent to carry out delegated tasks.
+
+**Does a local bridge keep inference offline?** Model requests and relevant context still reach OpenAI. Local credential storage and loopback binding do not isolate other programs running as your user. [Security boundaries](SECURITY.md).
 
 ## Security and privacy
 
