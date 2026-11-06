@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import bridge_models
+import diagnostics
 import launcher
 from live_support import existing_subscription
 import rolling_runtime
@@ -94,6 +95,12 @@ def run(proxy: Path, ingress: Path, installed: Path) -> dict:
                 if (status != 200 or not result['expected_output'] or not result['message_stop'] or
                         not result['end_turn'] or result['sse_error']):
                     raise RuntimeError('Synthetic model response did not pass')
+                log = runtime / state['current'] / 'proxy.log'
+                completion_observed = any(
+                    observation is not None and observation['outcome'] == 'completion_event'
+                    for observation in (diagnostics.stream_observation(line) for line in diagnostics.lines(log)))
+                if not completion_observed:
+                    raise RuntimeError('The owned observer did not record the healthy subscription control')
             finally:
                 try:
                     rolling_runtime.stop(root)
@@ -105,7 +112,7 @@ def run(proxy: Path, ingress: Path, installed: Path) -> dict:
                     rolling_runtime.owned_stop(state)
                     raise
     return {'synthetic_prompt': True, 'observer_requested': True, 'status_200': True,
-            'existing_service_changed': False, **result}
+            'completion_observed': completion_observed, 'existing_service_changed': False, **result}
 
 
 def main() -> None:

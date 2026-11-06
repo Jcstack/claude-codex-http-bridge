@@ -131,8 +131,9 @@ retained across three EOF positions; this does not establish exactly-once
 execution for arbitrary parallel tools or timing. The unmodified and fixed
 proxy are compared by [a standalone fixture](tests/probe_forwarded_incomplete.py).
 The fix and a separate [metadata-only observer](upstream/patches/codex-stream-observation-candidate.patch)
-are included in the next source-lock candidate; neither is active in the
-existing managed backend. The observer is disabled by default. When explicitly
+were included in the next source-lock candidate. Before the 2026-11-06
+activation described below, neither was active in the managed backend.
+The observer is disabled by default. When explicitly
 enabled in a candidate backend, it logs only
 allowlisted event/outcome/error categories, the preceding event category,
 bounded timing intervals and a local request tag. It stops recording one hour
@@ -169,6 +170,44 @@ because its log hook did not copy the log level; fixing the fixture retained
 the passing delay measurements. Cross-platform and live rollout results must
 be recorded separately before claiming activation.
 
+The revised candidate subsequently passed the local 419-case offline suite
+(20 optional cases skipped), observer race checks, the generated two-layer TLS
+failure/healthy control, and a draining handoff using the same persistent
+Claude client. An overlay containing the installed controller modules and the
+two proposed module updates passed that handoff separately. The explicit live
+subscription probe verified a short model response, its client termination,
+and the owned observer's completion record. The
+[three-platform observation workflow](https://github.com/Jcstack/harnesslift/actions/runs/42233093102)
+subsequently passed on Windows, Linux and macOS. At local activation, the
+macOS cloud job was still pending and the local Mac checks had passed; those
+states are retained separately rather than counting a pending job as a pass.
+
+On the active Mac, the reviewed runtime controller, diagnostics parser and
+source lock were installed with private rollback copies. The managed backend
+was replaced through its existing admission/drain mechanism with observation
+explicitly enabled. Read-only checks verified that the original service state,
+ingress process and port, front key, and selected account did not change. Real
+traffic then produced completion observations, including one access record of
+about 96 seconds with an observed maximum read gap of about 22 seconds. The
+observer expires after one hour; it does not retry requests or repair missing
+events. The original origin and ingress were not replaced.
+
+Immediately before this activation, another real session failed after about
+63 seconds. Its retained client records contained opaque thinking signatures
+and no text or tool call after that request's marker. A prior completed tool
+and result belonged to the preceding request. The managed error and an origin
+HTTP 200 access row had matching timing and duration; they did not share an
+authenticated cross-layer identity. Observation cannot be added retroactively,
+and these records do not establish upstream silence or safe hosted-tool replay.
+
+The separate [upstream report about a 900-second boundary](https://github.com/router-for-me/CLIProxyAPI/issues/7287)
+was closed as not planned on 2026-11-06. Its maintainer reports that tested
+WebSocket requests also hit that boundary, while acknowledging a contradictory
+longer WebSocket sample. It is not evidence for the cause of the 63-second
+incident, nor a verified WebSocket fix for this installation. Keep fixed-duration,
+capacity, cancellation and network hypotheses separate. Do not add dummy tool
+calls or silently lower effort to make a timeout disappear.
+
 On 2026-11-05 the updated candidate was built locally on macOS from the pinned
 proxy source and reviewed patches with a checksum-verified Go toolchain. Its
 observer unit tests and generated managed TLS-ingress failure fixture passed.
@@ -192,8 +231,9 @@ HTTP 200 and `message_stop` but a raw-byte marker check failed; that check did
 not distinguish split events from an unexpected answer and is not counted as a
 pass. The later test only proves the healthy short-stream path. It does not
 induce or diagnose a real interruption, verify a real long-running cache hit,
-or prove that replacing an active backend is free of all effects. The observer
-remains uninstalled and disabled in the active service.
+or prove that replacing an active backend is free of all effects. At that stage
+the observer remained uninstalled and disabled in the active service; the
+2026-11-06 activation above supersedes that installation status.
 
 To repeat the explicit live check with binaries you have independently reviewed:
 
@@ -258,7 +298,7 @@ not establish that this specific failure or an overload caused the observed
 incomplete streams. Do not enable buffering or replay partial tool calls on
 that assumption.
 
-The disabled observer candidate recognizes `response.metadata` as an event
+The opt-in observer recognizes `response.metadata` as an event
 category, while retaining none of its fields or moderation data. A synthetic
 privacy check injects a private marker into that event. Recognition does not
 establish whether this event occurred in any real interrupted request.

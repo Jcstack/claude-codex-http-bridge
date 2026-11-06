@@ -22,6 +22,38 @@ Start each iteration with read-only diagnostics of the tracked session and its c
 
 The tracked session's anonymous marker is stored locally in the private installation's `runtime-audit/target.json`, preventing temporary test sessions from being mistaken for it. That file is not committed.
 
+## P0/P1 execution order
+
+The 2026-11-06 inventory has 18 open P0 items and 11 open P1 items. Several
+describe different acceptance gates for the same reliability work. They remain
+open until their stated boundary is met; an unavailable host or provider
+capability is not a successful test.
+
+1. Diagnose the recurring incomplete-stream failure before expanding other
+   features. Follow the current incident session and its children, preserve
+   the former private audit target, and compare failed streams with completed
+   controls. A bounded observer has now been activated for new managed requests;
+   original-service and ingress migration remain separate work.
+2. Establish recovery inside a verified account boundary, including OAuth
+   refresh, selection changes, hosted tools, second-attempt error semantics,
+   cancellation, concurrency and total memory. Keep the experimental replay
+   disabled until these gates pass. A server timeout cannot be repaired by
+   inventing a completion event or unconditionally repeating an action.
+3. Complete cooperative listener/controller migration and login recovery.
+   Existing direct clients and the current socket owner lack a demonstrated
+   socket-transfer protocol. A real Mac reboot and authenticated Windows login
+   require those environments and a safe opportunity; never reboot active work
+   merely to check a box. Linux user-service support is a separate implementation.
+4. Complete route-specific cache, context, compaction and HUD acceptance using
+   synthetic histories and independent task outcomes. Retain unsupported cache
+   controls, unknown quota/pricing and unavailable account entitlements as such.
+   Include model/effort changes, dynamic tools, account isolation and resume/fork.
+5. Validate catalog publication with account switching and current-client model
+   settings. Treat startup-only settings and partial effort sets as explicit
+   compatibility boundaries. The separately authorized Sign in with ChatGPT
+   grant and the disabled paid Project API are not interchangeable with the
+   existing Codex credential route.
+
 ## P0: Availability and investigation
 
 - [ ] Deliver safe unattended recovery for incomplete streams and structured
@@ -80,6 +112,7 @@ The tracked session's anonymous marker is stored locally in the private installa
 - [ ] Investigate the screenshot-confirmed 08:06 recurrence. The session's error, managed sentinel, and one origin access record ended in the same second; the access durations were approximately 392 and 391 seconds. A recorded thinking block preceded the error by about 25 seconds. Timing is not a shared request ID, and the cause and affected hop remain unknown. Later requests continued. The metadata-only observer has not been installed into the active service.
 - [ ] Evaluate the separately reported [30-second silent-phase hypothesis](https://github.com/router-for-me/CLIProxyAPI/issues/5545) with privacy-limited event-gap measurements and successful controls. The tracked session's last recorded thinking block is not an upstream silence measurement; the public report and maintainer attribution do not establish this installation's cause. Distinguish an EOF from the separate indefinitely stalled-connection scenario and do not enable automatic replay after partial effects.
 - [x] Add successful terminal-event controls to the disabled-by-default observer and fixed read-gap buckets to read-only diagnostics. Local synthetic buffered/unbuffered delayed controls and parser checks passed. A completion event is not proof of client delivery; the observer still measures its immediate upstream and retains no content. Cross-platform and active-installation results remain separate gates for this revision.
+- [x] Activate the bounded observer on the active Mac after local race, two-layer, real-client handoff, installed-module overlay and short subscription checks. Windows/Linux observation jobs passed before activation; the macOS cloud job subsequently passed in the [same three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/42233093102). The existing origin state, ingress process/port, client key and account were preserved. Natural traffic produced completion controls. The tracked audit now follows the current incident session, retaining the previous private target. This improves investigation and does not establish recovery or root cause.
 - [x] Add bounded, privacy-limited comparisons of managed failure completions with nearby origin Responses access records. Synthetic tests cover unique timing candidates, ambiguity, unmatched and unavailable rows, output bounds, private fields, and backward compatibility with the earlier observer format. An installed-dependency overlay and actual read-only command passed locally; the diagnostic file was atomically installed with a private rollback without restarting services. Timing alone does not establish a shared request identity or the missing event's cause.
 - [x] Compare the running original binary and pinned source to identify the translator's matching incomplete-stream error marker. This strongly associates the wrapper with the message but does not establish why the terminal event went missing.
 - [x] Test SSE keepalive, cancellation, truncation, and errors before the first byte with a fake upstream, isolated translator, TLS ingress, and real client. Keepalive before the first byte commits HTTP 200 and moves subsequent errors into the stream; the running configuration was not changed.
