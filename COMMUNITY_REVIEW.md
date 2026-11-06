@@ -424,3 +424,42 @@ uses a once-per-process task with a periodic loop, so the inspected code does
 not stop it when that record is later removed. This is a useful prewarming
 design to evaluate, not proof of active-credential filtering, first-request
 freshness, complete provider parity, or privacy after account removal.
+
+## Stream investigation and upstream v8.0.58, 2026-11-06
+
+The upstream [v8.0.58 release](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.58)
+was published at 13:16 UTC. Its changes include
+[preserving terminal responses across execution paths](https://github.com/router-for-me/CLIProxyAPI/pull/7294)
+and [rejecting unsupported forced hosted-image requests](https://github.com/router-for-me/CLIProxyAPI/pull/7295).
+The merged production diffs were reviewed; their upstream test claims have not
+been independently rerun here.
+
+The terminal-response change classifies non-credential-scoped
+`RequestTerminatedError` as belonging to its request, and prevents a Home stream
+release acknowledgement timeout from replacing a terminal result. It preserves
+status, headers and body and avoids inappropriate credential retries or a
+terminal-401 refresh. The currently pinned incomplete-stream error is a
+different, already request-scoped type. The new change does not reconstruct a
+missing SSE completion or implement cursor resume. There is no demonstrated
+connection between that fix and the recent local 63-second interruption.
+
+The image change removes implicit chat-model substitution for a forced hosted
+image on native Responses Lite. It validates final payloads and headers, while
+retaining optional tools and separately routed Images API behavior. This matters
+to model/effort fidelity, but does not establish that optional image injection
+has disappeared or that repeating an unknown hosted-tool attempt is safe. The
+recent failed client request retained only opaque thinking blocks, without a
+new client tool call; that alone does not reveal provider-side effects.
+
+The separate [900-second report](https://github.com/router-for-me/CLIProxyAPI/issues/7287)
+was closed as not planned. The maintainer reports a tested upstream boundary
+that also affected WebSocket, while acknowledging another report's longer
+WebSocket completion. A transport switch is therefore not an established fix.
+The local 63-second observation has a different duration and still needs its
+own failure evidence. Do not generate dummy tool calls to split model requests,
+silently lower effort, or infer safe replay from a release title.
+
+These findings have not changed the original credential-owning process or its
+listener. A larger upstream migration needs the existing protocol, account,
+cache, compaction, plugin and draining gates. The active finite metadata
+observer and its limitations are recorded in [STREAMING.md](STREAMING.md).

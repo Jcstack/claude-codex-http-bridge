@@ -271,6 +271,17 @@ one-second window that has expired before the requests arrive. The latter must
 still forward both a failure and a healthy response without any observation.
 Source and runtime tests reject invalid, noncanonical and excessive values.
 
+After local race, two-layer expiry and 24-hour controls and the installed-source
+persistent-client handoff passed, the active Mac was switched to an explicit
+86,400-second window. The original service, ingress, client key and selected
+account remained unchanged; the new process's enabled flag and exact finite
+window were verified without exporting its environment. Natural traffic
+produced a completion record. The
+[extended three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/42237489905)
+and [full source gate](https://github.com/Jcstack/harnesslift/actions/runs/42237424806)
+remain separate verification results; activation was based on the local Mac
+checks, not a claim about pending cloud jobs. Automatic replay remains disabled.
+
 For PowerShell, set `$env:CLAUDE_CODEX_STREAM_DIAGNOSTICS = '1'` before the
 reload and remove it afterward with `Remove-Item Env:CLAUDE_CODEX_STREAM_DIAGNOSTICS`.
 For the longer window, also set `$env:CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS = '86400'`
