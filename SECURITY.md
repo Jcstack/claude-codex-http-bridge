@@ -2,6 +2,13 @@
 
 Never commit or publish OAuth JSON, access or refresh tokens, API keys, `config.yaml`, `proxy.sha256`, proxy binaries, logs, Claude transcripts, model caches, or files from an installed runtime directory. This repository can be public; Git history must never contain credentials.
 
+Upstream forced error logs can contain full request bodies even when ordinary
+request logging is disabled. Keep the entire runtime under its private POSIX
+directory or Windows ACL, including log descendants and rollback directories.
+The metadata diagnostic command does not read these raw error files. An
+explicit local forensic review must export only fixed categories and necessary
+findings; never attach raw error files to a public report.
+
 To report a vulnerability, use GitHub's [private vulnerability reporting](https://github.com/Jcstack/harnesslift/security/advisories/new) for this repository. Include a synthetic reproduction and affected versions. Do not disclose a vulnerability with sensitive details in a public issue, and do not send live credentials even in a private report.
 
 The optional `claude-codex api` profile stores a project API key only in the installed root's `openai-api-key` file (0600 on POSIX, protected current-user NTFS ACL on Windows). Its separate `runtime-api` service config temporarily contains that key while the API bridge runs; the service binds loopback and requires a separate random client key. The profile sends the project key only to the fixed official `api.openai.com` model-list and Responses endpoints. Official model documentation is fetched without a credential, and redirects are rejected during metadata discovery. The API proxy uses a separate empty `api-auth` credential directory, so it does not load the subscription OAuth files. Stop its service after background work finishes to remove the per-service config. API Platform data-retention rules still apply to requests sent to OpenAI.

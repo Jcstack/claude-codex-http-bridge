@@ -1,6 +1,6 @@
 # Claude Code × Codex capability and reliability plan
 
-Updated 2026-11-06 (Asia/Shanghai). Work is guided by the long-running session and its child-session records. Update the evidence, open problems, and next steps after each phase.
+Updated 2026-11-07 (Asia/Shanghai). Work is guided by the long-running session and its child-session records. Update the evidence, open problems, and next steps after each phase.
 
 ## Goals and boundaries
 
@@ -34,6 +34,9 @@ capability is not a successful test.
    the former private audit target, and compare failed streams with completed
    controls. A bounded observer has now been activated for new managed requests;
    original-service and ingress migration remain separate work.
+   Preserve noncompletion details independently of healthy controls. A private
+   error-file review also found the same sentinel on a nonstream request;
+   buffered execution and pre-successful-HTTP failures remain observation gaps.
 2. Establish recovery inside a verified account boundary, including OAuth
    refresh, selection changes, hosted tools, second-attempt error semantics,
    cancellation, concurrency and total memory. Keep the experimental replay
@@ -59,6 +62,14 @@ capability is not a successful test.
    existing Codex credential route.
 
 ## P0: Availability and investigation
+
+- [x] Retain up to twelve noncompletion observations independently of the
+  general recent-event list, with an explicit omitted count and unchanged
+  fixed-field redaction. Healthy controls no longer evict every failure
+  detail. Synthetic privacy, time-window, legacy-format, ambiguity and
+  HTTP-200 failure checks passed locally, along with the 422-case offline
+  suite (20 optional skips). Cross-platform and installed results are separate
+  gates; this changes reporting, not recovery or error provenance.
 
 - [ ] Deliver safe unattended recovery for incomplete streams and structured
   overloads without disrupting running sessions. The credential-free

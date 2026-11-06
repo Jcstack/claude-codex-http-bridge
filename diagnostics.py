@@ -183,6 +183,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     recent_inband = deque(maxlen=12)
     recent_preconnect = deque(maxlen=12)
     stream_observation_outcomes, recent_stream_observations = Counter(), deque(maxlen=12)
+    recent_stream_noncompletion = deque(maxlen=12)
     stream_read_gaps = {}
     latencies, slow, failed = [], [], []
     coverage = {}
@@ -218,7 +219,10 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                         if gap < bound), "60s_or_more")
                     stream_read_gaps.setdefault(observation["outcome"], Counter())[bucket] += 1
                 request = re.match(r'^\[[^]]+\]\s+\[([a-f0-9]{8})\]', line)
-                recent_stream_observations.append((request[1] if request else None, at, observation))
+                observation_record = (request[1] if request else None, at, observation)
+                recent_stream_observations.append(observation_record)
+                if observation["outcome"] != "completion_event":
+                    recent_stream_noncompletion.append(observation_record)
             if "failed to refresh antigravity version" in lower:
                 # This exact upstream log marker is distinct from an inference
                 # request; it still only establishes a log mention. Do not
@@ -261,7 +265,8 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     # a cross-layer or transcript correlation, and 200 does not prove SSE end.
     matches = [[] for _ in recent_inband]
     preconnect_matches = [[] for _ in recent_preconnect]
-    stream_observation_matches = [[] for _ in recent_stream_observations]
+    retained_stream_observations = list(recent_stream_observations) + list(recent_stream_noncompletion)
+    stream_observation_matches = [[] for _ in retained_stream_observations]
     if recent_inband or recent_preconnect or recent_stream_observations:
         try:
             for line in lines(path):
@@ -283,7 +288,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                             and len(preconnect_matches[index]) < 2):
                         preconnect_matches[index].append({"http_status": int(row[2]),
                             "seconds": duration(row[3].strip()), "delay": delay})
-                for index, (failure_tag, failure_at, _observation) in enumerate(recent_stream_observations):
+                for index, (failure_tag, failure_at, _observation) in enumerate(retained_stream_observations):
                     if (failure_tag == tag[2] and abs((failure_at - at).total_seconds()) <= 5
                             and len(stream_observation_matches[index]) < 2):
                         stream_observation_matches[index].append({"http_status": int(row[2]),
@@ -291,7 +296,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
         except OSError:
             matches = [[] for _ in recent_inband]
             preconnect_matches = [[] for _ in recent_preconnect]
-            stream_observation_matches = [[] for _ in recent_stream_observations]
+            stream_observation_matches = [[] for _ in retained_stream_observations]
     observations = []
     for (failure_tag, at, shape), rows in zip(recent_inband, matches):
         unique = len(rows) == 1
@@ -308,7 +313,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "http_seconds": round(rows[0]["seconds"], 3) if unique and rows[0]["seconds"] is not None else None,
             "seconds_after_failure": round(rows[0]["delay"], 3) if unique else None})
     stream_observations = []
-    for (failure_tag, at, observation), rows in zip(recent_stream_observations, stream_observation_matches):
+    for (failure_tag, at, observation), rows in zip(retained_stream_observations, stream_observation_matches):
         unique = len(rows) == 1
         stream_observations.append({"at": at.isoformat(), **observation,
             "same_log_match": "unique" if unique else "ambiguous" if rows else "unmatched" if failure_tag else "untagged",
@@ -333,7 +338,11 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "stream_termination_observations": {"outcome_mentions": dict(stream_observation_outcomes),
                                                  "max_read_gap_buckets_by_outcome": {
                                                      outcome: dict(buckets) for outcome, buckets in stream_read_gaps.items()},
-                                                 "recent": stream_observations},
+                                                 "recent": stream_observations[:len(recent_stream_observations)],
+                                                 "recent_noncompletion": stream_observations[len(recent_stream_observations):],
+                                                 "noncompletion_omitted_at_limit": max(0, sum(
+                                                     count for outcome, count in stream_observation_outcomes.items()
+                                                     if outcome != "completion_event") - len(recent_stream_noncompletion))},
             "inference_requests": len(ordered),
             "latency_seconds": {"median": round(statistics.median(ordered), 3) if ordered else None,
                                 "p95": round(ordered[math.ceil(len(ordered) * .95) - 1], 3) if ordered else None,
@@ -341,7 +350,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "slow_requests": slow[-12:],
             "failed_requests": failed[-12:],
             "coverage": coverage,
-            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error and background-event mentions are not retry or inference-failure counts. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them. Observer timing starts after response headers and includes downstream processing; it does not prove upstream network silence."}
+            "limits": "HTTP 200 can contain a later SSE error; in-flight requests are absent. Error and background-event mentions are not retry or inference-failure counts. Recent observation and noncompletion lists can overlap and must not be added together. Same-log tag matches are not cross-layer or transcript correlations. Logged error shapes do not establish which upstream component generated them. Observer timing starts after response headers and includes downstream processing; it does not prove upstream network silence."}
 
 
 def correlate_stream_endings(origin: Path, backends: list[dict], since: datetime) -> dict:

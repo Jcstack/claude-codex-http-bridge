@@ -281,7 +281,8 @@ produced a completion record. The
 subsequently passed on macOS, Linux and Windows. At activation, the cloud jobs
 were still pending and the local Mac checks had passed. The
 [full source gate](https://github.com/Jcstack/harnesslift/actions/runs/42237424806)
-is a separate result. Automatic replay remains disabled.
+subsequently passed all eleven jobs. These gates use synthetic upstreams;
+they do not establish recovery at the real provider. Automatic replay remains disabled.
 
 For PowerShell, set `$env:CLAUDE_CODEX_STREAM_DIAGNOSTICS = '1'` before the
 reload and remove it afterward with `Remove-Item Env:CLAUDE_CODEX_STREAM_DIAGNOSTICS`.
@@ -315,7 +316,23 @@ The observer measures only that backend's immediate upstream:
 `same_log_match` associates records only inside one proxy log. Similar origin
 and client timestamps do not authenticate a cross-layer request identity. The
 twelve recent details are bounded; outcome/read-gap aggregates can outlive an
-individual detail. Do not add records from both proxy layers as separate
+individual detail. The revised read-only parser also retains a separate
+`recent_noncompletion` list of at most twelve observations, with
+`noncompletion_omitted_at_limit`. Later completion controls cannot evict these
+details. Both recent lists can contain the same observation and must not be
+added together as independent failures. Synthetic tests cover a terminal error
+followed by healthy controls, HTTP-200 matching, time filtering, legacy fields,
+ambiguous/absent tags and bounded retention without exporting raw identifiers.
+This is a reporting change and requires no inference-service restart.
+
+A later private error-file review found the same incomplete-stream sentinel
+in a nonstream Messages request. The active stream observer does not cover
+buffered execution or failures before a successful upstream HTTP response.
+An absent stream observation therefore cannot rule out those failures. A
+separate observed `response.failed` event does not establish that it has the
+same cause. No raw error-file contents were copied into the repository.
+
+Do not add records from both proxy layers as separate
 failed requests, infer provider silence from read gaps, or expose raw error
 bodies, opaque reasoning, prompts or credentials to obtain a diagnosis.
 

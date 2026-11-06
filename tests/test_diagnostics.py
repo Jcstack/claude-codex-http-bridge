@@ -44,6 +44,58 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertEqual(len(observed['recent']), 12)
             self.assertNotIn('PRIVATE', json.dumps(report))
 
+    def test_failed_terminal_detail_survives_completed_controls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'PRIVATE.log'
+            path.write_text(
+                '[2026-01-02T12:00:00Z] [aabbccdd] [warn] codex stream observation: phase=stream '
+                'outcome=terminal_event last_event=response.failed prior_event=response.output_item.added '
+                'data_items=5 elapsed_ms=17000 since_read_ms=0 event_gap_ms=11000 '
+                'max_read_gap_ms=11000 read_error=none\n'
+                '[2026-01-02T12:00:00Z] [aabbccdd] [info] [gin.go:1] 200 | 25.125s | PRIVATE_HOST | '
+                'POST "/v1/messages?token=PRIVATE_SECRET"\n' +
+                ('[2026-01-02T12:01:00Z] [11223344] [info] codex stream observation: phase=stream '
+                 'outcome=completion_event last_event=response.completed prior_event=response.output_item.done '
+                 'data_items=10 elapsed_ms=1000 since_read_ms=0 event_gap_ms=1 '
+                 'max_read_gap_ms=500 read_error=none\n') * 20, encoding='utf-8')
+            report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            observed = report['stream_termination_observations']
+            self.assertEqual(len(observed['recent']), 12)
+            self.assertTrue(all(row['outcome'] == 'completion_event' for row in observed['recent']))
+            failure, = observed['recent_noncompletion']
+            self.assertEqual(failure['last_event'], 'response.failed')
+            self.assertEqual(failure['max_read_gap_ms'], 11000)
+            self.assertEqual(failure['same_log_match'], 'unique')
+            self.assertEqual(failure['http_status'], 200)
+            self.assertEqual(failure['http_seconds'], 25.125)
+            self.assertEqual(observed['noncompletion_omitted_at_limit'], 0)
+            self.assertEqual(observed['outcome_mentions'], {'terminal_event': 1, 'completion_event': 20})
+            for secret in ('aabbccdd', '11223344', 'PRIVATE', str(path)):
+                self.assertNotIn(secret, json.dumps(report))
+
+    def test_noncompletion_retention_is_bounded_and_respects_window(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'PRIVATE.log'
+            failure = ('[2026-01-02T12:00:{second:02d}Z] [warn] codex stream observation: phase=stream '
+                       'outcome=eof last_event=response.created data_items=1 '
+                       'elapsed_ms=1 since_read_ms=0 read_error=none\n')
+            path.write_text(
+                failure.format(second=0).replace('2026-01-02', '2025-12-31') +
+                ''.join(failure.format(second=i) for i in range(15)) +
+                ('[2026-01-02T12:01:00Z] [info] codex stream observation: phase=stream '
+                 'outcome=completion_event last_event=response.completed '
+                 'data_items=1 elapsed_ms=1 since_read_ms=0 read_error=none\n') * 40,
+                encoding='utf-8')
+            observed = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))[
+                'stream_termination_observations']
+            self.assertEqual(observed['outcome_mentions'], {'eof': 15, 'completion_event': 40})
+            self.assertEqual(len(observed['recent_noncompletion']), 12)
+            self.assertEqual(observed['noncompletion_omitted_at_limit'], 3)
+            self.assertEqual(observed['recent_noncompletion'][0]['at'], '2026-01-02T12:00:03+00:00')
+            self.assertTrue(all(row['same_log_match'] == 'untagged' and row['http_status'] is None
+                                and row['max_read_gap_ms'] is None
+                                for row in observed['recent_noncompletion']))
+
     def test_stream_observer_accepts_old_and_new_metadata_without_partial_shapes(self):
         prefix = ('codex stream observation: phase=stream outcome=eof last_event=response.output_text.delta ')
         legacy = prefix + 'data_items=2 elapsed_ms=3000 since_read_ms=1000 read_error=none'
@@ -152,6 +204,8 @@ class DiagnosticsTests(unittest.TestCase):
             report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
             observation = report["stream_termination_observations"]
             self.assertEqual(observation["outcome_mentions"], {"eof": 4, "terminal_event": 1})
+            self.assertEqual(observation["recent_noncompletion"], observation["recent"])
+            self.assertEqual(observation["noncompletion_omitted_at_limit"], 0)
             self.assertEqual([row["same_log_match"] for row in observation["recent"]],
                              ["unique", "ambiguous", "unmatched", "untagged", "untagged"])
             self.assertEqual(observation["recent"][0]["http_status"], 200)
