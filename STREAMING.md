@@ -278,9 +278,10 @@ account remained unchanged; the new process's enabled flag and exact finite
 window were verified without exporting its environment. Natural traffic
 produced a completion record. The
 [extended three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/42237489905)
-and [full source gate](https://github.com/Jcstack/harnesslift/actions/runs/42237424806)
-remain separate verification results; activation was based on the local Mac
-checks, not a claim about pending cloud jobs. Automatic replay remains disabled.
+subsequently passed on macOS, Linux and Windows. At activation, the cloud jobs
+were still pending and the local Mac checks had passed. The
+[full source gate](https://github.com/Jcstack/harnesslift/actions/runs/42237424806)
+is a separate result. Automatic replay remains disabled.
 
 For PowerShell, set `$env:CLAUDE_CODEX_STREAM_DIAGNOSTICS = '1'` before the
 reload and remove it afterward with `Remove-Item Env:CLAUDE_CODEX_STREAM_DIAGNOSTICS`.
@@ -290,6 +291,33 @@ the already-started process window; that process stops recording on its expiry.
 These commands do not enable the feature in an older runtime. A reload starts a
 new managed backend and relies on the existing draining mechanism; it does not
 replace the original Codex listener or capture an already-started request.
+
+### Interpreting the next captured incident
+
+Run the read-only report locally; keep its output private:
+
+```sh
+claude-codex diagnostics --tracked --hours 1 --include-children
+```
+
+Use the current session's API-error time and the matching managed-log record.
+The observer measures only that backend's immediate upstream:
+
+| Observation | Established boundary | Next distinction to investigate |
+| --- | --- | --- |
+| `terminal_event` with `error` or `response.failed` | An error event arrived from the immediate upstream. | The original origin may have forwarded or synthesized it; its provider-facing failure is still unknown. |
+| `eof` | Reading ended without a recognized terminal event. | Premature closure, incomplete framing and the component that ended the stream remain separate possibilities. |
+| `read_error` | The local reader returned a classified error. | Compare its fixed category and measured gaps with completed controls; a duration alone does not establish a timeout policy. |
+| `incomplete_event` | An explicit incomplete terminal event was observed. | Do not reclassify it as a network failure or claim tool completion without item-state evidence. |
+| `completion_event` | A completed/done terminal category arrived. | Client receipt and successful downstream delivery remain separate checks. |
+| No observation | This report supplies no matching observer evidence. | Check process/window coverage, earlier in-flight requests, alternate endpoints and parser coverage before drawing conclusions. |
+
+`same_log_match` associates records only inside one proxy log. Similar origin
+and client timestamps do not authenticate a cross-layer request identity. The
+twelve recent details are bounded; outcome/read-gap aggregates can outlive an
+individual detail. Do not add records from both proxy layers as separate
+failed requests, infer provider silence from read gaps, or expose raw error
+bodies, opaque reasoning, prompts or credentials to obtain a diagnosis.
 
 A separate local before/after fixture compared synthetic model, instructions,
 tools, input, reasoning, tool choice and prompt-cache key bytes across three

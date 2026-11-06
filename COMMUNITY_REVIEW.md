@@ -463,3 +463,23 @@ These findings have not changed the original credential-owning process or its
 listener. A larger upstream migration needs the existing protocol, account,
 cache, compaction, plugin and draining gates. The active finite metadata
 observer and its limitations are recorded in [STREAMING.md](STREAMING.md).
+
+## Native Codex retry decisions, 2026-11-06
+
+The official [retry implementation at commit 2c502d8](https://github.com/openai/codex/blob/2c502d8b3d382dd609179164f31396d95deee55c/codex-rs/core/src/responses_retry.rs)
+was reviewed alongside its [deadline regression test](https://github.com/openai/codex/blob/2c502d8b3d382dd609179164f31396d95deee55c/codex-rs/core/src/responses_retry_tests.rs).
+It uses typed retry decisions, configured budgets, server retry advice and
+user-visible reconnect notifications. Transport fallback preserves the server's
+retry deadline. The test advances virtual time while notification delivery is
+blocked, checking that reporting does not restart that deadline.
+
+These are useful implementation requirements for a future bridge recovery
+policy: classify the error before retrying, keep a monotonic overall budget,
+retain an absolute server deadline through notifications and transport changes,
+and expose bounded recovery progress. A connection-failure feature is not a
+general license to retry every partial response.
+
+This source review does not prove hosted-tool idempotency, account binding,
+lossless HTTP error forwarding, or the safety of replaying a Claude conversation.
+It neither activates the experimental bridge retry nor changes Claude Code's
+role as the harness. The recurring live failure remains open.
