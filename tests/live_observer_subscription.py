@@ -60,7 +60,20 @@ def inspect_stream(body: bytes) -> dict:
             'end_turn': stop_reason == 'end_turn'}
 
 
-def run(proxy: Path, ingress: Path, installed: Path) -> dict:
+def inspect_message(body: bytes) -> dict:
+    """Inspect a bounded synthetic nonstream response without returning its contents."""
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise ValueError('Synthetic response exceeded the limit')
+    value = json.loads(body)
+    if not isinstance(value, dict) or not isinstance(value.get('content', []), list):
+        raise ValueError('Invalid synthetic message')
+    text = ''.join(block['text'] for block in value.get('content', [])
+                   if isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str))
+    return {'expected_output': text.strip() == MARKER, 'message_complete': value.get('type') == 'message',
+            'json_error': value.get('type') == 'error', 'end_turn': value.get('stop_reason') == 'end_turn'}
+
+
+def run(proxy: Path, ingress: Path, installed: Path, *, nonstream: bool = False) -> dict:
     upstream = existing_subscription(installed)
     model = bridge_models.aliases(upstream['models'])['sol']
     models = {model: upstream['models'][model]}
@@ -80,7 +93,7 @@ def run(proxy: Path, ingress: Path, installed: Path) -> dict:
                 context = ssl.create_default_context(cafile=str(runtime / 'ca.pem'))
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                                      urllib.request.HTTPSHandler(context=context))
-                payload = {'model': model, 'max_tokens': 1024, 'stream': True,
+                payload = {'model': model, 'max_tokens': 1024, 'stream': not nonstream,
                            'output_config': {'effort': 'low'},
                            'messages': [{'role': 'user', 'content': f'Reply with exactly {MARKER}.'}]}
                 request = urllib.request.Request(
@@ -91,13 +104,16 @@ def run(proxy: Path, ingress: Path, installed: Path) -> dict:
                 with opener.open(request, timeout=60) as response:
                     status = response.status
                     body = response.read(MAX_RESPONSE_BYTES + 1)
-                result = inspect_stream(body)
-                if (status != 200 or not result['expected_output'] or not result['message_stop'] or
-                        not result['end_turn'] or result['sse_error']):
+                result = inspect_message(body) if nonstream else inspect_stream(body)
+                finished = result['message_complete'] if nonstream else result['message_stop']
+                failed = result['json_error'] if nonstream else result['sse_error']
+                if (status != 200 or not result['expected_output'] or not finished or
+                        not result['end_turn'] or failed):
                     raise RuntimeError('Synthetic model response did not pass')
                 log = runtime / state['current'] / 'proxy.log'
                 completion_observed = any(
-                    observation is not None and observation['outcome'] == 'completion_event'
+                    observation is not None and observation['outcome'] == 'completion_event' and
+                    observation['phase'] in (('buffered',) if nonstream else ('stream', 'bootstrap'))
                     for observation in (diagnostics.stream_observation(line) for line in diagnostics.lines(log)))
                 if not completion_observed:
                     raise RuntimeError('The owned observer did not record the healthy subscription control')
@@ -112,7 +128,8 @@ def run(proxy: Path, ingress: Path, installed: Path) -> dict:
                     rolling_runtime.owned_stop(state)
                     raise
     return {'synthetic_prompt': True, 'observer_requested': True, 'status_200': True,
-            'completion_observed': completion_observed, 'existing_service_changed': False, **result}
+            'completion_observed': completion_observed, 'existing_service_changed': False,
+            'nonstream': nonstream, **result}
 
 
 def main() -> None:
@@ -120,8 +137,9 @@ def main() -> None:
     parser.add_argument('--proxy', type=Path, required=True)
     parser.add_argument('--ingress', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True, help='Existing private bridge installation')
+    parser.add_argument('--nonstream', action='store_true', help='Verify buffered Messages execution')
     args = parser.parse_args()
-    print(json.dumps(run(args.proxy.resolve(), args.ingress.resolve(), args.root.resolve())))
+    print(json.dumps(run(args.proxy.resolve(), args.ingress.resolve(), args.root.resolve(), nonstream=args.nonstream)))
 
 
 if __name__ == '__main__':

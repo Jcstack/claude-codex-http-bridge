@@ -64,7 +64,7 @@ jobs:
           go build -o "../fixed-${{ matrix.binary }}" ./cmd/server
           git apply --check ../upstream/patches/codex-stream-observation-candidate.patch
           git apply ../upstream/patches/codex-stream-observation-candidate.patch
-          go test -timeout 180s -run '^TestBridgeStreamObservation' ./internal/runtime/executor
+          go test -timeout 180s -run '^TestBridgeStreamObservation' ./internal/runtime/executor ./internal/runtime/executor/helps
           go build -o "../observed-${{ matrix.binary }}" ./cmd/server
           cd ../gateway
           go build -o ../bridge-ingress .
@@ -81,6 +81,8 @@ jobs:
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --gap-check
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --window-seconds 86400
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --expired-window
+          python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --nonstream
+          python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --nonstream --expired-window
           python tests/probe_response_resume_route.py "baseline-${{ matrix.binary }}"
           python tests/probe_response_resume_route.py "fixed-${{ matrix.binary }}"
           python tests/probe_opaque_reasoning_stream.py "baseline-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"

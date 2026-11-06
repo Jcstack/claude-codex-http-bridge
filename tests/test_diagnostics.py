@@ -13,6 +13,42 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_buffered_observation_has_no_invented_gap_and_no_raw_reason(self):
+        line = ('codex stream observation: phase=buffered outcome=terminal_event '
+                'last_event=response.failed data_items=2 elapsed_ms=1200 '
+                'read_error=none failure_kind=reported_overload')
+        row = diagnostics.stream_observation(line)
+        self.assertEqual(row['phase'], 'buffered')
+        self.assertEqual(row['failure_kind'], 'reported_overload')
+        self.assertEqual(row['elapsed_ms'], 1200)
+        for key in ('since_read_ms', 'event_gap_ms', 'max_read_gap_ms', 'prior_event'):
+            self.assertIsNone(row[key])
+        self.assertIsNone(diagnostics.stream_observation(line.replace('reported_overload', 'private_secret')))
+        self.assertIsNone(diagnostics.stream_observation(line.replace('data_items=', 'since_read_ms=10 data_items=')))
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'PRIVATE.log'
+            path.write_text('[2026-01-02T12:00:00Z] [aabbccdd] ' + line + '\n'
+                            '[2026-01-02T12:00:00Z] [aabbccdd] [gin.go:1] 502 | 2s | PRIVATE | POST "/v1/messages"\n',
+                            encoding='utf-8')
+            report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            observed = report['stream_termination_observations']
+            self.assertEqual(observed['max_read_gap_buckets_by_outcome'], {})
+            failure, = observed['recent_noncompletion']
+            self.assertEqual(failure['same_log_match'], 'unique')
+            self.assertEqual(failure['http_status'], 502)
+            for private in ('aabbccdd', 'PRIVATE', str(path)):
+                self.assertNotIn(private, json.dumps(report))
+
+    def test_reported_failure_kind_is_optional_for_old_stream_observations(self):
+        line = ('codex stream observation: phase=stream outcome=terminal_event '
+                'last_event=error data_items=2 elapsed_ms=1000 since_read_ms=0 read_error=none')
+        self.assertIsNone(diagnostics.stream_observation(line)['failure_kind'])
+        for kind in diagnostics.STREAM_FAILURE_KINDS:
+            self.assertEqual(diagnostics.stream_observation(line + ' failure_kind=' + kind)['failure_kind'], kind)
+        self.assertIsNone(diagnostics.stream_observation(line + ' failure_kind=private_secret'))
+        completed = line.replace('terminal_event', 'completion_event').replace('last_event=error', 'last_event=response.completed')
+        self.assertIsNone(diagnostics.stream_observation(completed + ' failure_kind=reported_auth'))
+
     def test_completion_observations_are_controls_not_http_success(self):
         line = ('codex stream observation: phase=stream outcome=completion_event '
                 'last_event=response.completed prior_event=response.output_text.delta '

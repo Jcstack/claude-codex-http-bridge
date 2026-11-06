@@ -36,7 +36,8 @@ capability is not a successful test.
    original-service and ingress migration remain separate work.
    Preserve noncompletion details independently of healthy controls. A private
    error-file review also found the same sentinel on a nonstream request;
-   buffered execution and pre-successful-HTTP failures remain observation gaps.
+   buffered execution has a tested metadata candidate, while its rollout and
+   pre-successful-HTTP coverage remain separate gates.
 2. Establish recovery inside a verified account boundary, including OAuth
    refresh, selection changes, hosted tools, second-attempt error semantics,
    cancellation, concurrency and total memory. Keep the experimental replay
@@ -68,8 +69,18 @@ capability is not a successful test.
   fixed-field redaction. Healthy controls no longer evict every failure
   detail. Synthetic privacy, time-window, legacy-format, ambiguity and
   HTTP-200 failure checks passed locally, along with the 422-case offline
-  suite (20 optional skips). Cross-platform and installed results are separate
-  gates; this changes reporting, not recovery or error provenance.
+  suite (20 optional skips). The [metadata gate](https://github.com/Jcstack/harnesslift/actions/runs/42253822719)
+  passed on all three platforms. A 43-check overlay using installed dependencies
+  passed before the read-only module was atomically installed with a private
+  rollback. Origin/managed state, key and account were unchanged; no process
+  was restarted. This changes reporting, not recovery or error provenance.
+- [x] Build a metadata-only candidate for nonstream Responses execution and
+  fixed reported error categories. Buffered parsing deliberately omits live
+  read/event-gap fields. Local Go race checks, a reconstructed source patch,
+  two-layer TLS failure/healthy and expiry controls, and the 425-case offline
+  suite (20 optional skips) passed. The stream observer remains a bounded
+  opt-in, and no automatic replay is added. Cross-platform verification and
+  live installation are separate acceptance gates.
 
 - [ ] Deliver safe unattended recovery for incomplete streams and structured
   overloads without disrupting running sessions. The credential-free

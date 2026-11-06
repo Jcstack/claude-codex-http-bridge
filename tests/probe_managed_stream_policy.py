@@ -61,7 +61,8 @@ class GapHandler(Handler):
 
 
 def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, observe: bool,
-          gap_check: bool = False, window_seconds: int = 3600, expired_window: bool = False):
+          gap_check: bool = False, window_seconds: int = 3600, expired_window: bool = False,
+          nonstream: bool = False):
     with tempfile.TemporaryDirectory(prefix="bridge-managed-stream-policy-") as temporary:
         root = Path(temporary)
         runtime_bundle.private_dir(root)
@@ -107,7 +108,7 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, ob
                         context = ssl.create_default_context(cafile=str(runtime / "ca.pem"))
                         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                                              urllib.request.HTTPSHandler(context=context))
-                        payload = json.dumps({"model": MODEL, "max_tokens": 1024, "stream": True,
+                        payload = json.dumps({"model": MODEL, "max_tokens": 1024, "stream": not nonstream,
                             "messages": [{"role": "user", "content": "Synthetic fixture"}],
                             "tools": [{"name": "Write", "description": "Synthetic fixture", "input_schema": {
                                 "type": "object", "properties": {"file_path": {"type": "string"},
@@ -124,14 +125,17 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, ob
                                 status, content = exc.code, exc.read(1_000_001)
                             if len(content) > 1_000_000:
                                 raise RuntimeError("Synthetic response exceeded its limit")
+                            message = json.loads(content) if nonstream else None
                             rows.append({"status": status, "sse_error": b"event: error" in content,
                                 "sse_stop": b"event: message_stop" in content,
+                                "json_message": isinstance(message, dict) and message.get("type") == "message",
                                 "incomplete_sentinel": b"stream closed before response.completed" in content,
                                 "fake_upstream_requests": len(server.requests)})
-                        if not (rows[0]["status"] == 200 and rows[0]["sse_error"] and
+                        if not (rows[0]["status"] == (502 if nonstream else 200) and (nonstream or rows[0]["sse_error"]) and
                                 rows[0]["incomplete_sentinel"] and rows[0]["fake_upstream_requests"] == 1):
                             raise AssertionError("Managed fixture did not forward the interruption")
-                        if not (rows[1]["status"] == 200 and rows[1]["sse_stop"] and rows[1]["fake_upstream_requests"] == 2):
+                        if not (rows[1]["status"] == 200 and (rows[1]["json_message"] if nonstream else rows[1]["sse_stop"])
+                                and rows[1]["fake_upstream_requests"] == 2):
                             raise AssertionError("Managed policy did not admit the follow-up")
                         log = runtime / value["current"] / "proxy.log"
                         observation_lines = [line for line in log.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -146,6 +150,12 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, ob
                             raise AssertionError("The opted-in managed observer did not record the synthetic failure")
                         if observe and not expired_window and not any(item["outcome"] == "completion_event" for item in observations):
                             raise AssertionError("The opted-in managed observer did not record the healthy control")
+                        if observe and not expired_window and nonstream:
+                            if any(item["phase"] != "buffered" or any(item[field] is not None
+                                   for field in ("since_read_ms", "event_gap_ms", "max_read_gap_ms")) for item in observations):
+                                raise AssertionError("Buffered diagnostics invented live-read timings")
+                            if not any(item["failure_kind"] == "reported_incomplete" for item in observations):
+                                raise AssertionError("Buffered diagnostics lost the reported incomplete category")
                         if gap_check and not any(item["outcome"] == "terminal_event" and
                                                  (item.get("max_read_gap_ms") or 0) >= 150 for item in observations):
                             raise AssertionError("The observer did not retain the synthetic read gap")
@@ -169,17 +179,21 @@ def main():
     parser.add_argument("--gap-check", action="store_true", help="Check a synthetic delay before EOF")
     parser.add_argument("--window-seconds", type=int, default=3600)
     parser.add_argument("--expired-window", action="store_true", help="Verify a one-second observer stops before requests")
+    parser.add_argument("--nonstream", action="store_true", help="Exercise buffered Messages execution")
     args = parser.parse_args()
     if args.gap_check and not args.observe:
         parser.error("--gap-check requires --observe")
+    if args.gap_check and args.nonstream:
+        parser.error("Buffered execution cannot measure live event gaps")
     if not 1 <= args.window_seconds <= 86400 or (args.expired_window and (not args.observe or args.gap_check)):
         parser.error("Use 1–86400 seconds; --expired-window requires --observe without --gap-check")
     rows = check(args.origin.resolve(), args.backend.resolve(), args.ingress.resolve(),
                  observe=args.observe, gap_check=args.gap_check, window_seconds=args.window_seconds,
-                 expired_window=args.expired_window)
+                 expired_window=args.expired_window, nonstream=args.nonstream)
     print(json.dumps({"mock_only": True, "actual_generated_managed_config": True,
                       "tls_ingress": True, "observer_enabled": args.observe,
                       "expired_window_checked": args.expired_window,
+                      "nonstream_checked": args.nonstream,
                       "synthetic_gap_checked": args.gap_check, "requests": rows}))
 
 

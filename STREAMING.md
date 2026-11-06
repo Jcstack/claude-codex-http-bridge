@@ -241,6 +241,11 @@ To repeat the explicit live check with binaries you have independently reviewed:
 python tests/live_observer_subscription.py --proxy PRIVATE_PROXY_BINARY --ingress PRIVATE_INGRESS_BINARY --root PRIVATE_BRIDGE_INSTALLATION
 ```
 
+With the buffered-observation candidate, add `--nonstream` for one short
+subscription request that requires a complete JSON message, exact synthetic
+text, `end_turn` and a buffered completion observation. This consumes
+subscription quota; it is never run by ordinary offline tests.
+
 The probe binds the supplied binaries to the current source-lock metadata; it
 does not independently prove how those binaries were built. On an unhandled
 process termination, inspect the private temporary directory before removing
@@ -326,11 +331,36 @@ ambiguous/absent tags and bounded retention without exporting raw identifiers.
 This is a reporting change and requires no inference-service restart.
 
 A later private error-file review found the same incomplete-stream sentinel
-in a nonstream Messages request. The active stream observer does not cover
-buffered execution or failures before a successful upstream HTTP response.
+in a nonstream Messages request. The initially activated stream observer does
+not cover buffered execution or failures before a successful upstream HTTP response.
 An absent stream observation therefore cannot rule out those failures. A
 separate observed `response.failed` event does not establish that it has the
 same cause. No raw error-file contents were copied into the repository.
+
+The next candidate adds `phase=buffered` observations to the nonstream
+executor. Its elapsed time starts after successful HTTP headers, before the
+existing body read. Since its events are parsed after buffering, it emits no
+`since_read_ms`, prior event or event/read-gap fields; the read-only report
+represents these as unknown and excludes them from gap buckets. Response
+bytes, terminal handling, request construction and retries remain unchanged.
+The helper resides under the upstream `helps` package.
+
+The candidate also adds an optional `failure_kind` with a fixed vocabulary:
+`none`, `other`, `reported_incomplete`, `reported_overload`,
+`reported_rate_limit`, `reported_auth`, `reported_context_limit` and
+`reported_content_filter`. These describe recognized structured error claims,
+never provider provenance or permission to retry. Unknown code/message fields
+are not recorded. Older observations have no reported kind. Only an owned
+copy of an allowlisted event-name string is retained in the observer.
+
+Local tests compare buffered response bytes/errors with observation disabled
+and enabled, classify synthetic errors without their text, and exercise the
+actual generated two-layer TLS path. The first failed nonstream response
+remains 502, a separate healthy request still succeeds, expiry stops recording,
+and no automatic retry occurs. Build, race, source reconstruction, client
+handoff and live-control evidence remain distinct from cloud and installed
+results. These changes improve diagnosis and do not repair a missing upstream
+terminal event.
 
 Do not add records from both proxy layers as separate
 failed requests, infer provider silence from read gaps, or expose raw error

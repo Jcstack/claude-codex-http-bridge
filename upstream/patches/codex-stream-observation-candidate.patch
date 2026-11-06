@@ -1,15 +1,67 @@
+diff --git a/internal/runtime/executor/codex_executor_execute.go b/internal/runtime/executor/codex_executor_execute.go
+index 889b7d6..d0f207c 100644
+--- a/internal/runtime/executor/codex_executor_execute.go
++++ b/internal/runtime/executor/codex_executor_execute.go
+@@ -156,6 +156,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 		err = newCodexStatusErrWithHeadersAndCooling(httpResp.StatusCode, httpResp.Header, b, e.modelLevelCooling())
+ 		return resp, err
+ 	}
++	observation := helps.NewCodexStreamObservation()
+ 	data, errRead := io.ReadAll(httpResp.Body)
+ 	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
+ 
+@@ -165,6 +166,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 	sawOutputDelta := false
+ 	for events.Scan() {
+ 		line := events.Bytes()
++		observation.Observe(line)
+ 		if !bytes.HasPrefix(line, dataTag) {
+ 			continue
+ 		}
+@@ -179,6 +181,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 		}
+ 
+ 		if streamErr, terminalBody, ok := codexTerminalFailureErrWithCooling(eventData, e.modelLevelCooling()); ok {
++			observation.Emit(ctx, "buffered", "terminal_event", nil)
+ 			if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
+ 				return resp, errClearReplay
+ 			}
+@@ -204,6 +207,12 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 			continue
+ 		}
+ 
++		if eventType == "response.incomplete" {
++			observation.Emit(ctx, "buffered", "incomplete_event", nil)
++		} else {
++			observation.Emit(ctx, "buffered", "completion_event", nil)
++		}
++
+ 		if helps.IsCodexTerminalEmptyIncomplete(eventData, len(outputItemsByIndex)+len(outputItemsFallback), sawOutputDelta) {
+ 			err = newCodexEmptyIncompleteStreamError()
+ 			return resp, err
+@@ -238,7 +247,10 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
+ 			err = errCtx
+ 			return resp, err
+ 		}
++		observation.Emit(ctx, "buffered", "read_error", errRead)
+ 		helps.RecordAPIResponseError(ctx, e.cfg, errRead)
++	} else {
++		observation.Emit(ctx, "buffered", "eof", nil)
+ 	}
+ 	err = newCodexIncompleteStreamError()
+ 	return resp, err
 diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runtime/executor/codex_executor_stream.go
-index ba21463..44f9ed9 100644
+index ba21463..9915ffb 100644
 --- a/internal/runtime/executor/codex_executor_stream.go
 +++ b/internal/runtime/executor/codex_executor_stream.go
 @@ -183,8 +183,10 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
  	budgetExhausted := false
  	exhaustedReason := ""
  
-+	observation := newCodexStreamObservation()
++	observation := helps.NewCodexStreamObservation()
  	scanner := helps.NewCodexSSEScanner(ctx, httpResp.Body, 52_428_800) // 50MB
  	scanner.SetOnLine(func(rawLine []byte) {
-+		observation.noteRead()
++		observation.NoteRead()
  		helps.AppendAPIResponseChunk(ctx, e.cfg, rawLine)
  	})
  	if buffering {
@@ -17,7 +69,7 @@ index ba21463..44f9ed9 100644
  	if buffering {
  		for scanner.Scan() {
  			line := scanner.Bytes()
-+			observation.observe(line)
++			observation.Observe(line)
  			if budgetExhausted {
  				helps.LogWithRequestID(ctx).Debugf("codex executor: bootstrap %s exhausted after %d lines / %d bytes / %v, releasing stream without overload probing", exhaustedReason, bufferedFrames, bufferedBytes, nowCodexBootstrap().Sub(bootstrapStart))
  				initialChunks = nil
@@ -25,7 +77,7 @@ index ba21463..44f9ed9 100644
  				translatedLine = append([]byte("data: "), data...)
  				eventType := gjson.GetBytes(data, "type").String()
  				if streamErr, terminalBody, ok := codexTerminalFailureErrWithCooling(data, e.modelLevelCooling()); ok {
-+					observation.emit(ctx, "bootstrap", "terminal_event", nil)
++					observation.Emit(ctx, "bootstrap", "terminal_event", nil)
  					closeBootstrapBody()
  					if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
  						helps.RecordAPIResponseError(ctx, e.cfg, errClearReplay)
@@ -33,7 +85,7 @@ index ba21463..44f9ed9 100644
  					sawOutputDelta = true
  				}
  				if helps.IsCodexTerminalEmptyIncomplete(data, len(outputItemsByIndex)+len(outputItemsFallback), sawOutputDelta) {
-+					observation.emit(ctx, "bootstrap", "incomplete_event", nil)
++					observation.Emit(ctx, "bootstrap", "incomplete_event", nil)
  					closeBootstrapBody()
  					streamErr := newCodexEmptyIncompleteStreamError()
  					helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
@@ -42,9 +94,9 @@ index ba21463..44f9ed9 100644
  				case "response.completed", "response.incomplete", "response.done":
  					terminalSuccess = true
 +					if eventType == "response.incomplete" {
-+						observation.emit(ctx, "bootstrap", "incomplete_event", nil)
++						observation.Emit(ctx, "bootstrap", "incomplete_event", nil)
 +					} else {
-+						observation.emit(ctx, "bootstrap", "completion_event", nil)
++						observation.Emit(ctx, "bootstrap", "completion_event", nil)
 +					}
  					data = normalizeCodexWebsocketCompletion(data)
  					if detail, ok := helps.ParseCodexUsage(data); ok {
@@ -53,7 +105,7 @@ index ba21463..44f9ed9 100644
  				if ctx.Err() != nil {
  					return nil, ctx.Err()
  				}
-+				observation.emit(ctx, "bootstrap", "read_error", errScan)
++				observation.Emit(ctx, "bootstrap", "read_error", errScan)
  				helps.RecordAPIResponseError(ctx, e.cfg, errScan)
  				reporter.PublishFailure(ctx, errScan)
  				return nil, errScan
@@ -61,7 +113,7 @@ index ba21463..44f9ed9 100644
  			if ctx.Err() != nil {
  				return nil, ctx.Err()
  			}
-+			observation.emit(ctx, "bootstrap", "eof", nil)
++			observation.Emit(ctx, "bootstrap", "eof", nil)
  			if len(bufferedChunks) == 0 && len(initialChunks) == 0 {
  				emptyErr := statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before first payload"}
  				helps.RecordAPIResponseError(ctx, e.cfg, emptyErr)
@@ -69,7 +121,7 @@ index ba21463..44f9ed9 100644
  		}()
  		for scanner.Scan() {
  			line := scanner.Bytes()
-+			observation.observe(line)
++			observation.Observe(line)
  			var translatedLine []byte
  			terminalSuccess := false
  
@@ -77,7 +129,7 @@ index ba21463..44f9ed9 100644
  				translatedLine = append([]byte("data: "), data...)
  				eventType := gjson.GetBytes(data, "type").String()
  				if streamErr, terminalBody, ok := codexTerminalFailureErrWithCooling(data, e.modelLevelCooling()); ok {
-+					observation.emit(ctx, "stream", "terminal_event", nil)
++					observation.Emit(ctx, "stream", "terminal_event", nil)
  					if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
  						helps.RecordAPIResponseError(ctx, e.cfg, errClearReplay)
  						reporter.PublishFailure(ctx, errClearReplay)
@@ -85,7 +137,7 @@ index ba21463..44f9ed9 100644
  					sawOutputDelta = true
  				}
  				if helps.IsCodexTerminalEmptyIncomplete(data, len(outputItemsByIndex)+len(outputItemsFallback), sawOutputDelta) {
-+					observation.emit(ctx, "stream", "incomplete_event", nil)
++					observation.Emit(ctx, "stream", "incomplete_event", nil)
  					streamErr := newCodexEmptyIncompleteStreamError()
  					helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
  					reporter.PublishFailure(ctx, streamErr)
@@ -94,9 +146,9 @@ index ba21463..44f9ed9 100644
  				case "response.completed", "response.incomplete", "response.done":
  					terminalSuccess = true
 +					if eventType == "response.incomplete" {
-+						observation.emit(ctx, "stream", "incomplete_event", nil)
++						observation.Emit(ctx, "stream", "incomplete_event", nil)
 +					} else {
-+						observation.emit(ctx, "stream", "completion_event", nil)
++						observation.Emit(ctx, "stream", "completion_event", nil)
 +					}
  					data = normalizeCodexWebsocketCompletion(data)
  					if detail, ok := helps.ParseCodexUsage(data); ok {
@@ -105,206 +157,23 @@ index ba21463..44f9ed9 100644
  			if ctx.Err() != nil {
  				return
  			}
-+			observation.emit(ctx, "stream", "read_error", errScan)
++			observation.Emit(ctx, "stream", "read_error", errScan)
  			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
 +		} else {
-+			observation.emit(ctx, "stream", "eof", nil)
++			observation.Emit(ctx, "stream", "eof", nil)
  		}
  		if emittedCount == 0 {
  			emptyErr := statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before first payload"}
-diff --git a/internal/runtime/executor/codex_stream_observation.go b/internal/runtime/executor/codex_stream_observation.go
-new file mode 100644
-index 0000000..7651c6b
---- /dev/null
-+++ b/internal/runtime/executor/codex_stream_observation.go
-@@ -0,0 +1,176 @@
-+package executor
-+
-+// A disabled-by-default, metadata-only observation for an incomplete stream.
-+// It never changes a request, stream, error, retry, or credential selection.
-+
-+import (
-+	"bytes"
-+	"context"
-+	"errors"
-+	"fmt"
-+	"io"
-+	"net"
-+	"os"
-+	"strconv"
-+	"time"
-+
-+	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
-+	log "github.com/sirupsen/logrus"
-+	"github.com/tidwall/gjson"
-+)
-+
-+type codexStreamObservation struct {
-+	started          time.Time
-+	expires          time.Time
-+	lastRead         time.Time
-+	lastEventAt      time.Time
-+	items            uint32
-+	last             string
-+	previous         string
-+	eventGapMillis   int64
-+	maxReadGapMillis int64
-+}
-+
-+// The window is explicit, finite, and fixed at process startup. Invalid input
-+// disables observation rather than extending its lifetime. No raw value is logged.
-+func codexObservationWindow(raw string) (time.Duration, bool) {
-+	if raw == "" {
-+		return time.Hour, true
-+	}
-+	seconds, err := strconv.Atoi(raw)
-+	if err != nil || seconds < 1 || seconds > 86400 || strconv.Itoa(seconds) != raw {
-+		return 0, false
-+	}
-+	return time.Duration(seconds) * time.Second, true
-+}
-+
-+var codexStreamObservationExpiry = func() time.Time {
-+	window, ok := codexObservationWindow(os.Getenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS"))
-+	if !ok {
-+		return time.Time{}
-+	}
-+	// The monotonic portion makes expiry independent of wall-clock jumps.
-+	return time.Now().Add(window)
-+}()
-+
-+func newCodexStreamObservation() *codexStreamObservation {
-+	now := time.Now()
-+	if os.Getenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS") != "1" || !now.Before(codexStreamObservationExpiry) {
-+		return nil
-+	}
-+	return &codexStreamObservation{started: now, expires: codexStreamObservationExpiry, lastRead: now, lastEventAt: now, last: "none", previous: "none"}
-+}
-+
-+// Scanner callbacks and frame observations are sequential, including the
-+// bootstrap-to-stream goroutine handoff. No frame or request bytes are stored.
-+func (d *codexStreamObservation) noteRead() {
-+	if d != nil {
-+		now := time.Now()
-+		if gap := codexObservationMillis(d.lastRead, now); gap > d.maxReadGapMillis {
-+			d.maxReadGapMillis = gap
-+		}
-+		d.lastRead = now
-+	}
-+}
-+
-+func (d *codexStreamObservation) observe(line []byte) {
-+	if d == nil || !bytes.HasPrefix(line, dataTag) {
-+		return
-+	}
-+	if d.items < 1_000_000 {
-+		d.items++
-+	}
-+	now := time.Now()
-+	d.eventGapMillis = codexObservationMillis(d.lastEventAt, now)
-+	d.lastEventAt = now
-+	d.previous = d.last
-+	value := gjson.GetBytes(bytes.TrimSpace(line[len(dataTag):]), "type")
-+	if value.Type != gjson.String {
-+		d.last = "other"
-+		return
-+	}
-+	switch value.String() {
-+	case "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done",
-+		"response.output_text.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_part.added",
-+		"response.function_call_arguments.delta", "response.completed", "response.done", "response.incomplete", "response.failed",
-+		"error", "codex.rate_limits", "codex.response.metadata", "response.metadata", "keepalive", "ping":
-+		d.last = value.String()
-+	default:
-+		d.last = "other"
-+	}
-+}
-+
-+func codexObservationReadError(err error) string {
-+	switch {
-+	case err == nil:
-+		return "none"
-+	case errors.Is(err, io.ErrUnexpectedEOF):
-+		return "unexpected_eof"
-+	case errors.Is(err, context.Canceled):
-+		return "cancelled"
-+	case errors.Is(err, context.DeadlineExceeded):
-+		return "timeout"
-+	}
-+	var network net.Error
-+	if errors.As(err, &network) && network.Timeout() {
-+		return "timeout"
-+	}
-+	return "other"
-+}
-+
-+func codexObservationMillis(start, now time.Time) int64 {
-+	value := now.Sub(start)
-+	if value < 0 {
-+		return 0
-+	}
-+	if value > 24*time.Hour {
-+		value = 24 * time.Hour
-+	}
-+	return value.Milliseconds()
-+}
-+
-+// Only an eight-character suffix of a canonical local UUID may be logged.
-+func codexObservationRequestTag(ctx context.Context) string {
-+	id := logging.GetRequestID(ctx)
-+	if len(id) != 36 {
-+		return ""
-+	}
-+	for i := 0; i < len(id); i++ {
-+		if i == 8 || i == 13 || i == 18 || i == 23 {
-+			if id[i] != '-' {
-+				return ""
-+			}
-+			continue
-+		}
-+		if !(id[i] >= '0' && id[i] <= '9' || id[i] >= 'a' && id[i] <= 'f') {
-+			return ""
-+		}
-+	}
-+	return id[28:]
-+}
-+
-+func (d *codexStreamObservation) emit(ctx context.Context, phase, outcome string, readErr error) {
-+	if d == nil || ctx == nil || ctx.Err() != nil || !time.Now().Before(d.expires) {
-+		return
-+	}
-+	if phase != "bootstrap" && phase != "stream" {
-+		phase = "other"
-+	}
-+	if outcome != "completion_event" && outcome != "terminal_event" && outcome != "incomplete_event" && outcome != "read_error" && outcome != "eof" {
-+		outcome = "other"
-+	}
-+	now := time.Now()
-+	// These intervals include downstream work and backpressure. They do not
-+	// measure upstream network silence; the clock starts after response headers.
-+	message := fmt.Sprintf("codex stream observation: phase=%s outcome=%s last_event=%s prior_event=%s data_items=%d elapsed_ms=%d since_read_ms=%d event_gap_ms=%d max_read_gap_ms=%d read_error=%s",
-+		phase, outcome, d.last, d.previous, d.items, codexObservationMillis(d.started, now), codexObservationMillis(d.lastRead, now), d.eventGapMillis, d.maxReadGapMillis, codexObservationReadError(readErr))
-+	entry := log.NewEntry(log.StandardLogger())
-+	if tag := codexObservationRequestTag(ctx); tag != "" {
-+		entry = entry.WithField("request_id", tag)
-+	}
-+	if outcome == "completion_event" {
-+		entry.Info(message)
-+	} else {
-+		entry.Warn(message)
-+	}
-+}
 diff --git a/internal/runtime/executor/codex_stream_observation_test.go b/internal/runtime/executor/codex_stream_observation_test.go
 new file mode 100644
-index 0000000..2574d89
+index 0000000..bc8a46c
 --- /dev/null
 +++ b/internal/runtime/executor/codex_stream_observation_test.go
-@@ -0,0 +1,311 @@
+@@ -0,0 +1,303 @@
 +package executor
 +
 +import (
 +	"context"
-+	"errors"
 +	"fmt"
 +	"io"
 +	"net/http"
@@ -347,45 +216,6 @@ index 0000000..2574d89
 +	h.mu.Lock()
 +	defer h.mu.Unlock()
 +	return append([]*log.Entry(nil), h.entries...)
-+}
-+
-+func TestBridgeStreamObservationRedactsUntrustedInputs(t *testing.T) {
-+	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
-+	hook := &observationHook{}
-+	logger := log.StandardLogger()
-+	old := logger.ReplaceHooks(make(log.LevelHooks))
-+	defer logger.ReplaceHooks(old)
-+	logger.AddHook(hook)
-+	d := newCodexStreamObservation()
-+	d.noteRead()
-+	d.observe([]byte(`data: {"type":{"secret":"` + observationSecret + `"}}`))
-+	d.emit(logging.WithRequestID(context.Background(), observationSecret), observationSecret, observationSecret, errors.New(observationSecret))
-+	entries := hook.snapshot()
-+	if len(entries) != 1 || strings.Contains(entries[0].Message, observationSecret) {
-+		t.Fatal("untrusted diagnostic inputs escaped the fixed vocabulary")
-+	}
-+	if !strings.Contains(entries[0].Message, "phase=other outcome=other last_event=other") ||
-+		!strings.Contains(entries[0].Message, "read_error=other") {
-+		t.Fatal("invalid values were not reduced to fixed categories")
-+	}
-+	if _, ok := entries[0].Data["request_id"]; ok {
-+		t.Fatal("an untrusted request ID was retained")
-+	}
-+	ctx, cancel := context.WithCancel(context.Background())
-+	cancel()
-+	d.emit(ctx, "stream", "eof", nil)
-+	if len(hook.snapshot()) != 1 {
-+		t.Fatal("a cancelled request emitted a failure observation")
-+	}
-+	d.expires = time.Now().Add(-time.Second)
-+	d.emit(context.Background(), "stream", "eof", nil)
-+	if len(hook.snapshot()) != 1 {
-+		t.Fatal("an expired observer emitted a failure observation")
-+	}
-+	if codexObservationMillis(time.Unix(10, 0), time.Unix(5, 0)) != 0 ||
-+		codexObservationMillis(time.Unix(0, 0), time.Unix(1000000, 0)) != (24*time.Hour).Milliseconds() {
-+		t.Fatal("duration bounds were not enforced")
-+	}
 +}
 +
 +func TestBridgeStreamObservationThroughFakeUpstream(t *testing.T) {
@@ -450,24 +280,6 @@ index 0000000..2574d89
 +	}
 +}
 +
-+func TestBridgeStreamObservationDisabledByDefault(t *testing.T) {
-+	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "")
-+	if newCodexStreamObservation() != nil {
-+		t.Fatal("observation enabled without explicit opt-in")
-+	}
-+	var disabled *codexStreamObservation
-+	disabled.noteRead()
-+	disabled.observe([]byte(`data: {"type":"error"}`))
-+	disabled.emit(context.Background(), "stream", "eof", nil)
-+	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
-+	oldExpiry := codexStreamObservationExpiry
-+	codexStreamObservationExpiry = time.Now().Add(-time.Second)
-+	defer func() { codexStreamObservationExpiry = oldExpiry }()
-+	if newCodexStreamObservation() != nil {
-+		t.Fatal("observation enabled after the one-hour process window")
-+	}
-+}
-+
 +func TestBridgeStreamObservationCompletionGapControl(t *testing.T) {
 +	for _, buffered := range []bool{false, true} {
 +		t.Run(map[bool]string{false: "stream", true: "bootstrap"}[buffered], func(t *testing.T) {
@@ -515,32 +327,6 @@ index 0000000..2574d89
 +				t.Fatal("healthy control lost its bounded read-gap measurement or level")
 +			}
 +		})
-+	}
-+}
-+
-+func TestBridgeStreamObservationPriorEventAndGapAreBounded(t *testing.T) {
-+	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
-+	hook := &observationHook{}
-+	logger := log.StandardLogger()
-+	old := logger.ReplaceHooks(make(log.LevelHooks))
-+	defer logger.ReplaceHooks(old)
-+	logger.AddHook(hook)
-+	d := newCodexStreamObservation()
-+	d.noteRead()
-+	d.observe([]byte(`data: {"type":"response.metadata","metadata":{"private":"` + observationSecret + `"}}`))
-+	d.lastRead = time.Now().Add(-4 * time.Second)
-+	d.lastEventAt = time.Now().Add(-3 * time.Second)
-+	d.noteRead()
-+	d.observe([]byte(`data: {"type":"error","error":{"message":"` + observationSecret + `"}}`))
-+	d.emit(context.Background(), "stream", "terminal_event", nil)
-+	entries := hook.snapshot()
-+	if len(entries) != 1 || strings.Contains(entries[0].Message, observationSecret) ||
-+		!strings.Contains(entries[0].Message, "last_event=error prior_event=response.metadata") {
-+		t.Fatal("event history was not limited to fixed categories")
-+	}
-+	if d.eventGapMillis < 2900 || d.eventGapMillis > (24*time.Hour).Milliseconds() ||
-+		d.maxReadGapMillis < 3900 || d.maxReadGapMillis > (24*time.Hour).Milliseconds() {
-+		t.Fatal("bounded synthetic event and read gaps were not captured")
 +	}
 +}
 +
@@ -597,6 +383,464 @@ index 0000000..2574d89
 +	}
 +}
 +
++func TestBridgeStreamObservationBufferedExecutionPreservesResults(t *testing.T) {
++	created := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"fixture\"}}\n\n"
++	cases := []struct {
++		name, payload, outcome, last, failure string
++		broken                                bool
++	}{
++		{"eof", created, "eof", "response.created", "none", false},
++		{"read-error", created, "read_error", "response.created", "none", true},
++		{"overload", created + `data: {"type":"response.failed","response":{"error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"` + observationSecret + `"}}}` + "\n\n", "terminal_event", "response.failed", "reported_overload", false},
++		{"unknown-error", created + `data: {"type":"error","error":{"type":"server_error","code":"` + observationSecret + `","message":"` + observationSecret + `"}}` + "\n\n", "terminal_event", "error", "other", false},
++		{"completed", created + `data: {"type":"response.completed","response":{"id":"fixture","status":"completed","output":[]}}` + "\n\n", "completion_event", "response.completed", "none", false},
++		{"incomplete", created + `data: {"type":"response.incomplete","response":{"id":"fixture","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}}` + "\n\n", "incomplete_event", "response.incomplete", "none", false},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			var baseline []byte
++			var baselineError string
++			for _, flag := range []string{"0", "1"} {
++				t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", flag)
++				hook := &observationHook{}
++				logger := log.StandardLogger()
++				old := logger.ReplaceHooks(make(log.LevelHooks))
++				logger.AddHook(hook)
++				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
++					w.Header().Set("Content-Type", "text/event-stream")
++					if tc.broken {
++						w.Header().Set("Content-Length", fmt.Sprint(len(tc.payload)+16))
++					}
++					w.WriteHeader(http.StatusOK)
++					w.(http.Flusher).Flush()
++					time.Sleep(40 * time.Millisecond)
++					_, _ = io.WriteString(w, tc.payload)
++				}))
++				executor := NewCodexExecutor(&config.Config{})
++				auth := &cliproxyauth.Auth{Attributes: map[string]string{"base_url": server.URL, "api_key": "fixture"}}
++				ctx := logging.WithRequestID(context.Background(), "00000000-0000-4000-8000-abcdef012345")
++				response, err := executor.Execute(ctx, auth, cliproxyexecutor.Request{
++					Model: "gpt-5.5", Payload: []byte(`{"model":"gpt-5.5","input":"fixture"}`),
++				}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FromString("openai-response")})
++				server.Close()
++				logger.ReplaceHooks(old)
++				errorText := ""
++				if err != nil {
++					errorText = err.Error()
++				}
++				if flag == "0" {
++					baseline, baselineError = response.Payload, errorText
++					if len(hook.snapshot()) != 0 {
++						t.Fatal("buffered observation enabled without opt-in")
++					}
++					continue
++				}
++				if !reflect.DeepEqual(response.Payload, baseline) || errorText != baselineError {
++					t.Fatal("buffered diagnostics changed response bytes or error semantics")
++				}
++				entries := hook.snapshot()
++				if len(entries) != 1 {
++					t.Fatal("buffered execution did not produce exactly one terminal observation")
++				}
++				entry := entries[0]
++				for _, field := range []string{"phase=buffered", "outcome=" + tc.outcome, "last_event=" + tc.last, "failure_kind=" + tc.failure} {
++					if !strings.Contains(entry.Message, field) {
++						t.Fatal("buffered observation lost an expected fixed category")
++					}
++				}
++				for _, forbidden := range []string{observationSecret, "prior_event=", "event_gap_ms=", "max_read_gap_ms=", "since_read_ms="} {
++					if strings.Contains(entry.Message, forbidden) {
++						t.Fatal("buffered observation exposed content or invented timing")
++					}
++				}
++				var elapsed int64
++				for _, field := range strings.Fields(entry.Message) {
++					if strings.HasPrefix(field, "elapsed_ms=") {
++						_, _ = fmt.Sscanf(field, "elapsed_ms=%d", &elapsed)
++					}
++				}
++				if elapsed < 20 || entry.Data["request_id"] != "ef012345" {
++					t.Fatal("buffered observation lost its read duration or short tag")
++				}
++				wantLevel := log.WarnLevel
++				if tc.outcome == "completion_event" {
++					wantLevel = log.InfoLevel
++				}
++				if entry.Level != wantLevel {
++					t.Fatal("buffered terminal observation changed severity")
++				}
++			}
++		})
++	}
++}
+diff --git a/internal/runtime/executor/helps/codex_stream_observation.go b/internal/runtime/executor/helps/codex_stream_observation.go
+new file mode 100644
+index 0000000..498d631
+--- /dev/null
++++ b/internal/runtime/executor/helps/codex_stream_observation.go
+@@ -0,0 +1,234 @@
++package helps
++
++// A disabled-by-default, metadata-only observation for an incomplete stream.
++// It never changes a request, stream, error, retry, or credential selection.
++
++import (
++	"bytes"
++	"context"
++	"errors"
++	"fmt"
++	"io"
++	"net"
++	"os"
++	"strconv"
++	"strings"
++	"time"
++
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
++	log "github.com/sirupsen/logrus"
++	"github.com/tidwall/gjson"
++)
++
++// CodexStreamObservation retains only fixed categories and bounded timing metadata.
++type CodexStreamObservation struct {
++	started          time.Time
++	expires          time.Time
++	lastRead         time.Time
++	lastEventAt      time.Time
++	items            uint32
++	last             string
++	failureKind      string
++	previous         string
++	eventGapMillis   int64
++	maxReadGapMillis int64
++}
++
++// The window is explicit, finite, and fixed at process startup. Invalid input
++// disables observation rather than extending its lifetime. No raw value is logged.
++func codexObservationWindow(raw string) (time.Duration, bool) {
++	if raw == "" {
++		return time.Hour, true
++	}
++	seconds, err := strconv.Atoi(raw)
++	if err != nil || seconds < 1 || seconds > 86400 || strconv.Itoa(seconds) != raw {
++		return 0, false
++	}
++	return time.Duration(seconds) * time.Second, true
++}
++
++var codexStreamObservationExpiry = func() time.Time {
++	window, ok := codexObservationWindow(os.Getenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS"))
++	if !ok {
++		return time.Time{}
++	}
++	// The monotonic portion makes expiry independent of wall-clock jumps.
++	return time.Now().Add(window)
++}()
++
++// NewCodexStreamObservation returns nil unless the finite observation window is enabled.
++func NewCodexStreamObservation() *CodexStreamObservation {
++	now := time.Now()
++	if os.Getenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS") != "1" || !now.Before(codexStreamObservationExpiry) {
++		return nil
++	}
++	return &CodexStreamObservation{started: now, expires: codexStreamObservationExpiry, lastRead: now, lastEventAt: now, last: "none", previous: "none", failureKind: "none"}
++}
++
++// NoteRead records a read callback. Callbacks and observations are sequential, including the
++// bootstrap-to-stream goroutine handoff. No frame or request bytes are stored.
++func (d *CodexStreamObservation) NoteRead() {
++	if d != nil {
++		now := time.Now()
++		if gap := codexObservationMillis(d.lastRead, now); gap > d.maxReadGapMillis {
++			d.maxReadGapMillis = gap
++		}
++		d.lastRead = now
++	}
++}
++
++// Observe classifies a line without retaining its contents.
++func (d *CodexStreamObservation) Observe(line []byte) {
++	if d == nil || !bytes.HasPrefix(line, codexSSEDataPrefix) {
++		return
++	}
++	if d.items < 1_000_000 {
++		d.items++
++	}
++	now := time.Now()
++	d.eventGapMillis = codexObservationMillis(d.lastEventAt, now)
++	d.lastEventAt = now
++	d.previous = d.last
++	data := bytes.TrimSpace(line[len(codexSSEDataPrefix):])
++	d.failureKind = "none"
++	value := gjson.GetBytes(data, "type")
++	if value.Type != gjson.String {
++		d.last = "other"
++		return
++	}
++	if value.String() == "error" || value.String() == "response.failed" {
++		d.failureKind = codexObservationFailureKind(data)
++	}
++	switch value.String() {
++	case "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done",
++		"response.output_text.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_part.added",
++		"response.function_call_arguments.delta", "response.completed", "response.done", "response.incomplete", "response.failed",
++		"error", "codex.rate_limits", "codex.response.metadata", "response.metadata", "keepalive", "ping":
++		// Retain a small owned enum string, never a view into a response frame.
++		d.last = strings.Clone(value.String())
++	default:
++		d.last = "other"
++	}
++}
++
++func codexObservationReadError(err error) string {
++	switch {
++	case err == nil:
++		return "none"
++	case errors.Is(err, io.ErrUnexpectedEOF):
++		return "unexpected_eof"
++	case errors.Is(err, context.Canceled):
++		return "cancelled"
++	case errors.Is(err, context.DeadlineExceeded):
++		return "timeout"
++	}
++	var network net.Error
++	if errors.As(err, &network) && network.Timeout() {
++		return "timeout"
++	}
++	return "other"
++}
++
++func codexObservationMillis(start, now time.Time) int64 {
++	value := now.Sub(start)
++	if value < 0 {
++		return 0
++	}
++	if value > 24*time.Hour {
++		value = 24 * time.Hour
++	}
++	return value.Milliseconds()
++}
++
++// Only an eight-character suffix of a canonical local UUID may be logged.
++func codexObservationRequestTag(ctx context.Context) string {
++	id := logging.GetRequestID(ctx)
++	if len(id) != 36 {
++		return ""
++	}
++	for i := 0; i < len(id); i++ {
++		if i == 8 || i == 13 || i == 18 || i == 23 {
++			if id[i] != '-' {
++				return ""
++			}
++			continue
++		}
++		if !(id[i] >= '0' && id[i] <= '9' || id[i] >= 'a' && id[i] <= 'f') {
++			return ""
++		}
++	}
++	return id[28:]
++}
++
++// Emit writes fixed metadata and omits gap timings for post-buffered parsing.
++func (d *CodexStreamObservation) Emit(ctx context.Context, phase, outcome string, readErr error) {
++	if d == nil || ctx == nil || ctx.Err() != nil || !time.Now().Before(d.expires) {
++		return
++	}
++	if phase != "bootstrap" && phase != "stream" && phase != "buffered" {
++		phase = "other"
++	}
++	if outcome != "completion_event" && outcome != "terminal_event" && outcome != "incomplete_event" && outcome != "read_error" && outcome != "eof" {
++		outcome = "other"
++	}
++	now := time.Now()
++	// These intervals include downstream work and backpressure. They do not
++	// measure upstream network silence; the clock starts after response headers.
++	message := fmt.Sprintf("codex stream observation: phase=%s outcome=%s last_event=%s prior_event=%s data_items=%d elapsed_ms=%d since_read_ms=%d event_gap_ms=%d max_read_gap_ms=%d read_error=%s",
++		phase, outcome, d.last, d.previous, d.items, codexObservationMillis(d.started, now), codexObservationMillis(d.lastRead, now), d.eventGapMillis, d.maxReadGapMillis, codexObservationReadError(readErr))
++	if phase == "buffered" {
++		// Events were parsed after ReadAll. Do not invent event/read-gap timings.
++		message = fmt.Sprintf("codex stream observation: phase=buffered outcome=%s last_event=%s data_items=%d elapsed_ms=%d read_error=%s",
++			outcome, d.last, d.items, codexObservationMillis(d.started, now), codexObservationReadError(readErr))
++	}
++	message += " failure_kind=" + d.failureKind
++	entry := log.NewEntry(log.StandardLogger())
++	if tag := codexObservationRequestTag(ctx); tag != "" {
++		entry = entry.WithField("request_id", tag)
++	}
++	if outcome == "completion_event" {
++		entry.Info(message)
++	} else {
++		entry.Warn(message)
++	}
++}
++
++const codexObservationIncompleteStreamMessage = "stream error: stream disconnected before completion: stream closed before response.completed"
++
++// Fixed reported categories aid diagnosis only. They never authorize a retry.
++func codexObservationFailureKind(data []byte) string {
++	event := gjson.GetBytes(data, "type").String()
++	path := "error"
++	if event == "response.failed" {
++		path = "response.error"
++	} else if event != "error" {
++		return "none"
++	}
++	object := gjson.GetBytes(data, path)
++	if !object.Exists() && event == "error" {
++		object = gjson.ParseBytes(data)
++	}
++	kind, code := object.Get("type"), object.Get("code")
++	if (kind.Exists() && kind.Type != gjson.String) || (code.Exists() && code.Type != gjson.String) {
++		return "other"
++	}
++	if object.Get("message").Type == gjson.String && object.Get("message").String() == codexObservationIncompleteStreamMessage {
++		return "reported_incomplete"
++	}
++	if code.String() == "server_is_overloaded" && (kind.String() == "service_unavailable_error" || kind.String() == "error" || !kind.Exists()) {
++		return "reported_overload"
++	}
++	if kind.String() == "rate_limit_error" || code.String() == "rate_limit_exceeded" {
++		return "reported_rate_limit"
++	}
++	if kind.String() == "authentication_error" || code.String() == "invalid_api_key" {
++		return "reported_auth"
++	}
++	if code.String() == "context_length_exceeded" {
++		return "reported_context_limit"
++	}
++	if code.String() == "content_filter" {
++		return "reported_content_filter"
++	}
++	return "other"
++}
+diff --git a/internal/runtime/executor/helps/codex_stream_observation_test.go b/internal/runtime/executor/helps/codex_stream_observation_test.go
+new file mode 100644
+index 0000000..261ffa9
+--- /dev/null
++++ b/internal/runtime/executor/helps/codex_stream_observation_test.go
+@@ -0,0 +1,158 @@
++package helps
++
++import (
++	"context"
++	"errors"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
++	log "github.com/sirupsen/logrus"
++)
++
++const observationSecret = "SYNTHETIC_PRIVATE_DO_NOT_RECORD"
++
++type observationHook struct {
++	mu      sync.Mutex
++	entries []*log.Entry
++}
++
++func (*observationHook) Levels() []log.Level { return log.AllLevels }
++func (h *observationHook) Fire(entry *log.Entry) error {
++	if strings.HasPrefix(entry.Message, "codex stream observation:") {
++		h.mu.Lock()
++		copy := entry.Dup()
++		copy.Message = entry.Message
++		copy.Level = entry.Level
++		h.entries = append(h.entries, copy)
++		h.mu.Unlock()
++	}
++	return nil
++}
++func (h *observationHook) snapshot() []*log.Entry {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	return append([]*log.Entry(nil), h.entries...)
++}
++
++func TestBridgeStreamObservationRedactsUntrustedInputs(t *testing.T) {
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++	hook := &observationHook{}
++	logger := log.StandardLogger()
++	old := logger.ReplaceHooks(make(log.LevelHooks))
++	defer logger.ReplaceHooks(old)
++	logger.AddHook(hook)
++	d := NewCodexStreamObservation()
++	d.NoteRead()
++	d.Observe([]byte(`data: {"type":{"secret":"` + observationSecret + `"}}`))
++	d.Emit(logging.WithRequestID(context.Background(), observationSecret), observationSecret, observationSecret, errors.New(observationSecret))
++	entries := hook.snapshot()
++	if len(entries) != 1 || strings.Contains(entries[0].Message, observationSecret) {
++		t.Fatal("untrusted diagnostic inputs escaped the fixed vocabulary")
++	}
++	if !strings.Contains(entries[0].Message, "phase=other outcome=other last_event=other") ||
++		!strings.Contains(entries[0].Message, "read_error=other") {
++		t.Fatal("invalid values were not reduced to fixed categories")
++	}
++	if _, ok := entries[0].Data["request_id"]; ok {
++		t.Fatal("an untrusted request ID was retained")
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	d.Emit(ctx, "stream", "eof", nil)
++	if len(hook.snapshot()) != 1 {
++		t.Fatal("a cancelled request emitted a failure observation")
++	}
++	d.expires = time.Now().Add(-time.Second)
++	d.Emit(context.Background(), "stream", "eof", nil)
++	if len(hook.snapshot()) != 1 {
++		t.Fatal("an expired observer emitted a failure observation")
++	}
++	if codexObservationMillis(time.Unix(10, 0), time.Unix(5, 0)) != 0 ||
++		codexObservationMillis(time.Unix(0, 0), time.Unix(1000000, 0)) != (24*time.Hour).Milliseconds() {
++		t.Fatal("duration bounds were not enforced")
++	}
++}
++
++func TestBridgeStreamObservationDisabledByDefault(t *testing.T) {
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "")
++	if NewCodexStreamObservation() != nil {
++		t.Fatal("observation enabled without explicit opt-in")
++	}
++	var disabled *CodexStreamObservation
++	disabled.NoteRead()
++	disabled.Observe([]byte(`data: {"type":"error"}`))
++	disabled.Emit(context.Background(), "stream", "eof", nil)
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++	oldExpiry := codexStreamObservationExpiry
++	codexStreamObservationExpiry = time.Now().Add(-time.Second)
++	defer func() { codexStreamObservationExpiry = oldExpiry }()
++	if NewCodexStreamObservation() != nil {
++		t.Fatal("observation enabled after the one-hour process window")
++	}
++}
++
++func TestBridgeStreamObservationPriorEventAndGapAreBounded(t *testing.T) {
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++	hook := &observationHook{}
++	logger := log.StandardLogger()
++	old := logger.ReplaceHooks(make(log.LevelHooks))
++	defer logger.ReplaceHooks(old)
++	logger.AddHook(hook)
++	d := NewCodexStreamObservation()
++	d.NoteRead()
++	d.Observe([]byte(`data: {"type":"response.metadata","metadata":{"private":"` + observationSecret + `"}}`))
++	d.lastRead = time.Now().Add(-4 * time.Second)
++	d.lastEventAt = time.Now().Add(-3 * time.Second)
++	d.NoteRead()
++	d.Observe([]byte(`data: {"type":"error","error":{"message":"` + observationSecret + `"}}`))
++	d.Emit(context.Background(), "stream", "terminal_event", nil)
++	entries := hook.snapshot()
++	if len(entries) != 1 || strings.Contains(entries[0].Message, observationSecret) ||
++		!strings.Contains(entries[0].Message, "last_event=error prior_event=response.metadata") {
++		t.Fatal("event history was not limited to fixed categories")
++	}
++	if d.eventGapMillis < 2900 || d.eventGapMillis > (24*time.Hour).Milliseconds() ||
++		d.maxReadGapMillis < 3900 || d.maxReadGapMillis > (24*time.Hour).Milliseconds() {
++		t.Fatal("bounded synthetic event and read gaps were not captured")
++	}
++}
++
 +func TestBridgeStreamObservationWindowBounded(t *testing.T) {
 +	for raw, seconds := range map[string]int{"": 3600, "1": 1, "3600": 3600, "86400": 86400} {
 +		window, ok := codexObservationWindow(raw)
@@ -608,6 +852,28 @@ index 0000000..2574d89
 +		window, ok := codexObservationWindow(raw)
 +		if ok || window != 0 {
 +			t.Fatal("invalid observation window did not fail closed")
++		}
++	}
++}
++
++func TestBridgeStreamObservationReportedFailureKinds(t *testing.T) {
++	cases := []struct{ data, want string }{
++		{`{"type":"response.created","error":{"code":"invalid_api_key"}}`, "none"},
++		{`{"type":"response.failed","response":{"error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"` + observationSecret + `"}}}`, "reported_overload"},
++		{`{"type":"error","code":"server_is_overloaded","message":"` + observationSecret + `"}`, "reported_overload"},
++		{`{"type":"error","error":{"type":"rate_limit_error"}}`, "reported_rate_limit"},
++		{`{"type":"error","code":"rate_limit_exceeded"}`, "reported_rate_limit"},
++		{`{"type":"error","error":{"type":"authentication_error"}}`, "reported_auth"},
++		{`{"type":"response.failed","response":{"error":{"code":"invalid_api_key"}}}`, "reported_auth"},
++		{`{"type":"error","error":{"code":"context_length_exceeded"}}`, "reported_context_limit"},
++		{`{"type":"error","error":{"code":"content_filter"}}`, "reported_content_filter"},
++		{`{"type":"error","error":{"message":"` + codexObservationIncompleteStreamMessage + `"}}`, "reported_incomplete"},
++		{`{"type":"error","error":{"code":"` + observationSecret + `","message":"` + observationSecret + `"}}`, "other"},
++		{`{"type":"error","error":{"code":{"private":"` + observationSecret + `"}}}`, "other"},
++	}
++	for _, tc := range cases {
++		if got := codexObservationFailureKind([]byte(tc.data)); got != tc.want || strings.Contains(got, observationSecret) {
++			t.Fatal("reported error classification left its fixed vocabulary")
 +		}
 +	}
 +}

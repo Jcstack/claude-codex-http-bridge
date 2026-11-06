@@ -33,12 +33,19 @@ STREAM_OBSERVATION_EVENTS = frozenset({"none", "other", "response.created", "res
     "response.reasoning_summary_text.delta", "response.reasoning_summary_part.added",
     "response.function_call_arguments.delta", "response.completed", "response.done", "response.incomplete", "response.failed",
     "error", "codex.rate_limits", "codex.response.metadata", "response.metadata", "keepalive", "ping"})
+STREAM_FAILURE_KINDS = frozenset({"none", "other", "reported_incomplete", "reported_overload",
+    "reported_rate_limit", "reported_auth", "reported_context_limit", "reported_content_filter"})
 STREAM_OBSERVATION = re.compile(
     r"codex stream observation: phase=(bootstrap|stream|other) "
     r"outcome=(completion_event|terminal_event|incomplete_event|read_error|eof|other) "
     r"last_event=([a-z0-9_.-]{1,64}) (?:prior_event=([a-z0-9_.-]{1,64}) )?data_items=(\d{1,7}) "
     r"elapsed_ms=(\d{1,8}) since_read_ms=(\d{1,8}) (?:event_gap_ms=(\d{1,8}) max_read_gap_ms=(\d{1,8}) )?"
-    r"read_error=(none|unexpected_eof|cancelled|timeout|other)$")
+    r"read_error=(none|unexpected_eof|cancelled|timeout|other)(?: failure_kind=([a-z_]{1,40}))?$")
+BUFFERED_OBSERVATION = re.compile(
+    r"codex stream observation: phase=buffered "
+    r"outcome=(completion_event|terminal_event|incomplete_event|read_error|eof|other) "
+    r"last_event=([a-z0-9_.-]{1,64}) data_items=(\d{1,7}) elapsed_ms=(\d{1,8}) "
+    r"read_error=(none|unexpected_eof|cancelled|timeout|other) failure_kind=([a-z_]{1,40})$")
 
 
 def endpoint_label(raw: str) -> str:
@@ -152,23 +159,31 @@ def incomplete_stream_shape(line: str) -> str:
 def stream_observation(line: str) -> dict | None:
     """Read the experimental observer's fixed vocabulary without returning raw input."""
     match = STREAM_OBSERVATION.search(line.rstrip("\r\n"))
-    if not match:
-        return None
-    phase, outcome, event, prior, items, elapsed, since_read, event_gap, max_read_gap, read_error = match.groups()
-    items, elapsed, since_read = map(int, (items, elapsed, since_read))
+    if match:
+        phase, outcome, event, prior, items, elapsed, since_read, event_gap, max_read_gap, read_error, failure_kind = match.groups()
+        since_read = int(since_read)
+    else:
+        match = BUFFERED_OBSERVATION.search(line.rstrip("\r\n"))
+        if not match:
+            return None
+        outcome, event, items, elapsed, read_error, failure_kind = match.groups()
+        phase, prior, since_read, event_gap, max_read_gap = "buffered", None, None, None, None
+    items, elapsed = map(int, (items, elapsed))
     if (prior is None) != (event_gap is None):
         return None
     event_gap = int(event_gap) if event_gap is not None else None
     max_read_gap = int(max_read_gap) if max_read_gap is not None else None
-    timings = (elapsed, since_read) + ((event_gap, max_read_gap) if event_gap is not None else ())
+    timings = tuple(value for value in (elapsed, since_read, event_gap, max_read_gap) if value is not None)
     if (event not in STREAM_OBSERVATION_EVENTS or (prior is not None and prior not in STREAM_OBSERVATION_EVENTS) or
+            (failure_kind is not None and failure_kind not in STREAM_FAILURE_KINDS) or
             items > 1_000_000 or any(value > 86_400_000 for value in timings)):
         return None
-    if outcome == "completion_event" and (event not in ("response.completed", "response.done") or read_error != "none"):
+    if outcome == "completion_event" and (event not in ("response.completed", "response.done") or
+                                          read_error != "none" or failure_kind not in (None, "none")):
         return None
     return {"phase": phase, "outcome": outcome, "last_event": event, "prior_event": prior, "data_items": items,
             "elapsed_ms": elapsed, "since_read_ms": since_read, "event_gap_ms": event_gap,
-            "max_read_gap_ms": max_read_gap, "read_error": read_error}
+            "max_read_gap_ms": max_read_gap, "read_error": read_error, "failure_kind": failure_kind}
 
 
 def proxy_summary(path: Path, since: datetime) -> dict:
