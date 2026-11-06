@@ -60,7 +60,8 @@ class GapHandler(Handler):
             self.wfile = original
 
 
-def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, observe: bool, gap_check: bool = False):
+def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, observe: bool,
+          gap_check: bool = False, window_seconds: int = 3600, expired_window: bool = False):
     with tempfile.TemporaryDirectory(prefix="bridge-managed-stream-policy-") as temporary:
         root = Path(temporary)
         runtime_bundle.private_dir(root)
@@ -95,9 +96,12 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, ob
                     runtime_bundle.pack(backend_binary, ingress_binary, bundle)
                     runtime_bundle.activate(root, bundle)
                 with patch.object(launcher, "ROOT", root), patch.dict(os.environ,
-                        {"CLAUDE_CODEX_STREAM_DIAGNOSTICS": "1" if observe else "0"}):
+                        {"CLAUDE_CODEX_STREAM_DIAGNOSTICS": "1" if observe else "0",
+                         "CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS": "1" if expired_window else str(window_seconds)}):
                     value = rolling_runtime.ensure(root, original_runtime, state, {MODEL: SPEC})
                     try:
+                        if expired_window:
+                            time.sleep(1.2)
                         runtime = root / "runtime-managed"
                         key = rolling_runtime.private_key(runtime / "front-key")
                         context = ssl.create_default_context(cafile=str(runtime / "ca.pem"))
@@ -138,14 +142,14 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, ob
                         if any(str(root) in line or key in line or "SYNTHETIC" in line or "fixture-upstream" in line
                                for line in observation_lines):
                             raise AssertionError("Managed observation exposed synthetic private input")
-                        if observe and not any(item["outcome"] == "terminal_event" for item in observations):
+                        if observe and not expired_window and not any(item["outcome"] == "terminal_event" for item in observations):
                             raise AssertionError("The opted-in managed observer did not record the synthetic failure")
-                        if observe and not any(item["outcome"] == "completion_event" for item in observations):
+                        if observe and not expired_window and not any(item["outcome"] == "completion_event" for item in observations):
                             raise AssertionError("The opted-in managed observer did not record the healthy control")
                         if gap_check and not any(item["outcome"] == "terminal_event" and
                                                  (item.get("max_read_gap_ms") or 0) >= 150 for item in observations):
                             raise AssertionError("The observer did not retain the synthetic read gap")
-                        if not observe and observations:
+                        if (not observe or expired_window) and observations:
                             raise AssertionError("The disabled managed observer recorded a failure")
                         return rows
                     finally:
@@ -163,13 +167,19 @@ def main():
     parser.add_argument("ingress", type=Path)
     parser.add_argument("--observe", action="store_true", help="Enable bounded metadata in the disposable backend")
     parser.add_argument("--gap-check", action="store_true", help="Check a synthetic delay before EOF")
+    parser.add_argument("--window-seconds", type=int, default=3600)
+    parser.add_argument("--expired-window", action="store_true", help="Verify a one-second observer stops before requests")
     args = parser.parse_args()
     if args.gap_check and not args.observe:
         parser.error("--gap-check requires --observe")
+    if not 1 <= args.window_seconds <= 86400 or (args.expired_window and (not args.observe or args.gap_check)):
+        parser.error("Use 1–86400 seconds; --expired-window requires --observe without --gap-check")
     rows = check(args.origin.resolve(), args.backend.resolve(), args.ingress.resolve(),
-                 observe=args.observe, gap_check=args.gap_check)
+                 observe=args.observe, gap_check=args.gap_check, window_seconds=args.window_seconds,
+                 expired_window=args.expired_window)
     print(json.dumps({"mock_only": True, "actual_generated_managed_config": True,
                       "tls_ingress": True, "observer_enabled": args.observe,
+                      "expired_window_checked": args.expired_window,
                       "synthetic_gap_checked": args.gap_check, "requests": rows}))
 
 

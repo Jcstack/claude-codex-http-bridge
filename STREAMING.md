@@ -136,8 +136,8 @@ activation described below, neither was active in the managed backend.
 The observer is disabled by default. When explicitly
 enabled in a candidate backend, it logs only
 allowlisted event/outcome/error categories, the preceding event category,
-bounded timing intervals and a local request tag. It stops recording one hour
-after that backend process starts, even if it remains running; events ending
+bounded timing intervals and a local request tag. By default it stops recording
+one hour after that backend process starts, even if it remains running; events ending
 after the window are not recorded. The clock starts after
 response headers, and intervals include processing and backpressure; they are
 not measurements of upstream network silence. A [manual three-platform workflow](.github/workflows/forwarded-stream-observation.yml)
@@ -154,7 +154,7 @@ info level for `response.completed` and the legacy `response.done` event.
 Nonempty `response.incomplete` events retain the separate `incomplete_event`
 category. This describes the immediate upstream event, not successful client
 delivery, tool execution, or provider provenance. Failure observations remain
-at warning level. The same explicit opt-in and one-hour process lifetime apply.
+at warning level. The same explicit opt-in and default one-hour lifetime apply.
 
 The read-only diagnostics group maximum read gaps into fixed intervals by
 outcome, retaining aggregate controls beyond the twelve most recent details.
@@ -189,7 +189,7 @@ explicitly enabled. Read-only checks verified that the original service state,
 ingress process and port, front key, and selected account did not change. Real
 traffic then produced completion observations, including one access record of
 about 96 seconds with an observed maximum read gap of about 22 seconds. The
-observer expires after one hour; it does not retry requests or repair missing
+observer initially used the default one-hour expiry; it does not retry requests or repair missing
 events. The original origin and ingress were not replaced.
 
 Immediately before this activation, another real session failed after about
@@ -253,8 +253,29 @@ shell can request one bounded observation window for newly routed requests:
 CLAUDE_CODEX_STREAM_DIAGNOSTICS=1 claude-codex bridge reload
 ```
 
+For an intermittent problem, a reviewed revision also accepts an explicit,
+canonical integer window from 1 to 86,400 seconds. Unset uses 3,600 seconds.
+Invalid explicit values are rejected before a managed backend is started; the
+binary independently bounds its window. The choice affects only a newly
+started observed backend, never the ingress or an already-started request:
+
+```sh
+CLAUDE_CODEX_STREAM_DIAGNOSTICS=1 CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS=86400 claude-codex bridge reload
+```
+
+Recording stops automatically on expiry even if the process continues. This
+keeps a longer local incident window without requiring repeated reloads; only
+the same fixed metadata is recorded. No setting is added to login startup.
+Synthetic two-layer TLS cases cover both the explicit 24-hour window and a
+one-second window that has expired before the requests arrive. The latter must
+still forward both a failure and a healthy response without any observation.
+Source and runtime tests reject invalid, noncanonical and excessive values.
+
 For PowerShell, set `$env:CLAUDE_CODEX_STREAM_DIAGNOSTICS = '1'` before the
 reload and remove it afterward with `Remove-Item Env:CLAUDE_CODEX_STREAM_DIAGNOSTICS`.
+For the longer window, also set `$env:CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS = '86400'`
+and remove it afterward. Clearing the invoking shell's variables does not end
+the already-started process window; that process stops recording on its expiry.
 These commands do not enable the feature in an older runtime. A reload starts a
 new managed backend and relies on the existing draining mechanism; it does not
 replace the original Codex listener or capture an already-started request.

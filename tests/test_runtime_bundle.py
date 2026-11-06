@@ -150,6 +150,21 @@ class BundleTests(unittest.TestCase):
             rolling_runtime.start(root / "binary", [], root / "backend.log", observe_streams=True)
             self.assertEqual(spawn.call_args.kwargs["env"].get(flag), "1")
 
+    def test_stream_observation_window_is_explicit_bounded_and_backend_only(self):
+        flag = "CLAUDE_CODEX_STREAM_DIAGNOSTICS"
+        seconds = "CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS"
+        for window in ("1", "3600", "86400"):
+            with self.subTest(window=window), patch.dict(os.environ, {flag: "1", seconds: window}, clear=True):
+                self.assertNotIn(seconds, rolling_runtime.process_environment())
+                self.assertEqual(rolling_runtime.process_environment(observe_streams=True)[seconds], window)
+        for window in ("0", "86401", "0001", "+1", "-1", "1.5", " 60", "60\n", "PRIVATE_SECRET", "9" * 100):
+            with self.subTest(window=window), patch.dict(os.environ, {flag: "1", seconds: window}, clear=True):
+                self.assertNotIn(seconds, rolling_runtime.process_environment())
+                with self.assertRaisesRegex(RuntimeError, "integer from 1 to 86400"):
+                    rolling_runtime.process_environment(observe_streams=True)
+        with patch.dict(os.environ, {seconds: "86400"}, clear=True):
+            self.assertNotIn(seconds, rolling_runtime.process_environment(observe_streams=True))
+
     def test_real_managed_child_does_not_receive_shell_credentials(self):
         child = ("import json,os; print(json.dumps({"
                  "'secret_present': 'OPENAI_API_KEY' in os.environ, "

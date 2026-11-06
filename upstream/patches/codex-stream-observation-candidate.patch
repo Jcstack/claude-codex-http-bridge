@@ -114,10 +114,10 @@ index ba21463..44f9ed9 100644
  			emptyErr := statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before first payload"}
 diff --git a/internal/runtime/executor/codex_stream_observation.go b/internal/runtime/executor/codex_stream_observation.go
 new file mode 100644
-index 0000000..fedfca8
+index 0000000..7651c6b
 --- /dev/null
 +++ b/internal/runtime/executor/codex_stream_observation.go
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,176 @@
 +package executor
 +
 +// A disabled-by-default, metadata-only observation for an incomplete stream.
@@ -131,6 +131,7 @@ index 0000000..fedfca8
 +	"io"
 +	"net"
 +	"os"
++	"strconv"
 +	"time"
 +
 +	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
@@ -150,9 +151,27 @@ index 0000000..fedfca8
 +	maxReadGapMillis int64
 +}
 +
-+// An opted-in process stops recording after one hour even if it remains alive.
-+// The monotonic portion of time.Time makes this independent of wall-clock jumps.
-+var codexStreamObservationExpiry = time.Now().Add(time.Hour)
++// The window is explicit, finite, and fixed at process startup. Invalid input
++// disables observation rather than extending its lifetime. No raw value is logged.
++func codexObservationWindow(raw string) (time.Duration, bool) {
++	if raw == "" {
++		return time.Hour, true
++	}
++	seconds, err := strconv.Atoi(raw)
++	if err != nil || seconds < 1 || seconds > 86400 || strconv.Itoa(seconds) != raw {
++		return 0, false
++	}
++	return time.Duration(seconds) * time.Second, true
++}
++
++var codexStreamObservationExpiry = func() time.Time {
++	window, ok := codexObservationWindow(os.Getenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS"))
++	if !ok {
++		return time.Time{}
++	}
++	// The monotonic portion makes expiry independent of wall-clock jumps.
++	return time.Now().Add(window)
++}()
 +
 +func newCodexStreamObservation() *codexStreamObservation {
 +	now := time.Now()
@@ -277,10 +296,10 @@ index 0000000..fedfca8
 +}
 diff --git a/internal/runtime/executor/codex_stream_observation_test.go b/internal/runtime/executor/codex_stream_observation_test.go
 new file mode 100644
-index 0000000..9a7a58a
+index 0000000..2574d89
 --- /dev/null
 +++ b/internal/runtime/executor/codex_stream_observation_test.go
-@@ -0,0 +1,296 @@
+@@ -0,0 +1,311 @@
 +package executor
 +
 +import (
@@ -574,6 +593,21 @@ index 0000000..9a7a58a
 +			if !reflect.DeepEqual(outputs[0], outputs[1]) {
 +				t.Fatal("enabling observation changed synthetic stream output")
 +			}
++		}
++	}
++}
++
++func TestBridgeStreamObservationWindowBounded(t *testing.T) {
++	for raw, seconds := range map[string]int{"": 3600, "1": 1, "3600": 3600, "86400": 86400} {
++		window, ok := codexObservationWindow(raw)
++		if !ok || window != time.Duration(seconds)*time.Second {
++			t.Fatal("valid observation window was not retained")
++		}
++	}
++	for _, raw := range []string{"0", "86401", "0001", "+1", "-1", "1.5", " 60", "60\n", "PRIVATE_SECRET", strings.Repeat("9", 100)} {
++		window, ok := codexObservationWindow(raw)
++		if ok || window != 0 {
++			t.Fatal("invalid observation window did not fail closed")
 +		}
 +	}
 +}

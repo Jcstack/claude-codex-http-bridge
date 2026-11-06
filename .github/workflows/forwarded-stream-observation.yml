@@ -42,7 +42,7 @@ jobs:
           npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
           python tests/claude_fixture.py
       - name: Check private diagnostics parsing
-        run: python -m unittest tests.test_diagnostics tests.test_session_audit -q
+        run: python -m unittest tests.test_diagnostics tests.test_session_audit tests.test_runtime_bundle -q
       - name: Build independent pinned baseline, fix, and observer candidates
         shell: bash
         run: |
@@ -79,6 +79,8 @@ jobs:
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "fixed-${{ matrix.binary }}" bridge-ingress
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe
           python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --gap-check
+          python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --window-seconds 86400
+          python tests/probe_managed_stream_policy.py "baseline-${{ matrix.binary }}" "observed-${{ matrix.binary }}" bridge-ingress --observe --expired-window
           python tests/probe_response_resume_route.py "baseline-${{ matrix.binary }}"
           python tests/probe_response_resume_route.py "fixed-${{ matrix.binary }}"
           python tests/probe_opaque_reasoning_stream.py "baseline-${{ matrix.binary }}" "baseline-${{ matrix.binary }}"

@@ -44,6 +44,11 @@ def process_environment(*, observe_streams: bool = False) -> dict[str, str]:
     environment["no_proxy"] = "127.0.0.1,localhost"
     if observe_streams and os.environ.get("CLAUDE_CODEX_STREAM_DIAGNOSTICS") == "1":
         environment["CLAUDE_CODEX_STREAM_DIAGNOSTICS"] = "1"
+        window = os.environ.get("CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS")
+        if window is not None:
+            if not re.fullmatch(r"[1-9][0-9]{0,4}", window) or int(window) > 86_400:
+                raise RuntimeError("Stream diagnostic window must be an integer from 1 to 86400 seconds")
+            environment["CLAUDE_CODEX_STREAM_DIAGNOSTICS_SECONDS"] = window
     return environment
 
 
