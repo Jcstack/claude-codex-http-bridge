@@ -93,8 +93,23 @@ native budget only inside a disposable client. Local two-hop controls recovered
 after two consecutive reasoning-only EOFs with one owned write and retained
 result. A persistent-failure control with two permitted retries stopped after
 three requests, performed no write and preserved the compared request semantics.
-This checks both recovery and a finite stop condition. Cloud results remain a
-separate gate until recorded below.
+This checks both recovery and a finite stop condition. The
+[three-platform budget run](https://github.com/Jcstack/harnesslift/actions/runs/42271883858)
+passed. The production revision's
+[full source-and-install run](https://github.com/Jcstack/harnesslift/actions/runs/42268027982)
+also passed all eleven jobs. A larger candidate workflow is tracked separately;
+its initial Windows job timed out while preparing a fixture's NTFS permissions,
+before its contract checks, and must not be counted as a pass.
+
+An additional local headless case closes a complete synthetic text block with
+`response.output_text.done` and `response.content_part.done`, then injects EOF
+before response completion. The baseline stopped after one request with no
+write. Patched Sol/Sonnet and Astra/Opus mappings retained that text in the next
+request and completed the task with one write and its result. This is the
+harness's native continuation of committed text, not an identical-request
+replay. It does not demonstrate interactive continuation. The extended budget
+workflow checks this case separately; its result is independent of the earlier
+budget run.
 
 No retry settings were changed in running user sessions. The watchdog is not
 enabled automatically: its documented maximum-wait setting covers 429/529

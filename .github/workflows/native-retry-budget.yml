@@ -72,3 +72,9 @@ jobs:
           set -euo pipefail
           python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "${{ matrix.binary }}" --codex-managed-policy --case eof_reasoning_only --reasoning-failures 20 --client-retries 2 --require-failure --client-timeout 90 --file-output
           python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "${{ matrix.binary }}" --codex-managed-policy --fixture-model gpt-6-astra --fixture-behaves-as claude-opus-5-5 --case eof_reasoning_only --reasoning-failures 20 --client-retries 2 --require-failure --client-timeout 90 --file-output
+      - name: Retain a completed text block while the headless harness continues
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "${{ matrix.binary }}" --codex-managed-policy --case eof_text_only --client-retries 3 --require-recovery --client-timeout 90 --file-output
+          python tests/probe_claude_stream_safety.py --proxy-binary "${{ matrix.binary }}" --codex-executor --codex-origin-binary "${{ matrix.binary }}" --codex-managed-policy --fixture-model gpt-6-astra --fixture-behaves-as claude-opus-5-5 --case eof_text_only --client-retries 3 --require-recovery --client-timeout 90 --file-output

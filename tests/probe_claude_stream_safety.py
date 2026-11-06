@@ -26,6 +26,8 @@ from live_support import temporary_translator
 from codex_stream_fixture import temporary_codex_translator
 from diagnostics import proxy_summary, stream_observation
 
+PARTIAL_TEXT = "BRIDGE_PARTIAL_TEXT_FIXTURE"
+
 
 def result_hints(items):
     text = json.dumps(items).lower()
@@ -121,6 +123,8 @@ class Handler(BaseHTTPRequestHandler):
         count = len(self.server.requests)
         first = count == 1
         mode = self.server.mode.removeprefix("eof_").removeprefix("failed_").removeprefix("max_")
+        if count > 1 and PARTIAL_TEXT in json.dumps(body.get("input", [])):
+            self.server.text_continuation_seen = True
         response = {"id": f"resp_fixture_{count}", "model": body.get("model"), "status": "in_progress"}
         if mode == "reasoning_only" and count <= getattr(self.server, "reasoning_failures", 1):
             self.send_response(200)
@@ -146,7 +150,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         incomplete_retry = self.server.mode in ("max_partial_arguments", "max_arguments_done", "max_item_incomplete",
                                                 "max_item_incomplete_then_completed") and not first
-        if not incomplete_retry and (not results or not (self.server.work / "owned.txt").is_file()):
+        text_prefix = first and mode == "text_only"
+        if not text_prefix and not incomplete_retry and (not results or not (self.server.work / "owned.txt").is_file()):
             arguments = json.dumps({"file_path": (self.server.work / self.server.target_name).as_posix(), "content": "SYNTHETIC"})
             item = {"id": f"fc_fixture_{count}", "type": "function_call", "call_id": f"call_fixture_{count}",
                     "name": "Write", "arguments": arguments, "status": "completed"}
@@ -165,18 +170,25 @@ class Handler(BaseHTTPRequestHandler):
                       "item_incomplete_then_completed": 5,
                       "tool_item_done": 5, "response_completed": 6}[mode] if first else 6
         else:
+            text = PARTIAL_TEXT if text_prefix else "DONE"
             item = {"id": f"msg_fixture_{count}", "type": "message", "role": "assistant", "status": "completed",
-                    "content": [{"type": "output_text", "text": "DONE", "annotations": []}]}
+                    "content": [{"type": "output_text", "text": text, "annotations": []}]}
             events = [
                 {"type": "response.created", "response": response},
                 {"type": "response.output_item.added", "output_index": 0,
                  "item": {**item, "content": [], "status": "in_progress"}},
                 {"type": "response.content_part.added", "output_index": 0, "content_index": 0,
                  "part": {"type": "output_text", "text": ""}},
-                {"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "DONE"},
+                {"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": text},
                 {"type": "response.output_item.done", "output_index": 0, "item": item},
             ]
-            cutoff = 6
+            if text_prefix:
+                events[4:4] = [
+                    {"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": text},
+                    {"type": "response.content_part.done", "output_index": 0, "content_index": 0,
+                     "part": {"type": "output_text", "text": text, "annotations": []}},
+                ]
+            cutoff = len(events) if text_prefix else 6
         events.append({"type": "response.completed", "response": {**response, "status": "completed", "output": [item],
                       "usage": {"input_tokens": 1000, "output_tokens": 10}}})
         self.send_response(200)
@@ -259,7 +271,7 @@ def main():
              ("denied_target", "healthy", "partial_arguments", "tool_block", "stop_reason", "message_stop",
               "eof_partial_arguments", "eof_tool_block", "eof_stop_reason", "eof_message_stop"))
     if args.codex_observation or args.codex_executor:
-        modes += ("eof_reasoning_only",)
+        modes += ("eof_reasoning_only", "eof_text_only")
     if args.case:
         if any(case not in modes for case in args.case):
             parser.error("Unknown synthetic stream case")
@@ -411,6 +423,8 @@ else:
                     elif succeeded:
                         assert len(hooks) == 1 and target.read_text(encoding="utf-8") == "SYNTHETIC", "Client reported success without completing the owned write"
                         assert any(request["has_tool_result"] for request in server.requests[1:]), "Continuation lost the committed tool result"
+                        if mode == "eof_text_only":
+                            assert getattr(server, "text_continuation_seen", False), "Native continuation lost the completed partial text"
                         if mode == "eof_reasoning_only":
                             assert reasoning_semantics_preserved, "Reasoning recovery changed the model, effort, tools, input or cache key"
                             assert json.loads(server.request_semantics[0])["model"] == args.fixture_model, "Recovery silently substituted the requested model"
@@ -438,6 +452,7 @@ else:
                     "write_hook_count": len(hooks), "followup_has_tool_result": any(request["has_tool_result"] for request in server.requests[1:]),
                     "tool_write_at_most_once": True,
                     "reasoning_retry_semantics_preserved": reasoning_semantics_preserved,
+                    "completed_partial_text_retained": mode == "eof_text_only" and bool(getattr(server, "text_continuation_seen", False)),
                     "synthetic_reasoning_failures": args.reasoning_failures if mode == "eof_reasoning_only" else 0,
                     "explicit_native_retry_budget": args.client_retries,
                     "synthetic_reasoning_delay_seconds": args.reasoning_delay_seconds if mode == "eof_reasoning_only" else 0})

@@ -124,9 +124,22 @@ close the broader unattended-recovery acceptance item.
   recovered with a single write and retained result; persistent EOFs stopped
   after three attempts under a two-retry fixture budget, with no write and
   unchanged compared semantics. No user-session retry setting was changed.
-  The [three-platform budget gate](.github/workflows/native-retry-budget.yml)
-  is a separate check; overall deadlines, cancellation and provider effects
-  remain open.
+  The [three-platform budget gate](https://github.com/Jcstack/harnesslift/actions/runs/42271883858)
+  passed; overall deadlines, cancellation and provider effects remain open.
+- [x] Pass all eleven jobs of the production revision's
+  [source-and-install gate](https://github.com/Jcstack/harnesslift/actions/runs/42268027982).
+  The separate broad candidate run is not a complete pass: its first Windows
+  attempt timed out in PowerShell while preparing a test directory's NTFS ACL,
+  before its contract checks. Preserve that failure and require a separate
+  retest rather than attributing it to the error patch without evidence.
+- [x] Compare native headless continuation after a completed text block and
+  subsequent EOF. The old outer translator stopped without writing; patched
+  Sol/Sonnet and Astra/Opus mappings retained the completed text in the next
+  request, wrote once and retained the tool result. The synthetic stream must
+  close its text part before EOF; an unfinished block is a different boundary.
+  The extended [budget workflow](.github/workflows/native-retry-budget.yml)
+  adds this case. Its platform result and interactive continuation remain
+  separate gates.
 
 - [ ] Deliver safe unattended recovery for incomplete streams and structured
   overloads without disrupting running sessions. The credential-free
