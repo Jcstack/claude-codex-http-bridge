@@ -148,6 +148,27 @@ activation. The flag
 is accepted only for a newly created backend, so an existing in-flight stream
 cannot acquire observation retroactively.
 
+The 2026-11-06 observer revision also records `completion_event` controls at
+info level for `response.completed` and the legacy `response.done` event.
+Nonempty `response.incomplete` events retain the separate `incomplete_event`
+category. This describes the immediate upstream event, not successful client
+delivery, tool execution, or provider provenance. Failure observations remain
+at warning level. The same explicit opt-in and one-hour process lifetime apply.
+
+The read-only diagnostics group maximum read gaps into fixed intervals by
+outcome, retaining aggregate controls beyond the twelve most recent details.
+This allows comparing interrupted and completed streams without recording
+content or treating HTTP 200 as completion. A long read gap in a completed
+stream is a useful control against a universal idle-timeout claim; it does not
+rule out route-specific timeouts. Timing still includes local processing and
+backpressure. Older observations without a measured gap do not enter those
+buckets. Synthetic tests cover healthy delayed streams in both buffered and
+unbuffered modes, invalid completion labels, redaction, and retention of an
+earlier failure after twenty completion controls. An initial test failed
+because its log hook did not copy the log level; fixing the fixture retained
+the passing delay measurements. Cross-platform and live rollout results must
+be recorded separately before claiming activation.
+
 On 2026-11-05 the updated candidate was built locally on macOS from the pinned
 proxy source and reviewed patches with a checksum-verified Go toolchain. Its
 observer unit tests and generated managed TLS-ingress failure fixture passed.

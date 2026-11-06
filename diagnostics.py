@@ -31,11 +31,11 @@ ENDPOINTS = {"/v1/messages", "/v1/responses", "/v1/models", "/v1/messages/count_
 STREAM_OBSERVATION_EVENTS = frozenset({"none", "other", "response.created", "response.in_progress",
     "response.output_item.added", "response.output_item.done", "response.output_text.delta",
     "response.reasoning_summary_text.delta", "response.reasoning_summary_part.added",
-    "response.function_call_arguments.delta", "response.completed", "response.incomplete", "response.failed",
+    "response.function_call_arguments.delta", "response.completed", "response.done", "response.incomplete", "response.failed",
     "error", "codex.rate_limits", "codex.response.metadata", "response.metadata", "keepalive", "ping"})
 STREAM_OBSERVATION = re.compile(
     r"codex stream observation: phase=(bootstrap|stream|other) "
-    r"outcome=(terminal_event|incomplete_event|read_error|eof|other) "
+    r"outcome=(completion_event|terminal_event|incomplete_event|read_error|eof|other) "
     r"last_event=([a-z0-9_.-]{1,64}) (?:prior_event=([a-z0-9_.-]{1,64}) )?data_items=(\d{1,7}) "
     r"elapsed_ms=(\d{1,8}) since_read_ms=(\d{1,8}) (?:event_gap_ms=(\d{1,8}) max_read_gap_ms=(\d{1,8}) )?"
     r"read_error=(none|unexpected_eof|cancelled|timeout|other)$")
@@ -164,6 +164,8 @@ def stream_observation(line: str) -> dict | None:
     if (event not in STREAM_OBSERVATION_EVENTS or (prior is not None and prior not in STREAM_OBSERVATION_EVENTS) or
             items > 1_000_000 or any(value > 86_400_000 for value in timings)):
         return None
+    if outcome == "completion_event" and (event not in ("response.completed", "response.done") or read_error != "none"):
+        return None
     return {"phase": phase, "outcome": outcome, "last_event": event, "prior_event": prior, "data_items": items,
             "elapsed_ms": elapsed, "since_read_ms": since_read, "event_gap_ms": event_gap,
             "max_read_gap_ms": max_read_gap, "read_error": read_error}
@@ -181,6 +183,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
     recent_inband = deque(maxlen=12)
     recent_preconnect = deque(maxlen=12)
     stream_observation_outcomes, recent_stream_observations = Counter(), deque(maxlen=12)
+    stream_read_gaps = {}
     latencies, slow, failed = [], [], []
     coverage = {}
     for line in lines(path, coverage):
@@ -207,6 +210,13 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             observation = stream_observation(line)
             if observation is not None:
                 stream_observation_outcomes[observation["outcome"]] += 1
+                gap = observation["max_read_gap_ms"]
+                if gap is not None:
+                    bucket = next((label for bound, label in (
+                        (1_000, "under_1s"), (10_000, "1_to_under_10s"),
+                        (30_000, "10_to_under_30s"), (60_000, "30_to_under_60s"))
+                        if gap < bound), "60s_or_more")
+                    stream_read_gaps.setdefault(observation["outcome"], Counter())[bucket] += 1
                 request = re.match(r'^\[[^]]+\]\s+\[([a-f0-9]{8})\]', line)
                 recent_stream_observations.append((request[1] if request else None, at, observation))
             if "failed to refresh antigravity version" in lower:
@@ -321,6 +331,8 @@ def proxy_summary(path: Path, since: datetime) -> dict:
                 "last_at": shape_last[category]} for category, count in shapes.items()},
             "recent_stream_failure_http": observations,
             "stream_termination_observations": {"outcome_mentions": dict(stream_observation_outcomes),
+                                                 "max_read_gap_buckets_by_outcome": {
+                                                     outcome: dict(buckets) for outcome, buckets in stream_read_gaps.items()},
                                                  "recent": stream_observations},
             "inference_requests": len(ordered),
             "latency_seconds": {"median": round(statistics.median(ordered), 3) if ordered else None,

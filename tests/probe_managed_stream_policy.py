@@ -140,6 +140,8 @@ def check(origin_binary: Path, backend_binary: Path, ingress_binary: Path, *, ob
                             raise AssertionError("Managed observation exposed synthetic private input")
                         if observe and not any(item["outcome"] == "terminal_event" for item in observations):
                             raise AssertionError("The opted-in managed observer did not record the synthetic failure")
+                        if observe and not any(item["outcome"] == "completion_event" for item in observations):
+                            raise AssertionError("The opted-in managed observer did not record the healthy control")
                         if gap_check and not any(item["outcome"] == "terminal_event" and
                                                  (item.get("max_read_gap_ms") or 0) >= 150 for item in observations):
                             raise AssertionError("The observer did not retain the synthetic read gap")

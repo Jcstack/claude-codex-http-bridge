@@ -13,6 +13,37 @@ import rolling_runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_completion_observations_are_controls_not_http_success(self):
+        line = ('codex stream observation: phase=stream outcome=completion_event '
+                'last_event=response.completed prior_event=response.output_text.delta '
+                'data_items=3 elapsed_ms=41000 since_read_ms=0 '
+                'event_gap_ms=40000 max_read_gap_ms=40000 read_error=none')
+        report = diagnostics.stream_observation(line)
+        self.assertEqual(report['outcome'], 'completion_event')
+        self.assertEqual(report['max_read_gap_ms'], 40000)
+        self.assertNotIn('http_status', report)
+        self.assertIsNotNone(diagnostics.stream_observation(line.replace('response.completed', 'response.done')))
+        self.assertIsNone(diagnostics.stream_observation(line.replace('response.completed', 'response.incomplete')))
+        self.assertIsNone(diagnostics.stream_observation(line.replace('read_error=none', 'read_error=timeout')))
+
+    def test_read_gap_comparison_retains_failures_after_recent_controls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'PRIVATE.log'
+            prefix = '[2026-01-02 12:00:00] [info] codex stream observation: phase=stream '
+            suffix = ('prior_event=response.created data_items=2 elapsed_ms=45000 '
+                      'since_read_ms=0 event_gap_ms=40000 max_read_gap_ms=40000 read_error=none\n')
+            path.write_text(prefix + 'outcome=eof last_event=response.created ' + suffix +
+                            (prefix + 'outcome=completion_event last_event=response.completed ' + suffix) * 20 +
+                            prefix + 'outcome=eof last_event=response.created '
+                            'data_items=1 elapsed_ms=1 since_read_ms=0 read_error=none\n', encoding='utf-8')
+            report = diagnostics.proxy_summary(path, datetime(2026, 1, 1, tzinfo=timezone.utc))
+            observed = report['stream_termination_observations']
+            self.assertEqual(observed['max_read_gap_buckets_by_outcome'], {
+                'eof': {'30_to_under_60s': 1}, 'completion_event': {'30_to_under_60s': 20}})
+            self.assertEqual(observed['outcome_mentions'], {'eof': 2, 'completion_event': 20})
+            self.assertEqual(len(observed['recent']), 12)
+            self.assertNotIn('PRIVATE', json.dumps(report))
+
     def test_stream_observer_accepts_old_and_new_metadata_without_partial_shapes(self):
         prefix = ('codex stream observation: phase=stream outcome=eof last_event=response.output_text.delta ')
         legacy = prefix + 'data_items=2 elapsed_ms=3000 since_read_ms=1000 read_error=none'

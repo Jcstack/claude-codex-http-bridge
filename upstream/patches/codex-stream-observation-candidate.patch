@@ -1,5 +1,5 @@
 diff --git a/internal/runtime/executor/codex_executor_stream.go b/internal/runtime/executor/codex_executor_stream.go
-index ba214635..a9379036 100644
+index ba21463..44f9ed9 100644
 --- a/internal/runtime/executor/codex_executor_stream.go
 +++ b/internal/runtime/executor/codex_executor_stream.go
 @@ -183,8 +183,10 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
@@ -37,7 +37,19 @@ index ba214635..a9379036 100644
  					closeBootstrapBody()
  					streamErr := newCodexEmptyIncompleteStreamError()
  					helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
-@@ -369,6 +374,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+@@ -300,6 +305,11 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+ 					collectCodexOutputItemDone(data, outputItemsByIndex, &outputItemsFallback)
+ 				case "response.completed", "response.incomplete", "response.done":
+ 					terminalSuccess = true
++					if eventType == "response.incomplete" {
++						observation.emit(ctx, "bootstrap", "incomplete_event", nil)
++					} else {
++						observation.emit(ctx, "bootstrap", "completion_event", nil)
++					}
+ 					data = normalizeCodexWebsocketCompletion(data)
+ 					if detail, ok := helps.ParseCodexUsage(data); ok {
+ 						reporter.Publish(ctx, detail)
+@@ -369,6 +379,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
  				if ctx.Err() != nil {
  					return nil, ctx.Err()
  				}
@@ -45,7 +57,7 @@ index ba214635..a9379036 100644
  				helps.RecordAPIResponseError(ctx, e.cfg, errScan)
  				reporter.PublishFailure(ctx, errScan)
  				return nil, errScan
-@@ -376,6 +382,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+@@ -376,6 +387,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
  			if ctx.Err() != nil {
  				return nil, ctx.Err()
  			}
@@ -53,7 +65,7 @@ index ba214635..a9379036 100644
  			if len(bufferedChunks) == 0 && len(initialChunks) == 0 {
  				emptyErr := statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before first payload"}
  				helps.RecordAPIResponseError(ctx, e.cfg, emptyErr)
-@@ -435,6 +442,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+@@ -435,6 +447,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
  		}()
  		for scanner.Scan() {
  			line := scanner.Bytes()
@@ -61,7 +73,7 @@ index ba214635..a9379036 100644
  			var translatedLine []byte
  			terminalSuccess := false
  
-@@ -447,6 +455,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+@@ -447,6 +460,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
  				translatedLine = append([]byte("data: "), data...)
  				eventType := gjson.GetBytes(data, "type").String()
  				if streamErr, terminalBody, ok := codexTerminalFailureErrWithCooling(data, e.modelLevelCooling()); ok {
@@ -69,7 +81,7 @@ index ba214635..a9379036 100644
  					if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
  						helps.RecordAPIResponseError(ctx, e.cfg, errClearReplay)
  						reporter.PublishFailure(ctx, errClearReplay)
-@@ -468,6 +477,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+@@ -468,6 +482,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
  					sawOutputDelta = true
  				}
  				if helps.IsCodexTerminalEmptyIncomplete(data, len(outputItemsByIndex)+len(outputItemsFallback), sawOutputDelta) {
@@ -77,7 +89,19 @@ index ba214635..a9379036 100644
  					streamErr := newCodexEmptyIncompleteStreamError()
  					helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
  					reporter.PublishFailure(ctx, streamErr)
-@@ -520,7 +530,10 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+@@ -482,6 +497,11 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
+ 					collectCodexOutputItemDone(data, outputItemsByIndex, &outputItemsFallback)
+ 				case "response.completed", "response.incomplete", "response.done":
+ 					terminalSuccess = true
++					if eventType == "response.incomplete" {
++						observation.emit(ctx, "stream", "incomplete_event", nil)
++					} else {
++						observation.emit(ctx, "stream", "completion_event", nil)
++					}
+ 					data = normalizeCodexWebsocketCompletion(data)
+ 					if detail, ok := helps.ParseCodexUsage(data); ok {
+ 						reporter.Publish(ctx, detail)
+@@ -520,7 +540,10 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
  			if ctx.Err() != nil {
  				return
  			}
@@ -90,10 +114,10 @@ index ba214635..a9379036 100644
  			emptyErr := statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before first payload"}
 diff --git a/internal/runtime/executor/codex_stream_observation.go b/internal/runtime/executor/codex_stream_observation.go
 new file mode 100644
-index 00000000..867a99bf
+index 0000000..fedfca8
 --- /dev/null
 +++ b/internal/runtime/executor/codex_stream_observation.go
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,157 @@
 +package executor
 +
 +// A disabled-by-default, metadata-only observation for an incomplete stream.
@@ -169,7 +193,7 @@ index 00000000..867a99bf
 +	switch value.String() {
 +	case "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done",
 +		"response.output_text.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_part.added",
-+		"response.function_call_arguments.delta", "response.completed", "response.incomplete", "response.failed",
++		"response.function_call_arguments.delta", "response.completed", "response.done", "response.incomplete", "response.failed",
 +		"error", "codex.rate_limits", "codex.response.metadata", "response.metadata", "keepalive", "ping":
 +		d.last = value.String()
 +	default:
@@ -233,7 +257,7 @@ index 00000000..867a99bf
 +	if phase != "bootstrap" && phase != "stream" {
 +		phase = "other"
 +	}
-+	if outcome != "terminal_event" && outcome != "incomplete_event" && outcome != "read_error" && outcome != "eof" {
++	if outcome != "completion_event" && outcome != "terminal_event" && outcome != "incomplete_event" && outcome != "read_error" && outcome != "eof" {
 +		outcome = "other"
 +	}
 +	now := time.Now()
@@ -245,19 +269,24 @@ index 00000000..867a99bf
 +	if tag := codexObservationRequestTag(ctx); tag != "" {
 +		entry = entry.WithField("request_id", tag)
 +	}
-+	entry.Warn(message)
++	if outcome == "completion_event" {
++		entry.Info(message)
++	} else {
++		entry.Warn(message)
++	}
 +}
 diff --git a/internal/runtime/executor/codex_stream_observation_test.go b/internal/runtime/executor/codex_stream_observation_test.go
 new file mode 100644
-index 00000000..b7f7458a
+index 0000000..9a7a58a
 --- /dev/null
 +++ b/internal/runtime/executor/codex_stream_observation_test.go
-@@ -0,0 +1,244 @@
+@@ -0,0 +1,296 @@
 +package executor
 +
 +import (
 +	"context"
 +	"errors"
++	"fmt"
 +	"io"
 +	"net/http"
 +	"net/http/httptest"
@@ -289,6 +318,7 @@ index 00000000..b7f7458a
 +		h.mu.Lock()
 +		copy := entry.Dup()
 +		copy.Message = entry.Message
++		copy.Level = entry.Level
 +		h.entries = append(h.entries, copy)
 +		h.mu.Unlock()
 +	}
@@ -349,7 +379,7 @@ index 00000000..b7f7458a
 +		{"metadata-eof", `data: {"type":"response.metadata","metadata":{"private":"` + observationSecret + `"}}` + "\n\n", "eof", "response.metadata", true},
 +		{"terminal", `data: {"type":"response.created","response":{"id":"fixture"}}` + "\n\n" +
 +			`data: {"type":"error","error":{"type":"server_error","code":"request_timeout","message":"` + observationSecret + `"}}` + "\n\n", "terminal_event", "error", true},
-+		{"complete", `data: {"type":"response.completed","response":{"id":"fixture","status":"completed","output":[]}}` + "\n\n", "", "", false},
++		{"complete", `data: {"type":"response.completed","response":{"id":"fixture","status":"completed","output":[]}}` + "\n\n", "completion_event", "response.completed", false},
 +	}
 +	for _, buffered := range []bool{false, true} {
 +		for _, tc := range cases {
@@ -416,6 +446,56 @@ index 00000000..b7f7458a
 +	defer func() { codexStreamObservationExpiry = oldExpiry }()
 +	if newCodexStreamObservation() != nil {
 +		t.Fatal("observation enabled after the one-hour process window")
++	}
++}
++
++func TestBridgeStreamObservationCompletionGapControl(t *testing.T) {
++	for _, buffered := range []bool{false, true} {
++		t.Run(map[bool]string{false: "stream", true: "bootstrap"}[buffered], func(t *testing.T) {
++			t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++			hook := &observationHook{}
++			logger := log.StandardLogger()
++			old := logger.ReplaceHooks(make(log.LevelHooks))
++			defer logger.ReplaceHooks(old)
++			logger.AddHook(hook)
++			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
++				w.Header().Set("Content-Type", "text/event-stream")
++				_, _ = io.WriteString(w, "data: {\"type\":\"response.created\",\"response\":{\"id\":\"fixture\"}}\n\n")
++				w.(http.Flusher).Flush()
++				time.Sleep(150 * time.Millisecond)
++				_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"fixture\",\"status\":\"completed\",\"output\":[]}}\n\n")
++			}))
++			defer server.Close()
++			cfg := &config.Config{}
++			cfg.Codex.StreamBootstrapBuffering = buffered
++			executor := NewCodexExecutor(cfg)
++			auth := &cliproxyauth.Auth{Attributes: map[string]string{"base_url": server.URL, "api_key": "fixture"}}
++			result, err := executor.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{
++				Model: "gpt-5.5", Payload: []byte(`{"model":"gpt-5.5","input":"fixture"}`),
++			}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FromString("openai-response"), Stream: true})
++			if err != nil || result == nil {
++				t.Fatal("healthy delayed control failed before streaming")
++			}
++			for chunk := range result.Chunks {
++				if chunk.Err != nil {
++					t.Fatal("healthy delayed control became an error")
++				}
++			}
++			entries := hook.snapshot()
++			if len(entries) != 1 || !strings.Contains(entries[0].Message, "outcome=completion_event") ||
++				!strings.Contains(entries[0].Message, "last_event=response.completed prior_event=response.created") {
++				t.Fatal("healthy delayed stream did not produce exactly one completion control")
++			}
++			var gap int64
++			for _, field := range strings.Fields(entries[0].Message) {
++				if strings.HasPrefix(field, "max_read_gap_ms=") {
++					_, _ = fmt.Sscanf(field, "max_read_gap_ms=%d", &gap)
++				}
++			}
++			if gap < 80 || entries[0].Level != log.InfoLevel {
++				t.Fatal("healthy control lost its bounded read-gap measurement or level")
++			}
++		})
 +	}
 +}
 +
