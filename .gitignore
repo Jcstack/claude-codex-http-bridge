@@ -144,6 +144,7 @@
 !upstream/patches/forwarded-incomplete-stream-candidate.patch
 !upstream/patches/claude-error-compat.patch
 !upstream/patches/retry-advice-candidate.patch
+!upstream/patches/codex-http-observation.patch
 !upstream/patches/claude-hud-v0.15-git-safety.patch
 !upstream/patches/claude-hud-v0.15-bun-node-fallback.patch
 !upstream/patches/claude-hud-v0.15-windows-fixture.patch
@@ -181,3 +182,4 @@
 !.github/workflows/native-retry-budget.yml
 !.github/workflows/retry-advice-cancellation.yml
 !.github/workflows/interactive-retry-cancel.yml
+!.github/workflows/request-phase-observation.yml

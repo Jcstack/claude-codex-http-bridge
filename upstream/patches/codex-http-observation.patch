@@ -1,0 +1,626 @@
+diff --git a/internal/runtime/executor/codex_executor_request.go b/internal/runtime/executor/codex_executor_request.go
+--- a/internal/runtime/executor/codex_executor_request.go
++++ b/internal/runtime/executor/codex_executor_request.go
+@@ -275,14 +275,17 @@
+ func doCodexRequest(client *http.Client, req *http.Request, upstreamBody []byte, prepareHeaders func(*http.Request), responseReady func(*http.Response)) (*http.Response, error) {
+ 	alignCodexContentEncoding(req)
+ 	compressed := req.Header.Get("Content-Encoding") == "zstd"
++	observation := helps.NewCodexHTTPObservation(req)
+ 	resp, errDo := client.Do(req)
++	observation.Returned(req.Context(), resp, errDo)
+ 	if errDo != nil {
+ 		return nil, errDo
+ 	}
+ 	if responseReady != nil {
+ 		responseReady(resp)
+ 	}
+-	if errDecode := decodeCodexUpstreamResponse(resp); errDecode != nil {
++	errDecode := observation.Decode(req.Context(), func() error { return decodeCodexUpstreamResponse(resp) })
++	if errDecode != nil {
+ 		return nil, errDecode
+ 	}
+ 	if !compressed || (resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnsupportedMediaType) {
+@@ -299,14 +302,17 @@
+ 	plainReq.Header.Del("Content-Encoding")
+ 	prepareHeaders(plainReq)
+ 	alignCodexContentEncoding(plainReq)
++	observation = helps.NewCodexHTTPObservation(plainReq)
+ 	resp, errDo = client.Do(plainReq)
++	observation.Returned(plainReq.Context(), resp, errDo)
+ 	if errDo != nil {
+ 		return nil, errDo
+ 	}
+ 	if responseReady != nil {
+ 		responseReady(resp)
+ 	}
+-	if errDecode := decodeCodexUpstreamResponse(resp); errDecode != nil {
++	errDecode = observation.Decode(plainReq.Context(), func() error { return decodeCodexUpstreamResponse(resp) })
++	if errDecode != nil {
+ 		return nil, errDecode
+ 	}
+ 	return resp, nil
+diff --git a/internal/runtime/executor/codex_http_observation_test.go b/internal/runtime/executor/codex_http_observation_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/runtime/executor/codex_http_observation_test.go
+@@ -0,0 +1,238 @@
++package executor
++
++import (
++	"bytes"
++	"compress/gzip"
++	"context"
++	"errors"
++	"io"
++	"net/http"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/klauspost/compress/zstd"
++	log "github.com/sirupsen/logrus"
++)
++
++type phaseObservationTransport func(*http.Request) (*http.Response, error)
++
++func (f phaseObservationTransport) RoundTrip(req *http.Request) (*http.Response, error) {
++	return f(req)
++}
++
++type phaseObservationHook struct {
++	mu      sync.Mutex
++	entries []*log.Entry
++}
++
++func (*phaseObservationHook) Levels() []log.Level { return log.AllLevels }
++func (h *phaseObservationHook) Fire(e *log.Entry) error {
++	if strings.HasPrefix(e.Message, "codex http observation:") {
++		h.mu.Lock()
++		copy := e.Dup()
++		copy.Message = e.Message
++		h.entries = append(h.entries, copy)
++		h.mu.Unlock()
++	}
++	return nil
++}
++func (h *phaseObservationHook) snapshot() []*log.Entry {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	return append([]*log.Entry(nil), h.entries...)
++}
++func capturePhaseObservations(t *testing.T) *phaseObservationHook {
++	t.Helper()
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++	h := &phaseObservationHook{}
++	logger := log.StandardLogger()
++	previous := logger.ReplaceHooks(make(log.LevelHooks))
++	t.Cleanup(func() { logger.ReplaceHooks(previous) })
++	logger.AddHook(h)
++	return h
++}
++
++type phaseObservationBody struct {
++	ctx     context.Context
++	entered chan struct{}
++	release chan struct{}
++	once    sync.Once
++	reader  io.Reader
++	closed  atomic.Int32
++}
++
++func (r *phaseObservationBody) Read(p []byte) (int, error) {
++	r.once.Do(func() { close(r.entered) })
++	select {
++	case <-r.ctx.Done():
++		return 0, r.ctx.Err()
++	case <-r.release:
++		return r.reader.Read(p)
++	}
++}
++func (r *phaseObservationBody) Close() error { r.closed.Add(1); return nil }
++
++func phaseObservationWait(t *testing.T, ch <-chan struct{}) {
++	t.Helper()
++	select {
++	case <-ch:
++	case <-time.After(5 * time.Second):
++		t.Fatal("owned HTTP observation fixture missed its synchronization boundary")
++	}
++}
++
++func TestBridgeHTTPObservationHeaderAndDecoderBoundaries(t *testing.T) {
++	for _, cancelDecode := range []bool{false, true} {
++		t.Run(map[bool]string{false: "finish", true: "cancel_decode"}[cancelDecode], func(t *testing.T) {
++			h := capturePhaseObservations(t)
++			ctx, cancel := context.WithCancel(context.Background())
++			defer cancel()
++			entered, headers := make(chan struct{}), make(chan struct{})
++			var compressed bytes.Buffer
++			writer := gzip.NewWriter(&compressed)
++			_, _ = writer.Write([]byte("synthetic response"))
++			_ = writer.Close()
++			body := &phaseObservationBody{ctx: ctx, entered: make(chan struct{}), release: make(chan struct{}), reader: bytes.NewReader(compressed.Bytes())}
++			var ready atomic.Int32
++			client := &http.Client{Transport: phaseObservationTransport(func(req *http.Request) (*http.Response, error) {
++				close(entered)
++				select {
++				case <-ctx.Done():
++					return nil, ctx.Err()
++				case <-headers:
++					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Encoding": {"gzip"}}, Body: body, Request: req}, nil
++				}
++			})}
++			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://example.invalid/v1/responses", bytes.NewReader([]byte(`{"synthetic":true}`)))
++			type result struct {
++				response *http.Response
++				err      error
++			}
++			finished := make(chan result, 1)
++			go func() {
++				response, err := doCodexRequest(client, req, nil, func(*http.Request) {}, func(*http.Response) { ready.Add(1) })
++				finished <- result{response, err}
++			}()
++			phaseObservationWait(t, entered)
++			if entries := h.snapshot(); len(entries) != 1 || !strings.Contains(entries[0].Message, "phase=dispatch") {
++				t.Fatal("request dispatch was not observable before headers")
++			}
++			close(headers)
++			phaseObservationWait(t, body.entered)
++			if entries := h.snapshot(); len(entries) != 2 || !strings.Contains(entries[1].Message, "phase=headers outcome=returned") || ready.Load() != 1 {
++				t.Fatal("header return was hidden behind decoder setup")
++			}
++			if cancelDecode {
++				cancel()
++			} else {
++				close(body.release)
++			}
++			select {
++			case r := <-finished:
++				if cancelDecode {
++					if !errors.Is(r.err, context.Canceled) || body.closed.Load() != 1 {
++						t.Fatal("decoder cancellation or native body cleanup changed")
++					}
++				} else {
++					if r.err != nil {
++						t.Fatal("owned decoder failed")
++					}
++					data, err := io.ReadAll(r.response.Body)
++					_ = r.response.Body.Close()
++					if err != nil || string(data) != "synthetic response" || body.closed.Load() != 1 {
++						t.Fatal("observation changed decoded bytes or body ownership")
++					}
++				}
++			case <-time.After(5 * time.Second):
++				t.Fatal("owned decoder did not return")
++			}
++			entries := h.snapshot()
++			if len(entries) != 3 || !strings.Contains(entries[2].Message, "phase=decode") {
++				t.Fatal("decoder result was not observed once")
++			}
++		})
++	}
++}
++
++func TestBridgeHTTPObservationCancelBeforeHeaders(t *testing.T) {
++	h := capturePhaseObservations(t)
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	entered := make(chan struct{})
++	client := &http.Client{Transport: phaseObservationTransport(func(*http.Request) (*http.Response, error) {
++		close(entered)
++		<-ctx.Done()
++		return nil, ctx.Err()
++	})}
++	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://example.invalid/v1/responses", nil)
++	finished := make(chan error, 1)
++	go func() { _, err := doCodexRequest(client, req, nil, func(*http.Request) {}, nil); finished <- err }()
++	phaseObservationWait(t, entered)
++	cancel()
++	select {
++	case err := <-finished:
++		if !errors.Is(err, context.Canceled) {
++			t.Fatal("pre-header cancellation changed")
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("pre-header cancellation did not return")
++	}
++	entries := h.snapshot()
++	if len(entries) != 2 || !strings.Contains(entries[1].Message, "phase=headers outcome=error") || !strings.Contains(entries[1].Message, "context_state=cancelled") {
++		t.Fatal("cancelled HTTP call was omitted or treated as a successful header return")
++	}
++}
++
++func TestBridgeHTTPObservationExistingCompressionFallback(t *testing.T) {
++	h := capturePhaseObservations(t)
++	plain := []byte(`{"input":"SYNTHETIC_PRIVATE_PHASE_PAYLOAD"}`)
++	encoder, err := zstd.NewWriter(nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	compressed := encoder.EncodeAll(plain, nil)
++	encoder.Close()
++	calls, prepared := 0, 0
++	client := &http.Client{Transport: phaseObservationTransport(func(req *http.Request) (*http.Response, error) {
++		calls++
++		data, err := io.ReadAll(req.Body)
++		_ = req.Body.Close()
++		if err != nil {
++			return nil, err
++		}
++		status := 415
++		if calls == 1 {
++			if !bytes.Equal(data, compressed) || req.Header.Get("Content-Encoding") != "zstd" {
++				t.Error("first attempt changed")
++			}
++		} else {
++			status = 200
++			if !bytes.Equal(data, plain) || req.Header.Get("Content-Encoding") != "" {
++				t.Error("existing plain fallback changed")
++			}
++		}
++		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("synthetic")), Request: req}, nil
++	})}
++	req, _ := http.NewRequest(http.MethodPost, "http://example.invalid/v1/responses", bytes.NewReader(compressed))
++	req.Header.Set("Content-Encoding", "zstd")
++	response, err := doCodexRequest(client, req, plain, func(*http.Request) { prepared++ }, nil)
++	if err != nil {
++		t.Fatal("owned compression fallback failed")
++	}
++	_ = response.Body.Close()
++	entries := h.snapshot()
++	if calls != 2 || prepared != 1 || len(entries) != 6 {
++		t.Fatal("observation changed the existing fallback attempt count")
++	}
++	for _, e := range entries {
++		if strings.Contains(e.Message, "SYNTHETIC_PRIVATE_PHASE_PAYLOAD") {
++			t.Fatal("request payload entered an observation")
++		}
++	}
++	if !strings.Contains(entries[1].Message, "status=415") || !strings.Contains(entries[4].Message, "status=200") {
++		t.Fatal("compression attempts were not observed separately")
++	}
++}
+diff --git a/internal/runtime/executor/helps/codex_http_observation.go b/internal/runtime/executor/helps/codex_http_observation.go
+new file mode 100644
+--- /dev/null
++++ b/internal/runtime/executor/helps/codex_http_observation.go
+@@ -0,0 +1,158 @@
++package helps
++
++// HTTP observations use the existing finite opt-in window. No request/response
++// bytes, raw headers, credentials, URLs, or error strings are retained.
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/hex"
++	"errors"
++	"fmt"
++	"io"
++	"net/http"
++	"os"
++	"strings"
++	"sync/atomic"
++	"time"
++
++	"github.com/gin-gonic/gin"
++	log "github.com/sirupsen/logrus"
++)
++
++var codexHTTPObservationSequence atomic.Uint64
++var codexHTTPObservationRun = func() string {
++	var value [8]byte
++	if _, err := rand.Read(value[:]); err != nil {
++		return ""
++	}
++	return hex.EncodeToString(value[:])
++}()
++
++// CodexHTTPObservation is called sequentially around one Client.Do and decode.
++// An existing compression fallback gets its own attempt without adding retries.
++type CodexHTTPObservation struct {
++	started, expires              time.Time
++	attempt                       uint64
++	run, requestTag, class, route string
++	nextPhase, status             int
++}
++
++// NewCodexHTTPObservation records admission to Client.Do, not bytes on the wire.
++func NewCodexHTTPObservation(req *http.Request) *CodexHTTPObservation {
++	now := time.Now()
++	if req == nil || codexHTTPObservationRun == "" || os.Getenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS") != "1" || !now.Before(codexStreamObservationExpiry) {
++		return nil
++	}
++	d := &CodexHTTPObservation{started: now, expires: codexStreamObservationExpiry,
++		attempt: codexHTTPObservationSequence.Add(1), run: codexHTTPObservationRun, requestTag: strings.Clone(codexObservationRequestTag(req.Context())),
++		class: codexHTTPObservationClass(req), route: "other", nextPhase: 1}
++	if req.URL != nil {
++		switch req.URL.Path {
++		case "/responses", "/v1/responses", "/backend-api/codex/responses":
++			d.route = "responses"
++		case "/responses/compact", "/v1/responses/compact", "/backend-api/codex/responses/compact":
++			d.route = "compact"
++		}
++	}
++	d.emit(req.Context(), "dispatch", "started", nil, now, now)
++	return d
++}
++
++func codexHTTPObservationClass(req *http.Request) string {
++	headers := req.Header
++	if c, ok := req.Context().Value("gin").(*gin.Context); ok && c != nil && c.Request != nil {
++		headers = c.Request.Header
++	}
++	count, value := 0, ""
++	for key, values := range headers {
++		if strings.EqualFold(key, "X-Claude-Code-Request-Class") {
++			count += len(values)
++			if len(values) == 1 {
++				value = values[0]
++			}
++		}
++	}
++	if count == 0 {
++		return "none"
++	}
++	if count == 1 {
++		switch value {
++		case "main":
++			return "main"
++		case "compaction":
++			return "compaction"
++		}
++	}
++	return "other"
++}
++
++// Returned preserves the response and error exactly; it neither reads nor closes a body.
++// A Do error need not mean no intermediate redirect response was received.
++func (d *CodexHTTPObservation) Returned(ctx context.Context, response *http.Response, err error) {
++	if d == nil || d.nextPhase != 1 {
++		return
++	}
++	d.nextPhase = 3
++	now := time.Now()
++	if response != nil && response.StatusCode >= 100 && response.StatusCode <= 599 {
++		d.status = response.StatusCode
++	}
++	outcome := "error"
++	if err == nil && response != nil {
++		outcome, d.nextPhase = "returned", 2
++	}
++	d.emit(ctx, "headers", outcome, err, d.started, now)
++}
++
++// Decode observes decoder setup exactly once without changing its result.
++func (d *CodexHTTPObservation) Decode(ctx context.Context, decode func() error) error {
++	if d == nil || d.nextPhase != 2 {
++		return decode()
++	}
++	d.nextPhase = 3
++	started := time.Now()
++	err := decode()
++	outcome := "ready"
++	if err != nil {
++		outcome = "error"
++	}
++	d.emit(ctx, "decode", outcome, err, started, time.Now())
++	return err
++}
++
++func (d *CodexHTTPObservation) emit(ctx context.Context, phase, outcome string, err error, phaseStart, now time.Time) {
++	if !now.Before(d.expires) {
++		return
++	}
++	state := "active"
++	if ctx != nil {
++		switch ctx.Err() {
++		case nil:
++		case context.Canceled:
++			state = "cancelled"
++		case context.DeadlineExceeded:
++			state = "deadline"
++		default:
++			state = "other"
++		}
++	}
++	kind := codexObservationReadError(err)
++	if errors.Is(err, io.EOF) {
++		kind = "eof"
++	}
++	if outcome == "error" && err == nil {
++		kind = "other"
++	}
++	message := fmt.Sprintf("codex http observation: run=%s attempt=%d phase=%s outcome=%s request_class=%s route=%s status=%d elapsed_ms=%d phase_elapsed_ms=%d error_kind=%s context_state=%s",
++		d.run, d.attempt, phase, outcome, d.class, d.route, d.status, codexObservationMillis(d.started, now), codexObservationMillis(phaseStart, now), kind, state)
++	entry := log.NewEntry(log.StandardLogger())
++	if d.requestTag != "" {
++		entry = entry.WithField("request_id", d.requestTag)
++	}
++	if outcome == "error" && state == "active" {
++		entry.Warn(message)
++	} else {
++		entry.Info(message)
++	}
++}
+diff --git a/internal/runtime/executor/helps/codex_http_observation_test.go b/internal/runtime/executor/helps/codex_http_observation_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/runtime/executor/helps/codex_http_observation_test.go
+@@ -0,0 +1,174 @@
++package helps
++
++import (
++	"context"
++	"errors"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/gin-gonic/gin"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
++	log "github.com/sirupsen/logrus"
++)
++
++const httpObservationSecret = "SYNTHETIC_HTTP_PRIVATE_DO_NOT_RECORD"
++
++type httpObservationHook struct {
++	mu      sync.Mutex
++	entries []*log.Entry
++}
++
++func (*httpObservationHook) Levels() []log.Level { return log.AllLevels }
++func (h *httpObservationHook) Fire(e *log.Entry) error {
++	if strings.HasPrefix(e.Message, "codex http observation:") {
++		h.mu.Lock()
++		copy := e.Dup()
++		copy.Message, copy.Level = e.Message, e.Level
++		h.entries = append(h.entries, copy)
++		h.mu.Unlock()
++	}
++	return nil
++}
++func (h *httpObservationHook) snapshot() []*log.Entry {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	return append([]*log.Entry(nil), h.entries...)
++}
++func captureHTTPObservations(t *testing.T) *httpObservationHook {
++	t.Helper()
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++	h := &httpObservationHook{}
++	logger := log.StandardLogger()
++	old := logger.ReplaceHooks(make(log.LevelHooks))
++	t.Cleanup(func() { logger.ReplaceHooks(old) })
++	logger.AddHook(h)
++	return h
++}
++
++type httpObservationBody struct{ reads, closes int }
++
++func (b *httpObservationBody) Read([]byte) (int, error) { b.reads++; return 0, io.EOF }
++func (b *httpObservationBody) Close() error             { b.closes++; return nil }
++
++func TestBridgeHTTPObservationPrivacyAndBodies(t *testing.T) {
++	h := captureHTTPObservations(t)
++	body := &httpObservationBody{}
++	ctx := logging.WithRequestID(context.Background(), httpObservationSecret)
++	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://example.invalid/"+httpObservationSecret, body)
++	req.Header.Set("Authorization", httpObservationSecret)
++	req.Header.Set("Cookie", httpObservationSecret)
++	req.Header.Set("X-Claude-Code-Request-Class", httpObservationSecret)
++	d := NewCodexHTTPObservation(req)
++	responseBody := &httpObservationBody{}
++	response := &http.Response{StatusCode: 503, Body: responseBody}
++	d.Returned(ctx, response, nil)
++	d.Returned(ctx, response, nil)
++	d.Decode(ctx, func() error { return errors.New(httpObservationSecret) })
++	d.Decode(ctx, func() error { return nil })
++	entries := h.snapshot()
++	if len(entries) != 3 || body.reads+body.closes+responseBody.reads+responseBody.closes != 0 || response.Body != responseBody {
++		t.Fatal("observation repeated a phase or touched request/response bodies")
++	}
++	for _, entry := range entries {
++		if strings.Contains(entry.Message, httpObservationSecret) || len(entry.Data) != 0 ||
++			!strings.Contains(entry.Message, "request_class=other route=other") {
++			t.Fatal("private input escaped fixed metadata categories")
++		}
++	}
++	if !strings.Contains(entries[2].Message, "phase=decode outcome=error") || !strings.Contains(entries[2].Message, "error_kind=other") {
++		t.Fatal("decoder failure was not distinguished from HTTP header return")
++	}
++}
++
++func TestBridgeHTTPObservationCancellationAndWindow(t *testing.T) {
++	h := captureHTTPObservations(t)
++	ctx, cancel := context.WithCancel(context.Background())
++	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://example.invalid/v1/responses", nil)
++	d := NewCodexHTTPObservation(req)
++	cancel()
++	d.Returned(ctx, nil, context.Canceled)
++	d.Decode(ctx, func() error { return nil })
++	entries := h.snapshot()
++	if len(entries) != 2 || !strings.Contains(entries[1].Message, "outcome=error") ||
++		!strings.Contains(entries[1].Message, "error_kind=cancelled context_state=cancelled") || entries[1].Level != log.InfoLevel {
++		t.Fatal("cancellation was omitted or misreported as an active-request failure")
++	}
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "")
++	if NewCodexHTTPObservation(req) != nil {
++		t.Fatal("observation enabled without opt-in")
++	}
++	var disabled *CodexHTTPObservation
++	disabled.Returned(ctx, nil, io.EOF)
++	disabled.Decode(ctx, func() error { return nil })
++	t.Setenv("CLAUDE_CODEX_STREAM_DIAGNOSTICS", "1")
++	old := codexStreamObservationExpiry
++	codexStreamObservationExpiry = time.Now().Add(-time.Second)
++	t.Cleanup(func() { codexStreamObservationExpiry = old })
++	if NewCodexHTTPObservation(req) != nil {
++		t.Fatal("observation enabled after its existing finite window")
++	}
++	d.expires = time.Now().Add(-time.Second)
++	d.emit(ctx, "decode", "error", io.EOF, d.started, time.Now())
++	if len(h.snapshot()) != 2 {
++		t.Fatal("expired observation emitted another record")
++	}
++}
++
++func TestBridgeHTTPObservationClassAndRequestTag(t *testing.T) {
++	captureHTTPObservations(t)
++	for _, tc := range []struct {
++		values []string
++		want   string
++	}{{nil, "none"}, {[]string{"main"}, "main"}, {[]string{"compaction"}, "compaction"},
++		{[]string{"main", "compaction"}, "other"}, {[]string{httpObservationSecret}, "other"}} {
++		c, _ := gin.CreateTestContext(httptest.NewRecorder())
++		c.Request, _ = http.NewRequest(http.MethodPost, "http://example.invalid", nil)
++		c.Request.Header["X-Claude-Code-Request-Class"] = tc.values
++		ctx := context.WithValue(context.Background(), "gin", c)
++		ctx = logging.WithRequestID(ctx, "00000000-0000-0000-0000-000012345678")
++		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://example.invalid/v1/responses/compact", nil)
++		d := NewCodexHTTPObservation(req)
++		if d.class != tc.want || d.route != "compact" || d.requestTag != "12345678" {
++			t.Fatal("client hint classification or canonical request-tag restriction changed")
++		}
++	}
++}
++
++func TestBridgeHTTPObservationClockAndConcurrentAttempts(t *testing.T) {
++	h := captureHTTPObservations(t)
++	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
++	d := &CodexHTTPObservation{started: now, expires: now.Add(time.Hour), run: "0000000000000000", attempt: 1,
++		class: "main", route: "responses", status: 200}
++	d.emit(context.Background(), "decode", "ready", nil, now.Add(time.Second), now.Add(3*time.Second))
++	if !strings.Contains(h.snapshot()[0].Message, "elapsed_ms=3000 phase_elapsed_ms=2000") {
++		t.Fatal("phase duration restarted the overall observation clock")
++	}
++	var mu sync.Mutex
++	seen := make(map[uint64]bool)
++	var wg sync.WaitGroup
++	for i := 0; i < 32; i++ {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			req, _ := http.NewRequest(http.MethodPost, "http://example.invalid/v1/responses", nil)
++			d := NewCodexHTTPObservation(req)
++			mu.Lock()
++			if seen[d.attempt] {
++				t.Error("concurrent attempts shared an observation identity")
++			}
++			seen[d.attempt] = true
++			mu.Unlock()
++			d.Returned(req.Context(), &http.Response{StatusCode: 200}, nil)
++			d.Decode(req.Context(), func() error { return nil })
++		}()
++	}
++	wg.Wait()
++	if len(h.snapshot()) != 97 || len(seen) != 32 {
++		t.Fatal("concurrent phase observations were lost or repeated")
++	}
++}

@@ -214,6 +214,47 @@ investigation but lacks a shared request ID and cannot distinguish model work,
 queueing, network delay or hidden upstream attempts. It is neither a failure-rate
 estimate nor proof that slow compaction or physical stream loss is resolved.
 
+### HTTP request phases, 2026-11-07
+
+The earlier stream observer starts after response headers and decoder setup.
+The selected source now adds [HTTP phase observation](upstream/patches/codex-http-observation.patch)
+at the two existing `Client.Do` calls in the Codex request helper. It observes
+the initial HTTP call and the existing plain-body compression fallback separately;
+it does not create another attempt. `dispatch` records entry to that call,
+`headers` records its return, and `decode` records response decoder setup.
+Each record uses the existing finite diagnostic opt-in: one hour by default,
+at most an explicitly selected 24 hours, with expiry fixed at process startup.
+No new network timeout, payload rewrite, body read or credential selection is added.
+
+Header wait includes the HTTP client's connection, upload, redirect and response
+work; it is not model computation time. Decoder setup can itself read a gzip
+header, so it has a separate clock. Decoder readiness is not a first model token
+or a completed response. The [Go HTTP contract](https://pkg.go.dev/net/http#Client.Do)
+also permits errors from redirect policy after an earlier response; a failed
+HTTP call is not automatically a preconnection failure.
+
+Only fixed request classes, route categories, status, bounded elapsed times and
+fixed error/context categories are retained. The observer does not retain a
+request, body, header map, URL, model name, account identity or error message.
+A random process nonce and local attempt counter distinguish compression
+fallbacks and process restarts. The diagnostic report uses those only internally
+and omits both, together with local request tags. Its per-log state is capped at
+256 attempts and its recent/error lists at twelve. Duplicate or conflicting
+sequences suppress paired timings. Missing phases can mean expiry, rotation,
+cancellation, unavailable records or ongoing work; they do not prove a hang.
+
+Local Go race tests passed real request-helper boundaries, decoder cancellation,
+body cleanup and unchanged compression fallback. The
+[owned HTTP fixture](tests/probe_http_phases.py) passed held headers, held gzip
+setup, cancellation at both boundaries, a 503 and independent work. A two-hop
+case with the previous inner binary also passed: when the inner decoder waits,
+the outer still records a header wait. This negative control prevents attributing
+the old credential owner's internal work to OpenAI or to an observed outer
+decoder. The new observer cannot instrument the old origin-to-provider hop.
+The [three-platform gate](.github/workflows/request-phase-observation.yml) adds
+native-client recovery and persistent-client managed handoff. Local installation
+remains on the previous profile until that gate and installed-source checks pass.
+
 ### Forwarded incomplete-stream failures
 
 A credential-free [two-layer fixture](tests/probe_opaque_reasoning_stream.py)

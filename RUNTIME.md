@@ -77,6 +77,15 @@ upgraded outer translator can preserve it. Its test workflow builds disposable
 binaries only; it does not create an installable bundle or migrate live OAuth
 ownership. The selected profile and running credential owner remain unchanged.
 
+The source profile now additionally includes
+[HTTP call/decoder phase observation](upstream/patches/codex-http-observation.patch),
+using the same finite diagnostic opt-in. It changes metadata only and remains
+separate from the excluded retry-advice candidate. The running installation is
+not changed by a source commit; rollout requires its
+[dedicated gate](.github/workflows/request-phase-observation.yml), source-lock
+verification and a draining managed-backend handoff. It does not migrate or
+restart the original credential owner or the existing ingress.
+
 An isolated Claude Code 2.1.316 probe found a possible future migration path:
 when its user settings file changed, an ordinary long-running client completed
 an already-started fake HTTP stream, then used a new authenticated fake HTTPS

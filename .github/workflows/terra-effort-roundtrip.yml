@@ -49,7 +49,7 @@ jobs:
           git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
           git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
           git -C upstream-source checkout --detach FETCH_HEAD
-          for patch in 12d97cf-inline-tools-backport 12d97cf-deferred-tools web-search-replay loopback-tls url-citations native-compaction-v2 incomplete-tool-guard effort-downgrade-guard midconversation-effort forwarded-incomplete-stream-candidate codex-stream-observation-candidate claude-error-compat; do
+          for patch in 12d97cf-inline-tools-backport 12d97cf-deferred-tools web-search-replay loopback-tls url-citations native-compaction-v2 incomplete-tool-guard effort-downgrade-guard midconversation-effort forwarded-incomplete-stream-candidate codex-stream-observation-candidate claude-error-compat codex-http-observation; do
             git -C upstream-source apply "../upstream/patches/${patch}.patch"
           done
           cd upstream-source

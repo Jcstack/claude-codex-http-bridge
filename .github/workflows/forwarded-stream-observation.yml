@@ -66,6 +66,9 @@ jobs:
           git apply ../upstream/patches/codex-stream-observation-candidate.patch
           git apply --check ../upstream/patches/claude-error-compat.patch
           git apply ../upstream/patches/claude-error-compat.patch
+          git apply --check ../upstream/patches/codex-http-observation.patch
+          git apply ../upstream/patches/codex-http-observation.patch
+          go test -timeout 180s -run "^TestBridgeHTTPObservation" ./internal/runtime/executor ./internal/runtime/executor/helps
           go test -timeout 180s ./sdk/api/handlers/claude
           go test -timeout 180s -run '^TestBridgeStreamObservation' ./internal/runtime/executor ./internal/runtime/executor/helps
           go build -o "../observed-${{ matrix.binary }}" ./cmd/server

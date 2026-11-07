@@ -46,6 +46,104 @@ BUFFERED_OBSERVATION = re.compile(
     r"outcome=(completion_event|terminal_event|incomplete_event|read_error|eof|other) "
     r"last_event=([a-z0-9_.-]{1,64}) data_items=(\d{1,7}) elapsed_ms=(\d{1,8}) "
     r"read_error=(none|unexpected_eof|cancelled|timeout|other) failure_kind=([a-z_]{1,40})$")
+HTTP_OBSERVATION = re.compile(
+    r"codex http observation: run=([a-f0-9]{16}) attempt=([1-9]\d{0,19}) "
+    r"phase=(dispatch|headers|decode) outcome=(started|returned|ready|error) "
+    r"request_class=(none|main|compaction|other) route=(responses|compact|other) status=(\d{1,3}) "
+    r"elapsed_ms=(\d{1,8}) phase_elapsed_ms=(\d{1,8}) "
+    r"error_kind=(none|eof|unexpected_eof|cancelled|timeout|other) context_state=(active|cancelled|deadline|other)$")
+
+
+def _http_observation(line: str):
+    match = HTTP_OBSERVATION.search(line.rstrip())
+    if not match:
+        return None
+    run, attempt, phase, outcome, request_class, route, status, elapsed, phase_elapsed, error, context = match.groups()
+    attempt, status, elapsed, phase_elapsed = map(int, (attempt, status, elapsed, phase_elapsed))
+    if (attempt > 2**64 - 1 or status != 0 and not 100 <= status <= 599 or
+            not 0 <= phase_elapsed <= elapsed <= 86_400_000):
+        return None
+    if phase == "dispatch":
+        if (outcome, status, elapsed, phase_elapsed, error) != ("started", 0, 0, 0, "none"):
+            return None
+    elif phase == "headers":
+        if outcome not in ("returned", "error") or outcome == "returned" and (status == 0 or error != "none"):
+            return None
+    elif outcome not in ("ready", "error") or status == 0 or outcome == "ready" and error != "none":
+        return None
+    if outcome == "error" and error == "none":
+        return None
+    # The process nonce and attempt number are internal grouping keys only.
+    return (run, attempt), {"phase": phase, "outcome": outcome, "request_class": request_class,
+        "route": route, "status": status, "elapsed_ms": elapsed, "phase_elapsed_ms": phase_elapsed,
+        "error_kind": error, "context_state": context}
+
+
+class _HTTPPhaseSummary:
+    LIMIT = 256
+
+    def __init__(self):
+        self.events = Counter()
+        self.attempts = {}
+        self.errors = deque(maxlen=12)
+        self.evicted = self.invalid = 0
+
+    def observe(self, line: str, at: datetime):
+        if "codex http observation:" not in line:
+            return
+        parsed = _http_observation(line)
+        if parsed is None:
+            self.invalid += 1
+            return
+        identity, record = parsed
+        record = {"at": at.isoformat(), **record}
+        phase = record["phase"]
+        self.events[phase + "." + record["outcome"]] += 1
+        if record["outcome"] == "error" or phase == "headers" and record["status"] >= 400:
+            self.errors.append(record)
+        state = self.attempts.pop(identity, None)
+        if state is None:
+            if len(self.attempts) >= self.LIMIT:
+                self.attempts.pop(next(iter(self.attempts)))
+                self.evicted += 1
+            state = {"records": {}, "phases": [], "ambiguous": False}
+        previous = next(reversed(state["records"].values()), None) if state["records"] else None
+        if (phase in state["records"] or previous is not None and (
+                record["request_class"] != previous["request_class"] or record["route"] != previous["route"] or
+                record["elapsed_ms"] < previous["elapsed_ms"] or
+                phase == "decode" and record["status"] != previous["status"])):
+            state["ambiguous"] = True
+        if phase == "decode" and state["records"].get("headers", {}).get("outcome") == "error":
+            state["ambiguous"] = True
+        if phase not in state["records"]:
+            state["records"][phase] = record
+            state["phases"].append(phase)
+        phases = state["phases"]
+        if phases != ["dispatch", "headers", "decode"][:len(phases)] and "dispatch" in phases:
+            state["ambiguous"] = True
+        self.attempts[identity] = state
+
+    def report(self):
+        recent = []
+        for state in list(self.attempts.values())[-12:]:
+            records = state["records"]
+            last = next(reversed(records.values()))
+            ambiguous = state["ambiguous"]
+            recent.append({"at": last["at"], "request_class": last["request_class"], "route": last["route"],
+                "recorded_phases": list(state["phases"]), "dispatch_seen": "dispatch" in records,
+                "ambiguous": ambiguous, "last_outcome": last["outcome"],
+                "context_state": last["context_state"], "error_kind": last["error_kind"],
+                "status": None if ambiguous else last["status"],
+                "header_wait_ms": None if ambiguous else records.get("headers", {}).get("elapsed_ms"),
+                "decoder_setup_ms": None if ambiguous else records.get("decode", {}).get("phase_elapsed_ms"),
+                "elapsed_ms": None if ambiguous else last["elapsed_ms"]})
+        return {"phase_outcome_mentions": dict(self.events), "recent_attempts": recent,
+            "recent_errors": list(self.errors), "attempt_limit": self.LIMIT,
+            "attempts_evicted": self.evicted, "invalid_records": self.invalid,
+            "limits": "Local HTTP call phases only; decoder readiness is not response completion. "
+                "A missing phase may reflect in-flight work, expiry, cancellation, rotation or unavailable records. "
+                "HTTP-client errors can follow redirects and do not prove a preconnection failure. "
+                "Process/attempt grouping is local to this log and is not a cross-layer request identity."}
 
 
 def endpoint_label(raw: str) -> str:
@@ -187,6 +285,7 @@ def stream_observation(line: str) -> dict | None:
 
 
 def proxy_summary(path: Path, since: datetime) -> dict:
+    http_phases = _HTTPPhaseSummary()
     counts, errors = Counter(), Counter()
     background_events, background_last = Counter(), {}
     preconnect = Counter()
@@ -207,6 +306,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
         at = timestamp(date[1]) if date else None
         if at is None or at < since:
             continue
+        http_phases.observe(line, at)
         match = GIN.search(line)
         if match:
             endpoint = endpoint_label(match[5])
@@ -336,6 +436,7 @@ def proxy_summary(path: Path, since: datetime) -> dict:
             "http_seconds": round(rows[0]["seconds"], 3) if unique and rows[0]["seconds"] is not None else None})
     ordered = sorted(latencies)
     return {"completed_http_statuses": dict(counts), "transport_error_mentions": dict(errors),
+            "http_request_phases": http_phases.report(),
             "background_event_mentions": {category: {"mentions": count, "last_at": background_last[category].isoformat()}
                                           for category, count in background_events.items()},
             "upstream_preconnection_failures": {category: {
@@ -528,6 +629,8 @@ def collect(root: Path, route: str, claude_roots: list[Path], since: datetime,
                     if (any(summary[key] for key in ("completed_http_statuses", "transport_error_mentions", "background_event_mentions",
                                                      "upstream_preconnection_failures", "stream_failure_mentions"))
                             or summary["stream_termination_observations"]["outcome_mentions"]
+                            or summary["http_request_phases"]["phase_outcome_mentions"]
+                            or summary["http_request_phases"]["invalid_records"]
                             or summary["coverage"]["oversized_lines"]):
                         detail["backends"].append({"generation_tag": hashlib.sha256(log.parent.name.encode()).hexdigest()[:12],
                                                   "current": log.parent.name == managed["current"], **summary})

@@ -75,6 +75,16 @@ handoff exists, let direct sessions finish on their existing service and use
 the managed endpoint for new sessions; resuming a session is a new client
 process, not proof that the old stream was preserved.
 
+A source review also confirmed that the pinned
+[response and stream interceptors](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/pluginapi/types.go)
+handle successful execution results. They are not a demonstrated hot fix for
+headers already discarded on a native error path. Replacing a provider executor
+with a plugin would require its own translation, refresh, selection and safety
+acceptance; it is not equivalent to adding a small response-header filter.
+The separately tested retry-advice patch therefore still needs safe origin
+migration. The new outer HTTP-phase observer can narrow timing boundaries while
+leaving that owner intact, but cannot establish its internal provider timing.
+
 ## Controller-source publication
 
 The current installer replaces controller modules individually. An immutable
