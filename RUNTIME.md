@@ -75,16 +75,21 @@ is intentionally excluded from `runtime_bundle.PATCHES`. Two-hop negative
 controls show that an old credential owner discards retry advice before an
 upgraded outer translator can preserve it. Its test workflow builds disposable
 binaries only; it does not create an installable bundle or migrate live OAuth
-ownership. The selected profile and running credential owner remain unchanged.
+ownership. That retry-advice candidate does not change the selected profile or
+the running credential owner.
 
 The source profile now additionally includes
 [HTTP call/decoder phase observation](upstream/patches/codex-http-observation.patch),
 using the same finite diagnostic opt-in. It changes metadata only and remains
-separate from the excluded retry-advice candidate. The running installation is
-not changed by a source commit; rollout requires its
-[dedicated gate](.github/workflows/request-phase-observation.yml), source-lock
-verification and a draining managed-backend handoff. It does not migrate or
-restart the original credential owner or the existing ingress.
+separate from the excluded retry-advice candidate. After its
+[dedicated three-platform run](https://github.com/Jcstack/harnesslift/actions/runs/42336373490),
+all eleven [source/install jobs](https://github.com/Jcstack/harnesslift/actions/runs/42336315848),
+source reconstruction and installed-source handoff checks passed, the observer
+was selected on the local Mac through a draining backend upgrade. Origin and
+ingress processes, port, key and selected account were preserved. The installed
+diagnostic/controller files match the tested overlay, and a short subscription
+control produced the new phase records and a complete response. No original
+credential-owner or ingress migration was performed. [Limits and evidence](STREAMING.md#http-request-phases-2026-11-07).
 
 An isolated Claude Code 2.1.316 probe found a possible future migration path:
 when its user settings file changed, an ordinary long-running client completed

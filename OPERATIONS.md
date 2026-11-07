@@ -221,6 +221,14 @@ no service, endpoint, signing key or active Claude process was replaced.
 
 ## Open sessions and service replacement
 
+The active managed backend now includes finite HTTP call/decoder phase metadata
+in addition to stream-terminal observations. Use `claude-codex diagnostics` to inspect
+the bounded `http_request_phases` report. Process/attempt identifiers remain
+internal; a decoder-ready record is not a completed response, and missing phases
+do not prove a hang. A previous inner proxy can absorb its own decoder wait into
+the observed outer header wait. [Acceptance and rollout](STREAMING.md#http-request-phases-2026-11-07)
+preserved the original credential process and existing ingress.
+
 The legacy process owns its loopback listener directly. Its [shutdown code](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/cliproxy/service_lifecycle.go#L256) cancels the runtime context. The stop command also removes runtime key/UI files, so it is unsuitable during dependent tasks.
 
 Two isolated persistent-client experiments changed settings while a response remained open. The next request still used the old endpoint, and `/autocompact` retained the old window. Live file edits are not a demonstrated migration method. The host supports plugin reload, but [native translators take precedence](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/sdk/translator/registry.go#L124); a translator plugin cannot simply replace this native route.

@@ -252,8 +252,25 @@ the outer still records a header wait. This negative control prevents attributin
 the old credential owner's internal work to OpenAI or to an observed outer
 decoder. The new observer cannot instrument the old origin-to-provider hop.
 The [three-platform gate](.github/workflows/request-phase-observation.yml) adds
-native-client recovery and persistent-client managed handoff. Local installation
-remains on the previous profile until that gate and installed-source checks pass.
+native-client recovery and persistent-client managed handoff. Its
+[run](https://github.com/Jcstack/harnesslift/actions/runs/42336373490) passed all
+three platforms, and the [source/install run](https://github.com/Jcstack/harnesslift/actions/runs/42336315848)
+passed all eleven jobs. The local offline suite passed 433 tests with twenty
+optional skips. An overlay of the installed controller sources passed 76 checks
+and an old-to-new persistent-client handoff before activation.
+
+The source-locked observer was then selected through a managed-backend upgrade.
+Private before/after checks preserved origin state/process, ingress process/port,
+frontend key, enabled account and account inventory. An older generation still
+had admitted work after publication; this is a metadata observation rather than
+proof of each individual stream. Existing Claude processes were not restarted.
+A short synthetic subscription control, chosen from the current local catalog,
+returned the exact marker and `end_turn` through the installed TLS endpoint.
+Dispatch, HTTP return, decoder readiness and a buffered completion were recorded;
+no phase refusal/error, noncompletion or parsing gap was observed in that bounded
+postcheck. It verifies the healthy route and instrumentation, not recovery from
+an induced real provider failure. The new explicit diagnostic window expires
+after 24 hours. The paid Project API and experimental gateway replay remain off.
 
 ### Forwarded incomplete-stream failures
 
