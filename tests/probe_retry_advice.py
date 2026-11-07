@@ -38,6 +38,7 @@ def main():
     expectation.add_argument("--expect-loss", action="store_true")
     parser.add_argument("--request-retries", type=int, choices=range(4), default=0)
     parser.add_argument("--second-credential", action="store_true")
+    parser.add_argument("--require-repeated", action="store_true")
     args = parser.parse_args()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Origin)
     server.requests = 0
@@ -87,6 +88,8 @@ def main():
                 assert all(row["retry_after_preserved"] and row["retry_veto_preserved"] and row["one_upstream_attempt"] for row in rows), "Retry advice was dropped or the vetoed request was repeated"
             if args.expect_loss:
                 assert any(not row["retry_after_preserved"] or not row["retry_veto_preserved"] for row in rows), "The baseline unexpectedly preserved all retry advice"
+            if args.require_repeated:
+                assert any(not row["one_upstream_attempt"] for row in rows), "The negative control did not repeat a vetoed request"
     finally:
         server.shutdown()
         server.server_close()

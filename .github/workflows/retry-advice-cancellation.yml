@@ -75,6 +75,7 @@ jobs:
           python tests/probe_retry_advice.py candidate.exe --require-advice
           python tests/probe_retry_advice.py candidate.exe --origin-binary candidate.exe --require-advice
           python tests/probe_retry_advice.py candidate.exe --origin-binary baseline.exe --expect-loss
+          python tests/probe_retry_advice.py baseline.exe --origin-binary baseline.exe --request-retries 2 --second-credential --expect-loss --require-repeated
           python tests/probe_retry_advice.py candidate.exe --origin-binary candidate.exe --request-retries 2 --second-credential --require-advice
       - name: Cancel active streams and native backoff without disrupting independent requests
         shell: bash

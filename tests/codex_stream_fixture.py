@@ -41,9 +41,10 @@ def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_pre
         policy = (f"routing:\n  retry:\n    request-retry: {request_retries}\n  cooldown:\n    disable-cooling: true\n"
                   "    transient-error-cooldown-seconds: -1\n") if managed_policy else ""
         extra_key = '\n        - api-key: "fixture-secondary"' if second_credential else ''
+        access_keys = [local_key, "fixture-secondary"] if second_credential else [local_key]
         config.write_text(f'''config-version: 8
 server: {{host: "127.0.0.1", port: {port}}}
-access: {{api-keys: ["{local_key}"]}}
+access: {{api-keys: {json.dumps(access_keys)}}}
 management: {{allow-remote: false, disable-control-panel: true, disable-auto-update-panel: true}}
 oauth: {{auth-dir: {json.dumps(str(auth))}}}
 {policy}\
@@ -83,6 +84,12 @@ api-keys:
                     if process.poll() is not None or time.monotonic() >= deadline:
                         raise RuntimeError("Synthetic Codex model did not become ready")
                     time.sleep(.1)
+                if second_credential:
+                    secondary = urllib.request.Request(f"http://127.0.0.1:{port}/v1/models",
+                        headers={"Authorization": "Bearer fixture-secondary"})
+                    with opener.open(secondary, timeout=1) as response:
+                        if response.status != 200:
+                            raise RuntimeError("The second synthetic caller key was rejected")
                 yield port, local_key, logfile
             finally:
                 if process.poll() is None:

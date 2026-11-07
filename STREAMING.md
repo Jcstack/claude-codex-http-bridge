@@ -153,8 +153,10 @@ genuine credential-level quota failure as a request-only error. A positive hint
 does not add attempts or expand the retry budget.
 
 Local Go race checks, actual error-writer checks and two-hop probes passed.
-With multiple fake credentials and additional configured gateway retries, a
-veto still caused only one upstream attempt. The real native client honored a
+Both synthetic caller keys are checked as accepted at each owned hop. With
+multiple fake credentials and additional configured gateway retries, the old
+profile repeats a vetoed request while the candidate makes only one upstream
+attempt. The real native client honored a
 synthetic 503 wait and stopped on its veto without changing compared request
 semantics. A fixed outer translator with the old inner translator still loses
 the advice and permits a native retry: the credential owner has already removed
