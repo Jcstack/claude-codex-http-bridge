@@ -124,6 +124,63 @@ Claude account limits. It cannot be assigned Codex semantics by inference.
 Neither an attempt count nor a successful synthetic retry proves an overall
 provider deadline, cancellation safety or hosted-tool idempotency.
 
+#### Cancellation and server retry advice, 2026-11-07
+
+The credential-free [native cancellation fixture](tests/probe_native_retry_cancel.py)
+uses the locked client, an empty disposable home and two owned translators.
+Local Sol/Sonnet and Astra/Opus mappings passed cancellation during an active
+signature-only stream and during native 429 backoff. On POSIX the fixture sends
+Ctrl-C through the child's controlling terminal. The active origin connection
+closed, no subsequent inference attempt occurred, independent requests completed
+before and after cancellation, and the workspace stayed empty. Windows coverage
+uses termination of the owned child; it does not establish Windows console-key
+behavior. These tests do not resolve the existing-HOME/installed-path timeout
+or cancellation between real tool effects.
+
+The official [Messages gateway protocol](https://code.claude.com/docs/en/llm-gateway-protocol)
+requires preserving `x-should-retry` and integer-second `retry-after` advice.
+The [header fixture](tests/probe_retry_advice.py) reproduced a separate gap:
+the selected source loses a 503 wait and its retry veto; a 429 retains the wait
+but loses the veto. Status and private-header filtering remain intact.
+The [excluded candidate](upstream/patches/retry-advice-candidate.patch) retains
+only validated retry controls independently of broad header passthrough. It
+captures a deadline once and emits the remaining rounded-up seconds; a locally
+trusted quota deadline takes precedence. Invalid or conflicting values do not
+become default-passthrough controls. Cookies and arbitrary headers stay filtered.
+An explicit veto stops additional credential selection and unauthorized refresh
+attempts, including configured continuation rules, without reclassifying a
+genuine credential-level quota failure as a request-only error. A positive hint
+does not add attempts or expand the retry budget.
+
+Local Go race checks, actual error-writer checks and two-hop probes passed.
+With multiple fake credentials and additional configured gateway retries, a
+veto still caused only one upstream attempt. The real native client honored a
+synthetic 503 wait and stopped on its veto without changing compared request
+semantics. A fixed outer translator with the old inner translator still loses
+the advice and permits a native retry: the credential owner has already removed
+the headers. Therefore this patch is **not in the selected runtime profile and
+has not been deployed**. Its [three-platform gate](.github/workflows/retry-advice-cancellation.yml)
+retains the old-inner negative control. Safe migration of the original credential
+owner remains necessary; merely building or upgrading an outer backend cannot
+close this gap. This candidate concerns pre-header HTTP refusals, not headers
+added after an HTTP 200 stream has been committed.
+
+The OpenAI [cancellation reference](https://developers.openai.com/api/reference/resources/responses/methods/cancel)
+limits the cancel endpoint to background responses. Its
+[background guide](https://developers.openai.com/api/docs/guides/background)
+describes cancelling synchronous responses by terminating the connection.
+Closing an owned fake connection tests propagation through these translators;
+it does not verify cancellation of provider computation or hosted-tool effects.
+No project API, watchdog, production timeout or user retry setting was enabled.
+
+A later read-only audit found natural completions and no retained post-rollout
+API-error record in the tracked main/child scope. Another long automatic
+compaction coincided with origin and managed inference requests lasting nearly
+the whole interval; nearby token-count work was short. This narrows the timing
+investigation but lacks a shared request ID and cannot distinguish model work,
+queueing, network delay or hidden upstream attempts. It is neither a failure-rate
+estimate nor proof that slow compaction or physical stream loss is resolved.
+
 ### Forwarded incomplete-stream failures
 
 A credential-free [two-layer fixture](tests/probe_opaque_reasoning_stream.py)

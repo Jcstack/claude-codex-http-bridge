@@ -21,11 +21,14 @@ import launcher
 @contextmanager
 def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_prefix: str = "",
                                upstream_key: str = "fixture-upstream", managed_policy: bool = False,
-                               local_key: str = "fixture-local", model: str = "gpt-6.1-sol"):
+                               local_key: str = "fixture-local", model: str = "gpt-6.1-sol",
+                               request_retries: int = 0, second_credential: bool = False):
     if (type(upstream_port) is not int or not 1 <= upstream_port <= 65535 or not binary.is_file()
             or upstream_prefix not in ("", "/v1") or upstream_key not in ("fixture-upstream", "fixture-local", "a" * 64)
             or local_key not in ("fixture-local", "a" * 64) or type(managed_policy) is not bool
-            or model not in ("gpt-6.1-sol", "gpt-6-astra")):
+            or model not in ("gpt-6.1-sol", "gpt-6-astra")
+            or type(request_retries) is not int or not 0 <= request_retries <= 3
+            or (request_retries != 0 and not managed_policy) or type(second_credential) is not bool):
         raise ValueError("Invalid synthetic translator fixture")
     with tempfile.TemporaryDirectory(prefix="bridge-codex-stream-fixture-") as temporary:
         root = Path(temporary)
@@ -35,8 +38,9 @@ def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_pre
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         config = root / "config.yaml"
-        policy = ("routing:\n  retry:\n    request-retry: 0\n  cooldown:\n    disable-cooling: true\n"
+        policy = (f"routing:\n  retry:\n    request-retry: {request_retries}\n  cooldown:\n    disable-cooling: true\n"
                   "    transient-error-cooldown-seconds: -1\n") if managed_policy else ""
+        extra_key = '\n        - api-key: "fixture-secondary"' if second_credential else ''
         config.write_text(f'''config-version: 8
 server: {{host: "127.0.0.1", port: {port}}}
 access: {{api-keys: ["{local_key}"]}}
@@ -51,7 +55,7 @@ api-keys:
         - name: "{model}"
           alias: "{model}"
       keys:
-        - api-key: "{upstream_key}"
+        - api-key: "{upstream_key}"{extra_key}
 ''', encoding="utf-8")
         config.chmod(0o600)
         environment = isolated_environment(root)

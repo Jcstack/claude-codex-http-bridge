@@ -1,0 +1,98 @@
+name: retry-advice-cancellation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic:
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install the integrity-locked native client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+          python tests/claude_fixture.py
+      - name: Build the selected baseline and the excluded candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          python - <<'PY'
+          import subprocess
+          import runtime_bundle
+          assert 'retry-advice-candidate.patch' not in runtime_bundle.PATCHES
+          for name in runtime_bundle.PATCHES:
+              patch = runtime_bundle.SOURCE / 'upstream' / 'patches' / name
+              subprocess.run(['git', '-C', 'upstream-source', 'apply', str(patch)], check=True)
+          PY
+          cd upstream-source
+          go mod verify
+          go build -o ../baseline.exe ./cmd/server
+          git apply ../upstream/patches/retry-advice-candidate.patch
+          go test -timeout 180s ./internal/util ./sdk/api/handlers ./sdk/api/handlers/claude ./sdk/cliproxy/auth
+          go test -timeout 180s -run '^(TestBridgeCodexRetry|TestCodex)' ./internal/runtime/executor
+          go build -o ../candidate.exe ./cmd/server
+      - name: Race-check the changed protocol and retry paths
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd upstream-source
+          go test -race -timeout 180s ./internal/util ./sdk/api/handlers ./sdk/api/handlers/claude ./sdk/cliproxy/auth
+          go test -race -timeout 180s -run '^(TestBridgeCodexRetry|TestCodex)' ./internal/runtime/executor
+      - name: Retain negative controls and filter private response headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_retry_advice.py baseline.exe --expect-loss
+          python tests/probe_retry_advice.py baseline.exe --origin-binary baseline.exe --expect-loss
+          python tests/probe_retry_advice.py candidate.exe --require-advice
+          python tests/probe_retry_advice.py candidate.exe --origin-binary candidate.exe --require-advice
+          python tests/probe_retry_advice.py candidate.exe --origin-binary baseline.exe --expect-loss
+          python tests/probe_retry_advice.py candidate.exe --origin-binary candidate.exe --request-retries 2 --second-credential --require-advice
+      - name: Cancel active streams and native backoff without disrupting independent requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for family in sol astra; do
+            python tests/probe_native_retry_cancel.py baseline.exe --origin-binary baseline.exe --mode active --family "$family"
+            python tests/probe_native_retry_cancel.py baseline.exe --origin-binary baseline.exe --mode backoff --status 429 --family "$family"
+          done
+      - name: Honor native waits and vetoes without changing model request semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          for family in sol astra; do
+            for status in 429 503; do
+              python tests/probe_native_retry_cancel.py candidate.exe --origin-binary candidate.exe --mode advice --status "$status" --family "$family"
+              python tests/probe_native_retry_cancel.py candidate.exe --origin-binary candidate.exe --mode veto --status "$status" --family "$family"
+            done
+          done
+          python tests/probe_native_retry_cancel.py baseline.exe --origin-binary baseline.exe --mode veto --status 503 --expect-veto-loss
+          python tests/probe_native_retry_cancel.py candidate.exe --origin-binary baseline.exe --mode veto --status 503 --expect-veto-loss

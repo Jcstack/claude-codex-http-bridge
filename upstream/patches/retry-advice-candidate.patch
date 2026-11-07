@@ -1,0 +1,625 @@
+diff --git a/internal/runtime/executor/bridge_retry_advice_test.go b/internal/runtime/executor/bridge_retry_advice_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/runtime/executor/bridge_retry_advice_test.go
+@@ -0,0 +1,31 @@
++package executor
++
++import (
++	"net/http"
++	"testing"
++)
++
++func TestBridgeCodexRetryVetoKeepsQuotaAndStatus(t *testing.T) {
++	for _, code := range []int{401, 403, 429, 503} {
++		body := []byte(`{"error":{"type":"server_error","message":"Synthetic provider failure"}}`)
++		if code == 429 {
++			body = []byte(`{"error":{"type":"usage_limit_reached","code":"usage_limit_reached","message":"Synthetic quota"}}`)
++		}
++		baseline := newCodexStatusErrWithHeaders(code, nil, body)
++		err := newCodexStatusErrWithHeaders(code, http.Header{"Retry-After": {"7"}, "X-Should-Retry": {"false"}, "Set-Cookie": {"private=1"}}, body)
++		if !err.IsRequestStop() || err.StatusCode() != baseline.StatusCode() || err.Error() != baseline.Error() || err.IsCredentialScoped() != baseline.IsCredentialScoped() || err.IsTransientRateLimit() != baseline.IsTransientRateLimit() {
++			t.Fatal("retry veto changed payload, status or credential scope")
++		}
++		if code == 429 && !err.IsCredentialScoped() {
++			t.Fatal("genuine quota scope lost")
++		}
++		headers := err.Headers()
++		if headers.Get("X-Should-Retry") != "false" || len(headers) != 2 {
++			t.Fatal("retry advice lost or private headers escaped")
++		}
++	}
++	err := newCodexStatusErrWithHeaders(503, http.Header{"X-Should-Retry": {"true"}}, []byte(`{"error":{"message":"Synthetic"}}`))
++	if err.IsRequestStop() {
++		t.Fatal("positive hint changed stop eligibility")
++	}
++}
+diff --git a/internal/runtime/executor/codex_executor_terminal.go b/internal/runtime/executor/codex_executor_terminal.go
+--- a/internal/runtime/executor/codex_executor_terminal.go
++++ b/internal/runtime/executor/codex_executor_terminal.go
+@@ -10,6 +10,7 @@
+ 	"time"
+ 
+ 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
+ 	"github.com/tidwall/gjson"
+ 	"github.com/tidwall/sjson"
+ )
+@@ -387,7 +388,7 @@
+ 		errCode = http.StatusTooManyRequests
+ 	}
+ 	body = classifyCodexStatusError(errCode, body)
+-	err := statusErr{code: errCode, msg: string(body), credentialScoped: credentialScoped, transientRateLimit: transientCapacity && errCode == http.StatusTooManyRequests}
++	err := statusErr{code: errCode, msg: string(body), credentialScoped: credentialScoped, transientRateLimit: transientCapacity && errCode == http.StatusTooManyRequests, retryAdvice: util.NewRetryAdvice(headers, time.Now())}
+ 	// A usage_limit_reached body reset describes quota recovery and wins over
+ 	// the generic Retry-After header. Every other 429 honours the upstream
+ 	// header so per-turn admission limits cool until their real deadline.
+diff --git a/internal/runtime/executor/openai_compat_executor.go b/internal/runtime/executor/openai_compat_executor.go
+--- a/internal/runtime/executor/openai_compat_executor.go
++++ b/internal/runtime/executor/openai_compat_executor.go
+@@ -1152,6 +1152,7 @@
+ }
+ 
+ type statusErr struct {
++	retryAdvice        *util.RetryAdvice
+ 	code               int
+ 	msg                string
+ 	retryAfter         *time.Duration
+@@ -1161,6 +1162,10 @@
+ 	// diagnostic is a content-free detail for logs only; it never reaches clients.
+ 	diagnostic string
+ }
++
++func (e statusErr) Headers() http.Header { return e.retryAdvice.Headers(time.Now()) }
++
++func (e statusErr) IsRequestStop() bool { return e.retryAdvice.DisallowsRetry() }
+ 
+ func (e statusErr) Error() string {
+ 	if e.msg != "" {
+diff --git a/internal/util/retry_advice.go b/internal/util/retry_advice.go
+new file mode 100644
+--- /dev/null
++++ b/internal/util/retry_advice.go
+@@ -0,0 +1,81 @@
++package util
++
++import (
++	"net/http"
++	"strconv"
++	"strings"
++	"time"
++)
++
++// RetryAdvice retains only validated client retry controls, never arbitrary headers.
++// The deadline starts when advice is captured; later processing cannot restart the wait.
++type RetryAdvice struct {
++	deadline    time.Time
++	hasDeadline bool
++	shouldRetry string
++}
++
++func NewRetryAdvice(headers http.Header, now time.Time) *RetryAdvice {
++	a := &RetryAdvice{}
++	if raw, ok := singleRetryHeader(headers, "X-Should-Retry"); ok && (raw == "false" || raw == "true") {
++		a.shouldRetry = raw
++	}
++	if raw, ok := singleRetryHeader(headers, "Retry-After"); ok {
++		digits := raw != ""
++		for _, c := range raw {
++			digits = digits && c >= '0' && c <= '9'
++		}
++		if seconds, err := strconv.ParseUint(raw, 10, 64); digits && err == nil && seconds <= uint64((1<<63-1)/time.Second) {
++			a.deadline = now.Add(time.Duration(seconds) * time.Second)
++			a.hasDeadline = true
++		} else if deadline, err := http.ParseTime(raw); err == nil {
++			a.deadline = deadline
++			a.hasDeadline = true
++		}
++	}
++	if !a.hasDeadline && a.shouldRetry == "" {
++		return nil
++	}
++	return a
++}
++
++func singleRetryHeader(headers http.Header, name string) (string, bool) {
++	var values []string
++	for key, candidate := range headers {
++		if strings.EqualFold(key, name) {
++			values = append(values, candidate...)
++		}
++	}
++	if len(values) != 1 || len(values[0]) > 128 {
++		return "", false
++	}
++	return strings.TrimSpace(values[0]), true
++}
++
++// Headers emits a fresh allowlisted map and a nonnegative remaining wait.
++func (a *RetryAdvice) Headers(now time.Time) http.Header {
++	if a == nil {
++		return nil
++	}
++	result := make(http.Header)
++	if a.shouldRetry != "" {
++		result.Set("X-Should-Retry", a.shouldRetry)
++	}
++	if a.hasDeadline {
++		remaining := a.deadline.Sub(now)
++		seconds := int64(0)
++		if remaining > 0 {
++			seconds = int64(remaining / time.Second)
++			if remaining%time.Second != 0 {
++				seconds++
++			}
++		}
++		result.Set("Retry-After", strconv.FormatInt(seconds, 10))
++	}
++	return result
++}
++
++// DisallowsRetry never promotes a true hint into extra attempts.
++func (a *RetryAdvice) DisallowsRetry() bool {
++	return a != nil && a.shouldRetry == "false"
++}
+diff --git a/internal/util/retry_advice_test.go b/internal/util/retry_advice_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/util/retry_advice_test.go
+@@ -0,0 +1,53 @@
++package util
++
++import (
++	"net/http"
++	"testing"
++	"time"
++)
++
++func TestBridgeRetryAdviceDeadlineAndPrivacy(t *testing.T) {
++	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
++	headers := http.Header{"Retry-After": {"7"}, "X-Should-Retry": {"false"}, "Set-Cookie": {"private=1"}, "X-Private": {"fixture-private"}}
++	advice := NewRetryAdvice(headers, now)
++	headers.Set("Retry-After", "999")
++	if !advice.DisallowsRetry() {
++		t.Fatal("explicit retry veto lost")
++	}
++	for _, tc := range []struct {
++		after time.Duration
++		want  string
++	}{{0, "7"}, {3 * time.Second, "4"}, {6500 * time.Millisecond, "1"}, {7 * time.Second, "0"}, {time.Minute, "0"}} {
++		got := advice.Headers(now.Add(tc.after))
++		if got.Get("Retry-After") != tc.want || got.Get("X-Should-Retry") != "false" || len(got) != 2 {
++			t.Fatal("retry deadline was restarted or private headers escaped")
++		}
++		got.Set("X-Should-Retry", "true")
++	}
++}
++
++func TestBridgeRetryAdviceStrictValues(t *testing.T) {
++	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
++	for _, tc := range []struct {
++		headers http.Header
++		wait    string
++		veto    string
++	}{
++		{nil, "", ""},
++		{http.Header{"Retry-After": {"0"}}, "0", ""},
++		{http.Header{"retry-after": {"7"}, "x-should-retry": {"true"}}, "7", "true"},
++		{http.Header{"Retry-After": {now.Add(7 * time.Second).Format(http.TimeFormat)}}, "7", ""},
++		{http.Header{"Retry-After": {now.Add(-time.Minute).Format(http.TimeFormat)}}, "0", ""},
++		{http.Header{"Retry-After": {"-1"}, "X-Should-Retry": {"secret"}}, "", ""},
++		{http.Header{"Retry-After": {"+7"}}, "", ""},
++		{http.Header{"Retry-After": {"7", "9"}, "X-Should-Retry": {"true", "false"}}, "", ""},
++		{http.Header{"Retry-After": {"7"}, "retry-after": {"9"}}, "", ""},
++		{http.Header{"Retry-After": {"18446744073709551615"}}, "", ""},
++	} {
++		advice := NewRetryAdvice(tc.headers, now)
++		got := advice.Headers(now)
++		if got.Get("Retry-After") != tc.wait || got.Get("X-Should-Retry") != tc.veto || advice.DisallowsRetry() {
++			t.Fatal("malformed, conflicting or unrelated retry controls were promoted")
++		}
++	}
++}
+diff --git a/sdk/api/handlers/bridge_retry_advice_test.go b/sdk/api/handlers/bridge_retry_advice_test.go
+new file mode 100644
+--- /dev/null
++++ b/sdk/api/handlers/bridge_retry_advice_test.go
+@@ -0,0 +1,42 @@
++package handlers
++
++import (
++	"errors"
++	"github.com/gin-gonic/gin"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++)
++
++type bridgeTrustedRetryError struct{}
++
++func (bridgeTrustedRetryError) Error() string { return "Synthetic deadline" }
++func (bridgeTrustedRetryError) SafeResponseHeaders() http.Header {
++	return http.Header{"Retry-After": {"17"}}
++}
++
++func TestBridgeRetryAdviceWithoutBroadPassthrough(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	for _, trusted := range []bool{false, true} {
++		recorder := httptest.NewRecorder()
++		c, _ := gin.CreateTestContext(recorder)
++		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
++		var cause error = errors.New("Synthetic provider failure")
++		want := "7"
++		if trusted {
++			cause = bridgeTrustedRetryError{}
++			want = "17"
++		}
++		handler := NewBaseAPIHandlers(nil, nil)
++		handler.WriteErrorResponse(c, &interfaces.ErrorMessage{StatusCode: 503, Error: cause, Addon: http.Header{
++			"Retry-After": {"7"}, "X-Should-Retry": {"false"}, "Set-Cookie": {"private=1"}, "X-Fixture-Private": {"private"},
++		}})
++		if recorder.Code != 503 || recorder.Header().Get("Retry-After") != want || recorder.Header().Get("X-Should-Retry") != "false" {
++			t.Fatal("native retry controls changed status or trusted deadline")
++		}
++		if recorder.Header().Get("Set-Cookie") != "" || recorder.Header().Get("X-Fixture-Private") != "" {
++			t.Fatal("broad private headers escaped the default policy")
++		}
++	}
++}
+diff --git a/sdk/api/handlers/claude/bridge_retry_advice_test.go b/sdk/api/handlers/claude/bridge_retry_advice_test.go
+new file mode 100644
+--- /dev/null
++++ b/sdk/api/handlers/claude/bridge_retry_advice_test.go
+@@ -0,0 +1,43 @@
++package claude
++
++import (
++	"errors"
++	"github.com/gin-gonic/gin"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
++	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++)
++
++type bridgeTrustedRetryError struct{}
++
++func (bridgeTrustedRetryError) Error() string { return "Synthetic deadline" }
++func (bridgeTrustedRetryError) SafeResponseHeaders() http.Header {
++	return http.Header{"Retry-After": {"17"}}
++}
++
++func TestBridgeRetryAdviceWithoutBroadPassthrough(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	for _, trusted := range []bool{false, true} {
++		recorder := httptest.NewRecorder()
++		c, _ := gin.CreateTestContext(recorder)
++		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
++		var cause error = errors.New("Synthetic provider failure")
++		want := "7"
++		if trusted {
++			cause = bridgeTrustedRetryError{}
++			want = "17"
++		}
++		handler := NewClaudeCodeAPIHandler(handlers.NewBaseAPIHandlers(nil, nil))
++		handler.WriteErrorResponse(c, &interfaces.ErrorMessage{StatusCode: 503, Error: cause, Addon: http.Header{
++			"Retry-After": {"7"}, "X-Should-Retry": {"false"}, "Set-Cookie": {"private=1"}, "X-Fixture-Private": {"private"},
++		}})
++		if recorder.Code != 503 || recorder.Header().Get("Retry-After") != want || recorder.Header().Get("X-Should-Retry") != "false" {
++			t.Fatal("native retry controls changed status or trusted deadline")
++		}
++		if recorder.Header().Get("Set-Cookie") != "" || recorder.Header().Get("X-Fixture-Private") != "" {
++			t.Fatal("broad private headers escaped the default policy")
++		}
++	}
++}
+diff --git a/sdk/api/handlers/claude/code_handlers.go b/sdk/api/handlers/claude/code_handlers.go
+--- a/sdk/api/handlers/claude/code_handlers.go
++++ b/sdk/api/handlers/claude/code_handlers.go
+@@ -24,6 +24,7 @@
+ 	. "github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
+ 	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
+ 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
+ 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+ 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+ 	log "github.com/sirupsen/logrus"
+@@ -609,6 +610,20 @@
+ 			c.Writer.Header().Add("Retry-After", value)
+ 		}
+ 	}
++	// Retry advice is a limited protocol control, independent of broad header passthrough.
++	var retryAdvice http.Header
++	if msg != nil {
++		retryAdvice = util.NewRetryAdvice(msg.Addon, time.Now()).Headers(time.Now())
++		for key, values := range retryAdvice {
++			if key == "Retry-After" && coreauth.HasTrustedRetryDeadline(msg.Error) {
++				continue
++			}
++			c.Writer.Header().Del(key)
++			for _, value := range values {
++				c.Writer.Header().Add(key, value)
++			}
++		}
++	}
+ 	if msg != nil && msg.Addon != nil && handlers.PassthroughHeadersEnabled(h.CurrentConfig()) {
+ 		for key, values := range msg.Addon {
+ 			if len(values) == 0 || handlers.IsCPAReservedResponseHeader(key) {
+@@ -617,6 +632,9 @@
+ 			// A locally trusted cooldown deadline outranks the raw upstream
+ 			// Retry-After; keep the value written above.
+ 			if coreauth.HasTrustedRetryDeadline(msg.Error) && http.CanonicalHeaderKey(key) == "Retry-After" {
++				continue
++			}
++			if len(retryAdvice.Values(key)) > 0 {
+ 				continue
+ 			}
+ 			c.Writer.Header().Del(key)
+diff --git a/sdk/api/handlers/handlers_error_response_test.go b/sdk/api/handlers/handlers_error_response_test.go
+--- a/sdk/api/handlers/handlers_error_response_test.go
++++ b/sdk/api/handlers/handlers_error_response_test.go
+@@ -43,7 +43,7 @@
+ func (e responseBodyOnlyTestError) StatusCode() int      { return e.status }
+ func (e responseBodyOnlyTestError) ResponseBody() []byte { return e.body }
+ 
+-func TestWriteErrorResponse_AddonHeadersDisabledByDefault(t *testing.T) {
++func TestWriteErrorResponse_AddonHeadersDisabledExceptRetryAdvice(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 	recorder := httptest.NewRecorder()
+ 	c, _ := gin.CreateTestContext(recorder)
+@@ -62,8 +62,8 @@
+ 	if recorder.Code != http.StatusTooManyRequests {
+ 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
+ 	}
+-	if got := recorder.Header().Get("Retry-After"); got != "" {
+-		t.Fatalf("Retry-After should be empty when passthrough is disabled, got %q", got)
++	if got := recorder.Header().Get("Retry-After"); got != "30" {
++		t.Fatalf("validated Retry-After must survive without broad header passthrough, got %q", got)
+ 	}
+ 	if got := recorder.Header().Get("X-Request-Id"); got != "" {
+ 		t.Fatalf("X-Request-Id should be empty when passthrough is disabled, got %q", got)
+diff --git a/sdk/api/handlers/handlers_errors.go b/sdk/api/handlers/handlers_errors.go
+--- a/sdk/api/handlers/handlers_errors.go
++++ b/sdk/api/handlers/handlers_errors.go
+@@ -6,10 +6,12 @@
+ 	"fmt"
+ 	"net/http"
+ 	"strings"
++	"time"
+ 
+ 	"github.com/gin-gonic/gin"
+ 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
+ 	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
+ 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+ 	"golang.org/x/net/context"
+ )
+@@ -128,6 +130,20 @@
+ 			c.Writer.Header().Add("Retry-After", value)
+ 		}
+ 	}
++	// Retry advice is a limited protocol control, independent of broad header passthrough.
++	var retryAdvice http.Header
++	if msg != nil {
++		retryAdvice = util.NewRetryAdvice(msg.Addon, time.Now()).Headers(time.Now())
++		for key, values := range retryAdvice {
++			if key == "Retry-After" && coreauth.HasTrustedRetryDeadline(msg.Error) {
++				continue
++			}
++			c.Writer.Header().Del(key)
++			for _, value := range values {
++				c.Writer.Header().Add(key, value)
++			}
++		}
++	}
+ 	if msg != nil && msg.Addon != nil && PassthroughHeadersEnabled(h.CurrentConfig()) {
+ 		for key, values := range msg.Addon {
+ 			if len(values) == 0 || IsCPAReservedResponseHeader(key) {
+@@ -136,6 +152,9 @@
+ 			// A locally trusted cooldown deadline outranks the raw upstream
+ 			// Retry-After; keep the value written above.
+ 			if coreauth.HasTrustedRetryDeadline(msg.Error) && http.CanonicalHeaderKey(key) == "Retry-After" {
++				continue
++			}
++			if len(retryAdvice.Values(key)) > 0 {
+ 				continue
+ 			}
+ 			c.Writer.Header().Del(key)
+diff --git a/sdk/cliproxy/auth/bridge_retry_advice_test.go b/sdk/cliproxy/auth/bridge_retry_advice_test.go
+new file mode 100644
+--- /dev/null
++++ b/sdk/cliproxy/auth/bridge_retry_advice_test.go
+@@ -0,0 +1,81 @@
++package auth
++
++import (
++	"context"
++	"fmt"
++	"testing"
++	"time"
++
++	internalconfig "github.com/router-for-me/CLIProxyAPI/v8/internal/config"
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
++)
++
++type bridgeRetryVetoError struct{ customStatusError }
++
++func (bridgeRetryVetoError) IsRequestStop() bool { return true }
++
++func TestBridgeRetryVetoPreventsRotationRefreshAndConfiguredContinuation(t *testing.T) {
++	for _, status := range []int{401, 429, 503} {
++		for _, mode := range []string{"execute", "count", "stream", "bootstrap"} {
++			for _, action := range []string{"continue", "continue-and-cooldown"} {
++				t.Run(fmt.Sprintf("%d/%s/%s", status, mode, action), func(t *testing.T) {
++					ctx := context.Background()
++					m := NewManager(nil, nil, nil)
++					m.SetRetryConfig(2, 2*time.Second, 5)
++					marker := "fixture-retry-veto"
++					rule := internalconfig.RequestScopedErrorRule{Status: status, Match: []string{marker}, Action: action}
++					delay := time.Second
++					failure := bridgeRetryVetoError{customStatusError{code: status, msg: marker, retryAfter: &delay}}
++					for index := 0; index < 2; index++ {
++						id := fmt.Sprintf("bridge-veto-%d-%s-%s-%d", status, mode, action, index)
++						auth := &Auth{ID: id, Provider: "codex", Status: StatusActive,
++							Attributes: map[string]string{"auth_kind": "oauth"},
++							Metadata: map[string]any{"access_token": "fixture-access", "refresh_token": "fixture-refresh",
++								"request_scoped_errors": []internalconfig.RequestScopedErrorRule{rule}}}
++						if _, matched := matchRequestScopedErrorAction(auth, failure.customStatusError, nil); !matched {
++							t.Fatal("the negative-control rule did not match an ordinary error")
++						}
++						registry.GetGlobalRegistry().RegisterClient(id, "codex", []*registry.ModelInfo{{ID: "gpt-5.5"}})
++						t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(id) })
++						if _, err := m.Register(ctx, auth); err != nil {
++							t.Fatal(err)
++						}
++					}
++					calls := 0
++					reject := func(ctx context.Context, _ *Auth, _ cliproxyexecutor.Request, _ cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
++						calls++
++						cliproxyexecutor.MarkUpstreamAttempt(ctx)
++						return cliproxyexecutor.Response{}, failure
++					}
++					exec := &issue6865Executor{id: "codex", executeFn: reject, countFn: reject,
++						streamFn: func(ctx context.Context, _ *Auth, _ cliproxyexecutor.Request, _ cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
++							calls++
++							cliproxyexecutor.MarkUpstreamAttempt(ctx)
++							if mode != "bootstrap" {
++								return nil, failure
++							}
++							chunks := make(chan cliproxyexecutor.StreamChunk, 1)
++							chunks <- cliproxyexecutor.StreamChunk{Err: failure}
++							close(chunks)
++							return &cliproxyexecutor.StreamResult{Chunks: chunks}, nil
++						}}
++					m.RegisterExecutor(exec)
++					req, opts := cliproxyexecutor.Request{Model: "gpt-5.5"}, cliproxyexecutor.Options{}
++					var err error
++					switch mode {
++					case "execute":
++						_, err = m.Execute(ctx, []string{"codex"}, req, opts)
++					case "count":
++						_, err = m.ExecuteCount(ctx, []string{"codex"}, req, opts)
++					default:
++						_, err = m.ExecuteStream(ctx, []string{"codex"}, req, opts)
++					}
++					if err == nil || statusCodeFromError(err) != status || calls != 1 || exec.refreshCalls != 0 {
++						t.Fatalf("retry veto lost: status=%d attempts=%d refreshes=%d", statusCodeFromError(err), calls, exec.refreshCalls)
++					}
++				})
++			}
++		}
++	}
++}
+diff --git a/sdk/cliproxy/auth/conductor_execution.go b/sdk/cliproxy/auth/conductor_execution.go
+--- a/sdk/cliproxy/auth/conductor_execution.go
++++ b/sdk/cliproxy/auth/conductor_execution.go
+@@ -689,7 +689,7 @@
+ 					}
+ 					continue
+ 				}
+-				if isResponsesCompactRequestFaultError(execOpts, errExec) || isRequestInvalidError(errExec) {
++				if isResponsesCompactRequestFaultError(execOpts, errExec) || isRequestStopError(errExec) || isRequestInvalidError(errExec) {
+ 					return cliproxyexecutor.Response{}, errExec
+ 				}
+ 				authErr = errExec
+@@ -715,7 +715,7 @@
+ 				}
+ 				continue
+ 			}
+-			if isResponsesCompactRequestFaultError(opts, authErr) || isRequestInvalidError(authErr) {
++			if isResponsesCompactRequestFaultError(opts, authErr) || isRequestStopError(authErr) || isRequestInvalidError(authErr) {
+ 				return cliproxyexecutor.Response{}, authErr
+ 			}
+ 			lastErr = authErr
+@@ -911,7 +911,7 @@
+ 					}
+ 					continue
+ 				}
+-				if isRequestInvalidError(errExec) {
++				if isRequestStopError(errExec) || isRequestInvalidError(errExec) {
+ 					return cliproxyexecutor.Response{}, errExec
+ 				}
+ 				authErr = errExec
+@@ -937,7 +937,7 @@
+ 				}
+ 				continue
+ 			}
+-			if isRequestInvalidError(authErr) {
++			if isRequestStopError(authErr) || isRequestInvalidError(authErr) {
+ 				return cliproxyexecutor.Response{}, authErr
+ 			}
+ 			lastErr = authErr
+@@ -1261,7 +1261,7 @@
+ 				}
+ 				continue
+ 			}
+-			if isRequestInvalidError(errStream) || cliproxyexecutor.IsUpstreamWebsocketTurnError(errStream) {
++			if isRequestStopError(errStream) || isRequestInvalidError(errStream) || cliproxyexecutor.IsUpstreamWebsocketTurnError(errStream) {
+ 				return nil, errStream
+ 			}
+ 			lastErr = errStream
+diff --git a/sdk/cliproxy/auth/conductor_home_execution.go b/sdk/cliproxy/auth/conductor_home_execution.go
+--- a/sdk/cliproxy/auth/conductor_home_execution.go
++++ b/sdk/cliproxy/auth/conductor_home_execution.go
+@@ -294,7 +294,7 @@
+ 				}
+ 				continue
+ 			}
+-			if isRequestInvalidError(errExecute) {
++			if isRequestStopError(errExecute) || isRequestInvalidError(errExecute) {
+ 				releaseAttempt()
+ 				selection.End("request_invalid")
+ 				return cliproxyexecutor.Response{}, errExecute
+diff --git a/sdk/cliproxy/auth/conductor_refresh.go b/sdk/cliproxy/auth/conductor_refresh.go
+--- a/sdk/cliproxy/auth/conductor_refresh.go
++++ b/sdk/cliproxy/auth/conductor_refresh.go
+@@ -825,9 +825,9 @@
+ 	if m == nil || auth == nil || execErr == nil {
+ 		return auth, false
+ 	}
+-	// Request-scoped failures describe this request, not stale credentials.
+-	// Refreshing would turn a direct error response into an implicit retry.
+-	if isRequestScopedError(execErr) || !isUnauthorizedError(execErr) {
++	// Retry vetoes and request-scoped failures must not become an implicit
++	// refresh-and-resend action.
++	if isRequestStopError(execErr) || isRequestScopedError(execErr) || !isUnauthorizedError(execErr) {
+ 		return auth, false
+ 	}
+ 	// A 401 matched by a configured request-scoped rule is the rule's to handle: no rejection, no refresh.
+diff --git a/sdk/cliproxy/auth/conductor_request_scoped_errors.go b/sdk/cliproxy/auth/conductor_request_scoped_errors.go
+--- a/sdk/cliproxy/auth/conductor_request_scoped_errors.go
++++ b/sdk/cliproxy/auth/conductor_request_scoped_errors.go
+@@ -185,7 +185,8 @@
+ // If a rule matches, it returns (action, true).
+ // If no rule matches, it returns ("", false).
+ func matchRequestScopedErrorAction(auth *Auth, err error, cfg *internalconfig.Config) (string, bool) {
+-	if err == nil || cliproxyexecutor.IsUpstreamWebsocketTurnError(err) {
++	// An explicit upstream veto must not become credential rotation through a custom rule.
++	if err == nil || isRequestStopError(err) || cliproxyexecutor.IsUpstreamWebsocketTurnError(err) {
+ 		return "", false
+ 	}
+ 	rules := extractRequestScopedErrorRules(auth, cfg)
+diff --git a/sdk/cliproxy/auth/conductor_stream.go b/sdk/cliproxy/auth/conductor_stream.go
+--- a/sdk/cliproxy/auth/conductor_stream.go
++++ b/sdk/cliproxy/auth/conductor_stream.go
+@@ -336,7 +336,7 @@
+ 				}
+ 				continue
+ 			}
+-			if isRequestInvalidError(errStream) || cliproxyexecutor.IsUpstreamWebsocketTurnError(errStream) {
++			if isRequestStopError(errStream) || isRequestInvalidError(errStream) || cliproxyexecutor.IsUpstreamWebsocketTurnError(errStream) {
+ 				return nil, errStream
+ 			}
+ 			lastErr = errStream
+@@ -429,7 +429,7 @@
+ 				}
+ 				continue
+ 			}
+-			if isRequestInvalidError(bootstrapErr) || cliproxyexecutor.IsUpstreamWebsocketTurnError(bootstrapErr) {
++			if isRequestStopError(bootstrapErr) || isRequestInvalidError(bootstrapErr) || cliproxyexecutor.IsUpstreamWebsocketTurnError(bootstrapErr) {
+ 				rerr := resultErrorFromError(bootstrapErr)
+ 				result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, RouteModel: routeModel, Success: false, Error: rerr, Options: execOpts, CredentialVersion: auth.CredentialVersion, RegistrationEpoch: auth.RegistrationEpoch, ExecutionSeq: executionSeq}
+ 				result.RetryAfter = retryAfterFromError(bootstrapErr)

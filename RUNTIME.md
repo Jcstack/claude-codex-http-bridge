@@ -70,6 +70,13 @@ managed requests receive the patch; already admitted requests and direct legacy
 sessions retain their original translator. The physical upstream failure and
 broader unattended-recovery limits remain open; see [STREAMING.md](STREAMING.md#native-claude-error-compatibility-2026-11-07).
 
+The separate [retry-advice candidate](upstream/patches/retry-advice-candidate.patch)
+is intentionally excluded from `runtime_bundle.PATCHES`. Two-hop negative
+controls show that an old credential owner discards retry advice before an
+upgraded outer translator can preserve it. Its test workflow builds disposable
+binaries only; it does not create an installable bundle or migrate live OAuth
+ownership. The selected profile and running credential owner remain unchanged.
+
 An isolated Claude Code 2.1.316 probe found a possible future migration path:
 when its user settings file changed, an ordinary long-running client completed
 an already-started fake HTTP stream, then used a new authenticated fake HTTPS

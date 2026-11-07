@@ -530,3 +530,24 @@ general Codex deadline or provider-tool safety. The separate
 is another reason to distinguish first-header waits, body idle time and
 missing-terminal errors, without copying short timeout settings into real
 long-reasoning sessions.
+
+## Server retry controls and cancellation, 2026-11-07
+
+The official [Claude Code gateway protocol](https://code.claude.com/docs/en/llm-gateway-protocol)
+provides a concrete acceptance contract: preserve server retry advice without
+forwarding arbitrary private headers. Local single-hop and two-hop negative
+controls found advice lost by the pinned Codex error path. An
+[isolated candidate](upstream/patches/retry-advice-candidate.patch) retains a
+validated wait and veto, preserves trusted quota deadlines, and prevents a veto
+from triggering credential rotation or refresh. Real native-client tests check
+the resulting behavior rather than assuming that a translated error is enough.
+The old-inner negative control still fails, so the candidate remains excluded
+from the installable source profile and the original credential owner is intact.
+
+The OpenAI [background guide](https://developers.openai.com/api/docs/guides/background)
+distinguishes synchronous connection cancellation from cancelling or resuming
+stored background responses. An owned two-hop native-client fixture tests active
+connection closure and cancellation during retry backoff while independent work
+continues. It does not establish provider-side cancellation or safe replay of
+hosted tools. The [results and remaining boundaries](STREAMING.md#cancellation-and-server-retry-advice-2026-11-07)
+keep those claims separate from the existing incomplete-stream error fix.
