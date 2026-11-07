@@ -107,6 +107,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        self.respond(body)
+
+    def respond(self, body):
+        """Drive the owned tool protocol from an already decoded fixture request."""
         outputs = [item for item in body.get("input", [])
                    if isinstance(item, dict) and item.get("type") == "function_call_output"]
         observed = {self.server.calls.get(item.get("call_id")) for item in outputs}
@@ -133,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
         count = len(self.server.requests)
         first = count == 1
         missing = [name for name in TARGETS if name not in observed]
-        response = {"id": f"response_{count}", "model": MODEL, "status": "in_progress"}
+        response = {"id": f"response_{count}", "model": getattr(self.server, "model", MODEL), "status": "in_progress"}
         events = [{"type": "response.created", "response": response}]
         if missing:
             items = []
@@ -165,6 +169,8 @@ class Handler(BaseHTTPRequestHandler):
                 {"type": "response.content_part.added", "output_index": 0, "content_index": 0,
                  "part": {"type": "output_text", "text": ""}},
                 {"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "DONE"},
+                {"type": "response.content_part.done", "output_index": 0, "content_index": 0,
+                 "part": item["content"][0]},
                 {"type": "response.output_item.done", "output_index": 0, "item": item},
             ])
             output = [item]

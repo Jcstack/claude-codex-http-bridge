@@ -7,6 +7,53 @@ permissions:
   contents: read
 
 jobs:
+  windows-tool-regression:
+    timeout-minutes: 15
+    runs-on: windows-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install the integrity-locked headless client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+          python tests/claude_fixture.py
+      - name: Reconstruct and build the selected source profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          python - <<'PY'
+          import subprocess
+          import runtime_bundle
+          for name in runtime_bundle.PATCHES:
+              patch = runtime_bundle.SOURCE / 'upstream' / 'patches' / name
+              subprocess.run(['git', '-C', 'upstream-source', 'apply', str(patch)], check=True)
+          PY
+          cd upstream-source
+          go mod verify
+          go build -o ../selected.exe ./cmd/server
+      - name: Check shared parallel-tool protocol fixtures without claiming console-key coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/probe_parallel_stream.py selected.exe --two-layer-eof-origin selected.exe
   posix:
     timeout-minutes: 20
     strategy:
@@ -62,5 +109,26 @@ jobs:
               for key in escape ctrl-c; do
                 python tests/probe_interactive_retry_cancel.py selected --origin-binary selected --family "$family" --mode "$mode" --interrupt-key "$key"
               done
+            done
+          done
+      - name: Interrupt between tool effects and retain successful history in the same process
+        shell: bash
+        run: |
+          set -euo pipefail
+          for family in sol astra; do
+            for key in escape ctrl-c; do
+              python tests/probe_interactive_tool_cancel.py selected --origin-binary selected --family "$family" --interrupt-key "$key"
+            done
+          done
+      - name: Repeat tool interruption with a byte-identical client at another path
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir alternate-client
+          cp "$CLAUDE_CODEX_TEST_BIN" alternate-client/claude
+          chmod +x alternate-client/claude
+          for family in sol astra; do
+            for key in escape ctrl-c; do
+              python tests/probe_interactive_tool_cancel.py selected --origin-binary selected --family "$family" --interrupt-key "$key" --client-binary alternate-client/claude
             done
           done

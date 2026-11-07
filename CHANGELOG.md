@@ -4,6 +4,10 @@ HarnessLift versions describe this wrapper and documentation, independently of t
 
 ## Unreleased
 
+- Extend credential-free POSIX cancellation acceptance to interrupted file
+  tools in the same interactive client. Check retained successful results,
+  one effect per target and independent work at two byte-identical client
+  paths. Existing user homes and provider-hosted actions remain separate gates.
 - Add a source-locked Claude Messages error compatibility patch: preserve the
   status-derived native category for foreign `server_error` and
   `service_unavailable_error` names. This enables the tested Claude client's

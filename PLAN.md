@@ -41,7 +41,10 @@ close the broader unattended-recovery acceptance item.
    Preserve noncompletion details independently of healthy controls. A private
    error-file review also found the same sentinel on a nonstream request;
    buffered execution now has bounded metadata in the active managed backend.
-   Coverage before successful HTTP response headers remains a separate gate.
+   The selected backend now records bounded HTTP dispatch, header-return and
+   decoder-setup phases. Its immediate upstream is the older origin; these
+   observations do not expose the origin-to-provider phases or establish the
+   historical disconnect's cause.
 2. The native error-category correction is selected. Complete repeated-failure,
    exhaustion, cancellation and overall-budget acceptance for the harness's
    native retry policy. Keep this separate from
@@ -196,6 +199,16 @@ close the broader unattended-recovery acceptance item.
 - [x] Add EOF, `response.failed`, interleaved calls to two tools, and client termination before and after tool completion. Count each tool's effect independently and check subsequent requests for corresponding results; process termination does not represent every Ctrl-C or plugin scenario.
 - [x] Send Ctrl-C to a real Claude `-p` client in a private POSIX pseudoterminal before tool completion, after the first upstream item, after one effect while a separate isolated hook blocks the other, and after both effects. The existing local HOME plus installed-path combination timed out; interactive TUI and Windows console behavior remain unverified.
 - [x] Resume the same isolated interrupted session with a synthetic model that distinguishes successful and denied outcomes, complete unfinished actions, and verify completed actions are not repeated. This does not cover arbitrary real models or tools.
+- [x] Verify local interactive cancellation between two owned file-tool effects
+  without exiting the client. Sol/Sonnet and Astra/Opus mappings passed Esc and
+  Ctrl-C through two owned translators: the completed result survived, the
+  blocked write stayed absent until the new user turn, each final write ran
+  once and independent requests completed. All four cases also passed at the
+  byte-identical installed executable path with an empty temporary HOME.
+  The [POSIX gate](.github/workflows/interactive-retry-cancel.yml) now repeats
+  the tool boundary at two client paths; its revised cross-platform result is
+  pending. Existing-HOME behavior, arbitrary plugins, Windows console keys and
+  provider-hosted effects remain open. No active client or service was restarted.
 - [x] Classify recorded incomplete-stream errors using a fixed allowlist. A structured `request_timeout` was observed; its exact source within the origin or farther upstream remains unresolved.
 - [x] Reproduce loss of request scope under the translator's default cooling policy when the exact incomplete-stream sentinel is forwarded through a second translator: a later independent synthetic request receives 503 without reaching its fake origin. A separate candidate preserves scope for the exact sentinel and retains synthetic quota, auth, conflicting-status and unrelated-timeout controls. On a pinned real macOS client, partial and completed synthetic tool cases preserved one write and its continuation. The actual managed backend disables cooling and already admits a follow-up in tests using both the same settings and the actual generated configuration with an owned TLS ingress. The 503 reproduction therefore does not establish a fault in the current managed policy or explain the original disconnect.
 - [x] Prepare a disabled-by-default stream-observation candidate with allowlisted, bounded metadata and a separate privacy-limited parser. The extended candidate retains the previous event category and bounded event/read gaps; its clock starts after response headers. It observes its immediate upstream, not necessarily OpenAI, and the intervals include processing and backpressure. Explicit observation expires one hour after backend startup. The candidate source lock includes the observer; neither the observer nor the default-cooling patch is installed in the existing runtime.

@@ -151,6 +151,27 @@ checks both mappings, both keys and both cancellation boundaries.
 Its [run](https://github.com/Jcstack/harnesslift/actions/runs/42332780182) passed
 all eight combinations on both Linux and macOS with the selected source profile.
 
+The [interactive tool fixture](tests/probe_interactive_tool_cancel.py) adds a
+different cancellation boundary: one owned write has completed while a second
+write waits in a synthetic `PreToolUse` hook. After Esc or Ctrl-C, the waiting
+effect must remain absent. The same client process then receives a new user
+turn, preserves the successful tool result, completes only the missing write
+and retains both final results. Independent requests must still complete,
+and `PostToolUse` markers count each write separately to detect an overwrite
+that would otherwise hide duplicate execution. Local Sol/Sonnet and Astra/Opus
+controls passed with both keys through a selected outer and earlier inner
+translator. All four controls also passed using the byte-identical client at
+the installed executable path, still with an empty temporary HOME. The POSIX
+workflow repeats these cases at the locked and copied executable paths;
+cross-platform acceptance is pending. These are synthetic hook and file-tool
+checks, not provider-hosted action cancellation or resolution of the earlier
+existing-HOME/installed-path timeout. No running client, setting or retry
+budget is changed by these fixtures.
+
+Claude's [interactive-mode reference](https://code.claude.com/docs/en/interactive-mode#general-controls)
+describes Ctrl-C interruption. This test checks observable tool and continuation
+behavior instead of relying on a particular interruption message in the UI.
+
 An initial fixture wrongly required the literal UI text `Interrupted`; this
 client can silently restore the input instead. Acceptance now uses connection
 closure and the actual next-turn request. One provisional run finished its
