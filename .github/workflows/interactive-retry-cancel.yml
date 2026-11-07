@@ -1,0 +1,66 @@
+name: interactive-retry-cancel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  posix:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install the integrity-locked interactive client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+          python tests/claude_fixture.py
+      - name: Reconstruct and build the selected source profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          python - <<'PY'
+          import subprocess
+          import runtime_bundle
+          for name in runtime_bundle.PATCHES:
+              patch = runtime_bundle.SOURCE / 'upstream' / 'patches' / name
+              subprocess.run(['git', '-C', 'upstream-source', 'apply', str(patch)], check=True)
+          PY
+          cd upstream-source
+          go mod verify
+          go build -o ../selected ./cmd/server
+      - name: Interrupt active streams and native backoff, then continue in the same process
+        shell: bash
+        run: |
+          set -euo pipefail
+          for family in sol astra; do
+            for mode in active backoff; do
+              for key in escape ctrl-c; do
+                python tests/probe_interactive_retry_cancel.py selected --origin-binary selected --family "$family" --mode "$mode" --interrupt-key "$key"
+              done
+            done
+          done

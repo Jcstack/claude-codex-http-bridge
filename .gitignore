@@ -180,3 +180,4 @@
 !.github/workflows/claude-error-recovery.yml
 !.github/workflows/native-retry-budget.yml
 !.github/workflows/retry-advice-cancellation.yml
+!.github/workflows/interactive-retry-cancel.yml

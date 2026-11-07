@@ -127,7 +127,7 @@ provider deadline, cancellation safety or hosted-tool idempotency.
 #### Cancellation and server retry advice, 2026-11-07
 
 The credential-free [native cancellation fixture](tests/probe_native_retry_cancel.py)
-uses the locked client, an empty disposable home and two owned translators.
+uses the locked headless client, an empty disposable home and two owned translators.
 Local Sol/Sonnet and Astra/Opus mappings passed cancellation during an active
 signature-only stream and during native 429 backoff. On POSIX the fixture sends
 Ctrl-C through the child's controlling terminal. The active origin connection
@@ -136,6 +136,25 @@ before and after cancellation, and the workspace stayed empty. Windows coverage
 uses termination of the owned child; it does not establish Windows console-key
 behavior. These tests do not resolve the existing-HOME/installed-path timeout
 or cancellation between real tool effects.
+
+A separate [interactive fixture](tests/probe_interactive_retry_cancel.py) keeps
+the actual terminal client alive. Local Sol/Sonnet and Astra/Opus controls cover
+Esc and Ctrl-C during active streams and native 429 backoff. After cancellation,
+the same process accepts a new user turn and displays its exact synthetic
+result. The next upstream input must contain that new prompt, which distinguishes
+continuation from a stale automatic retry. Active-stream cases also require
+origin connection closure before gateway cleanup; independent requests complete
+and no workspace effect occurs. These cases use fresh homes and no accounts.
+They do not resolve the existing-HOME/installed-path issue or Windows console
+behavior. The [separate POSIX gate](.github/workflows/interactive-retry-cancel.yml)
+checks both mappings, both keys and both cancellation boundaries.
+
+An initial fixture wrongly required the literal UI text `Interrupted`; this
+client can silently restore the input instead. Acceptance now uses connection
+closure and the actual next-turn request. One provisional run finished its
+functional checks but failed during cleanup. The client now stops before its
+temporary home or gateways are removed, and the affected case passed locally.
+Neither fixture-development failure establishes an installed-service defect.
 
 The official [Messages gateway protocol](https://code.claude.com/docs/en/llm-gateway-protocol)
 requires preserving `x-should-retry` and integer-second `retry-after` advice.
@@ -147,6 +166,8 @@ only validated retry controls independently of broad header passthrough. It
 captures a deadline once and emits the remaining rounded-up seconds; a locally
 trusted quota deadline takes precedence. Invalid or conflicting values do not
 become default-passthrough controls. Cookies and arbitrary headers stay filtered.
+This advisory clock starts at error capture after status-body decoding, not at
+request admission or first-header arrival; it is not an overall request deadline.
 An explicit veto stops additional credential selection and unauthorized refresh
 attempts, including configured continuation rules, without reclassifying a
 genuine credential-level quota failure as a request-only error. A positive hint

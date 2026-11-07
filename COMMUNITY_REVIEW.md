@@ -503,7 +503,7 @@ foreign server-error names, preserving unknown types and existing status,
 message and header handling. Native client recovery is distinct from adding a
 second gateway retry loop. No account credentials were needed for these tests.
 
-The maintained upstream [stream-reset report](https://github.com/router-for-me/CLIProxyAPI/issues/7169)
+The closed upstream [stream-reset report](https://github.com/router-for-me/CLIProxyAPI/issues/7169)
 remains useful for transport symptoms and retry boundaries, but cannot establish
 the physical cause of this installation's failures. Error compatibility fixes
 one demonstrated reason a client stops; it cannot promise recovery from every
@@ -551,3 +551,12 @@ connection closure and cancellation during retry backoff while independent work
 continues. It does not establish provider-side cancellation or safe replay of
 hosted tools. The [results and remaining boundaries](STREAMING.md#cancellation-and-server-retry-advice-2026-11-07)
 keep those claims separate from the existing incomplete-stream error fix.
+
+A fresh release/status check still found [v8.0.58](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.58)
+as the latest release. The maintainer's [closure of #7169](https://github.com/router-for-me/CLIProxyAPI/issues/7169#issuecomment-6558776375)
+attributes that reporter's resets to the external path and declines extra idle
+tracking or a grace-period buffer. It also notes that Codex already uses HTTP/2,
+so changing the Claude transport to HTTP/2 is not a demonstrated Codex remedy.
+Those are upstream findings about another installation, not proof of this
+machine's failure source. Neither a closed report nor release activity justifies
+replacing the current credential owner or replaying arbitrary partial responses.
