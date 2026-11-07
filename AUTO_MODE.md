@@ -28,6 +28,19 @@ The [native-client fixture](tests/probe_auto_classifier.py) uses fake models,
 disposable homes and owned file effects. Local direct Messages and two-hop
 Codex controls passed both launch profiles: allow runs once, deny runs nothing
 and retains its reason, and an explicit deny rule still blocks an allow verdict.
-The [three-platform gate](.github/workflows/auto-classifier-compatibility.yml)
-is pending. These headless checks do not establish real-model review accuracy,
-Windows interactive behavior, server-side review or zero classifier usage.
+The [three-platform gate](https://github.com/Jcstack/harnesslift/actions/runs/42376305863)
+passed all 12 owned controls per platform on macOS, Linux and Windows. The
+[source/install gate](https://github.com/Jcstack/harnesslift/actions/runs/42374971804)
+passed all 11 jobs for the implementation revision; the later fixture revisions
+only corrected Windows test paths and added fixed failure categories. These
+headless checks do not establish real-model review accuracy, Windows interactive
+behavior, server-side review or zero classifier usage.
+
+On the local macOS installation, only the compatible launch-function edit and
+read-only audit categories were replaced, with private rollback copies. An
+installed-source overlay passed 106 checks with one optional skip; all 12 native
+controls passed again using the installed modules and fake endpoints. Read-only
+service checks remained healthy. The original credential owner, ingress,
+selected runtime, account, client key and existing native client processes were
+preserved. This targeted replacement does not establish that the complete
+installer can update a running installation atomically.

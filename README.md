@@ -81,6 +81,7 @@ The installer verifies a pinned [CLIProxyAPI](https://github.com/router-for-me/C
 | Area | Current scope | Details |
 | --- | --- | --- |
 | Local Claude Code workflow | Model selection, tool use, permissions, MCP, hooks, skills, subagents, resume; behavior tested with specific client versions | [Compatibility](COMPATIBILITY.md) |
+| Auto-mode classifier | Native client review preserves permission rules; classifier inference uses the configured route and its quota | [Classifier configuration and billing](AUTO_MODE.md) |
 | Models, effort, context | Generated from eligible catalog metadata; no promise that every registered model is entitled or that every provider effort maps to Claude UI | [Usage](USAGE.md#use) |
 | Web search and citations | Native search preservation and citation replay require the reviewed runtime | [Runtime](RUNTIME.md) |
 | Prompt caching and HUD | Provider-reported cache counters, context and usage adaptation; cache hits and subscription cost are not fabricated | [Cache audit](CACHE_AUDIT.md), [HUD](USAGE.md#claude-hud-and-other-status-line-plugins) |

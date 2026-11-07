@@ -371,8 +371,17 @@ References: [OpenAI Prompt Caching](https://developers.openai.com/api/docs/guide
   explicit deny rule, directly and through two translators, for both profile
   configurations. Operator overrides and permission modes remain intact.
   No server safeguard results or free eligibility are fabricated. All 438
-  offline tests passed with 20 optional skips. Three-platform and installed
-  acceptance remain pending; see [AUTO_MODE.md](AUTO_MODE.md).
+  offline tests passed with 20 optional skips. The [classifier gate](https://github.com/Jcstack/harnesslift/actions/runs/42376305863)
+  passed all 12 owned native controls on each of three platforms; the
+  [implementation source/install gate](https://github.com/Jcstack/harnesslift/actions/runs/42374971804)
+  passed all 11 jobs. An installed-source overlay passed 106 checks with one
+  optional skip. Only the compatible launch edit and audit categories were
+  installed with private rollback copies; all 12 native controls passed again
+  with installed modules and fake endpoints, and read-only service checks
+  remained healthy. Origin, ingress, runtime selection, account, key and existing
+  native client processes were preserved. Real-model review accuracy, Windows
+  interactive behavior and complete live-installer safety remain separate
+  gates; see [AUTO_MODE.md](AUTO_MODE.md).
 - [x] Recognize the native server-error, connection-lost, sleep, idle-abort,
   missing-event and malformed-stream mid-response notices as separate fixed
   audit categories. Synthetic checks retain privacy, ignore user quotations and
