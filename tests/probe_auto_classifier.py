@@ -31,6 +31,15 @@ DENIAL = "OWNED_CLASSIFIER_DENIAL"
 DONE = "OWNED_AUTO_CLASSIFIER_DONE"
 
 
+class VerificationFailure(RuntimeError):
+    """A fixed fixture assertion; never includes native output or request data."""
+
+
+def verify(condition, reason):
+    if not condition:
+        raise VerificationFailure(reason)
+
+
 class Origin(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -207,31 +216,40 @@ def main():
                 ALL_PROXY="http://127.0.0.1:9", NO_PROXY="127.0.0.1,localhost")
             with patch.dict(os.environ, environment, clear=True):
                 environment = launcher.claude_environment(port, key, MAIN, args.route, available_models={MAIN, REVIEW})
-            assert environment["CLAUDE_CODE_AUTO_MODE_SERVER"] == "0", "The route did not select native client review"
+            verify(environment["CLAUDE_CODE_AUTO_MODE_SERVER"] == "0", "The route did not select native client review")
             if os.name == "nt" and shutil.which("git"):
-                bash = Path(shutil.which("git")).resolve().parent.parent / "bin/bash.exe"
-                if bash.is_file():
-                    environment["CLAUDE_CODE_GIT_BASH_PATH"] = str(bash)
+                git = Path(shutil.which("git")).resolve()
+                candidates = [parent / "bin/bash.exe" for parent in git.parents]
+                bash = next((path for path in candidates if path.is_file()), None)
+                verify(bash is not None, "The owned Windows action requires Git Bash")
+                environment["CLAUDE_CODE_GIT_BASH_PATH"] = str(bash)
             command = [str(binary()), "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                 "--settings", str(settings), "--permission-mode", "auto", "--tools", "Bash", "--model", MAIN,
                 "--max-turns", "3", "--output-format", "json", "-p", "Run the owned synthetic action once, then report its result."]
             run = subprocess.run(command, cwd=work, env=environment, stdin=subprocess.DEVNULL,
                                  capture_output=True, text=True, timeout=90)
-            result = json.loads(run.stdout)
-            assert run.returncode == 0 and result.get("is_error") is False, "The native auto-mode client did not complete"
-            assert str(result.get("result", "")).strip() == DONE, "The native auto-mode result changed"
-            assert "this session isn't eligible" not in run.stderr.lower(), "The incompatible server-review notice remained"
             reviews = server.models.count(REVIEW)
             effects = marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
+            print(json.dumps({"synthetic_only": True, "native_exit_code": run.returncode,
+                "classifier_requests": reviews, "tool_result_seen": server.tool_result_seen,
+                "tool_result_error": server.tool_result_error, "owned_effect_count": len(effects)}), flush=True)
+            verify(run.returncode == 0, "The native auto-mode client exited with an error")
+            try:
+                result = json.loads(run.stdout)
+            except ValueError:
+                raise VerificationFailure("The native auto-mode client returned no JSON result") from None
+            verify(result.get("is_error") is False, "The native auto-mode client did not complete")
+            verify(str(result.get("result", "")).strip() == DONE, "The native auto-mode result changed")
+            verify("this session isn't eligible" not in run.stderr.lower(), "The incompatible server-review notice remained")
             denied = args.verdict == "deny" or args.deny_rule
-            assert effects == ([] if denied else ["SYNTHETIC"]), "Auto classification lost, duplicated or permitted a denied effect"
-            assert server.tool_result_seen, "The native harness lost its tool result"
+            verify(effects == ([] if denied else ["SYNTHETIC"]), "Auto classification lost, duplicated or permitted a denied effect")
+            verify(server.tool_result_seen, "The native harness lost its tool result")
             if not args.deny_rule:
-                assert 1 <= reviews <= 3, "The classifier was skipped or repeatedly failed to parse"
+                verify(1 <= reviews <= 3, "The classifier was skipped or repeatedly failed to parse")
                 if args.verdict == "deny":
-                    assert server.denial_reason_seen, "The native denial did not preserve the classifier's verdict"
-            assert sorted(p.name for p in work.iterdir()) == ([] if denied else ["owned.txt"]), "Unexpected workspace effects"
-            assert not server.server_safeguards_requested, "Native server safeguards were requested in the direct control"
+                    verify(server.denial_reason_seen, "The native denial did not preserve the classifier's verdict")
+            verify(sorted(p.name for p in work.iterdir()) == ([] if denied else ["owned.txt"]), "Unexpected workspace effects")
+            verify(not server.server_safeguards_requested, "Native server safeguards were requested in the direct control")
             print(json.dumps({"synthetic_only": True, "route_configuration": args.route, "through_codex": bool(args.proxy_binary),
                 "two_layers": bool(args.origin_binary), "classifier_verdict": args.verdict, "explicit_deny_rule": args.deny_rule,
                 "classifier_requests": reviews, "effects": len(effects), "native_auto_mode_completed": True,
@@ -244,5 +262,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except VerificationFailure as error:
+        raise SystemExit("Owned auto-classifier verification failed: " + str(error)) from None
     except (OSError, RuntimeError, ValueError, AssertionError, subprocess.SubprocessError):
         raise SystemExit("Owned auto-classifier verification failed; raw details withheld") from None
