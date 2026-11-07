@@ -196,6 +196,10 @@ def claude_environment(port: int, key: str, model: str,
     # guessing from prompt text. Keep explicit operator overrides.
     environment.setdefault("CLAUDE_CODE_ATTRIBUTION_HEADER", "0")
     environment.setdefault("CLAUDE_CODE_GATEWAY_HINT_HEADERS", "1")
+    # This route translates to Codex/Responses and has no verified Anthropic
+    # server safeguard results. Keep auto mode's native client classifier;
+    # an explicit operator setting still wins. This does not bypass checks.
+    environment.setdefault("CLAUDE_CODE_AUTO_MODE_SERVER", "0")
     # The user chose a private local gateway. Disable optional Anthropic
     # telemetry/survey traffic by default using the documented host control;
     # ordinary tools, plugins and the WebFetch safety check remain available.

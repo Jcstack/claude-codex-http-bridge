@@ -1,0 +1,74 @@
+name: auto-classifier-compatibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Check route defaults, operator overrides and private error categories
+        run: python -m unittest tests.test_bridge tests.test_session_audit tests.test_diagnostics -q
+      - name: Install the integrity-locked native client without scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix tests/claude-client --ignore-scripts --no-audit --no-fund
+          python tests/claude_fixture.py
+      - name: Verify native classifier allow, deny and explicit permission rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          for route in subscription api; do
+            python tests/probe_auto_classifier.py --route "$route" --verdict allow
+            python tests/probe_auto_classifier.py --route "$route" --verdict deny
+            python tests/probe_auto_classifier.py --route "$route" --verdict allow --deny-rule
+          done
+      - name: Reconstruct and build the selected source profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/router-for-me/CLIProxyAPI.git upstream-source
+          git -C upstream-source fetch --depth 1 origin 9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5
+          git -C upstream-source checkout --detach FETCH_HEAD
+          python - <<'PY'
+          import subprocess
+          import runtime_bundle
+          for name in runtime_bundle.PATCHES:
+              subprocess.run(['git', '-C', 'upstream-source', 'apply', str(runtime_bundle.SOURCE / 'upstream/patches' / name)], check=True)
+          PY
+          cd upstream-source
+          go mod verify
+          go build -o ../selected.exe ./cmd/server
+      - name: Preserve native permission outcomes through two Codex translators
+        shell: bash
+        run: |
+          set -euo pipefail
+          for route in subscription api; do
+            python tests/probe_auto_classifier.py --route "$route" --verdict allow --proxy-binary selected.exe --origin-binary selected.exe
+            python tests/probe_auto_classifier.py --route "$route" --verdict deny --proxy-binary selected.exe --origin-binary selected.exe
+            python tests/probe_auto_classifier.py --route "$route" --verdict allow --deny-rule --proxy-binary selected.exe --origin-binary selected.exe
+          done

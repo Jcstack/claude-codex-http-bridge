@@ -167,6 +167,11 @@ close the broader unattended-recovery acceptance item.
   real accounts. Real OAuth refresh/selection, safe origin migration,
   provider-side tools, long waits, error headers and global memory limits
   remain acceptance gates. Do not silently change models, accounts or effort.
+  Include the native interactive partial-delivery stop separately from
+  headless continuation. `StopFailure` is notification-only; an unattended
+  continuation would need verified session ownership, preserved tool results
+  and explicit bounds without overwriting user input. None is enabled by the
+  classifier-compatibility or notice-classification changes.
 - [ ] Assess whether the existing origin can expose a safe retry boundary
   without moving its listener or creating a second OAuth refresh owner. The
   origin trace index alone is insufficient: it can be absent, a file-backed
@@ -361,6 +366,18 @@ References: [OpenAI Prompt Caching](https://developers.openai.com/api/docs/guide
 
 ## P2: Claude Code local capabilities and plugin matrix
 
+- [x] Prepare the documented native client-classifier default for Codex routes.
+  Local locked-client controls cover allow, deny with retained reason and an
+  explicit deny rule, directly and through two translators, for both profile
+  configurations. Operator overrides and permission modes remain intact.
+  No server safeguard results or free eligibility are fabricated. All 438
+  offline tests passed with 20 optional skips. Three-platform and installed
+  acceptance remain pending; see [AUTO_MODE.md](AUTO_MODE.md).
+- [x] Recognize the native server-error, connection-lost, sleep, idle-abort,
+  missing-event and malformed-stream mid-response notices as separate fixed
+  audit categories. Synthetic checks retain privacy, ignore user quotations and
+  leave unreported HTTP statuses unknown. These labels do not establish the
+  physical cause or repair an interrupted response.
 - [ ] Cover `/model`, `/effort`, `/compact`, `/context`, `/usage`, plan mode, resume, fork, rewind, context editing, and background work individually.
 - [ ] Verify permission denial, hook blocking, skills, coexisting MCP servers, dynamic tools, partial tool-argument streams, structured output, cancellation, and retries.
 - [x] Reproduce loss of explicit strict mode and programmatic-only caller restrictions with the selected translator and a fake upstream. An isolated request-guard candidate preserves an unchanged strict schema and rejects restricted callers before the fake on both streaming and nonstreaming paths; a native Codex executor fixture passes while the previous source fails. This is not a real Claude permission or provider test; see [TOOL_CONTRACT.md](TOOL_CONTRACT.md).

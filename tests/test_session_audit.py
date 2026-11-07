@@ -36,6 +36,30 @@ class SessionAuditTests(unittest.TestCase):
             self.assertNotIn("PRIVATE", json.dumps(report))
             self.assertEqual(audit.error_labels("server_is_overloaded"), ["server_overloaded"])
 
+    def test_mid_response_notices_have_fixed_categories_without_invented_statuses(self):
+        cases = {
+            "Server error mid-response": "server_error_mid_response",
+            "Connection lost mid-response": "connection_lost_mid_response",
+            "Your computer went to sleep mid-response": "sleep_mid_response",
+            "The response stopped arriving": "stream_idle_abort",
+            "Part of the response never arrived": "missing_stream_event",
+            "The response stream was malformed": "malformed_stream",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "PRIVATE_SESSION.jsonl"
+            for notice, category in cases.items():
+                with self.subTest(category=category):
+                    text = f"API Error: {notice}. The response above may be incomplete. PRIVATE_SECRET"
+                    write_records(path, [{"timestamp": AT, "type": "assistant", "isApiErrorMessage": True,
+                        "message": {"content": [{"type": "text", "text": text}]}},
+                        {"timestamp": AT, "type": "user", "message": {"content": text}}])
+                    report = audit.scan(path, None, audit.Usage())
+                    self.assertEqual(report["api_error_records"], 1)
+                    self.assertEqual(report["api_error_category_mentions"], {category: 1})
+                    self.assertEqual(report["api_error_status_mentions"], {})
+                    self.assertNotIn("PRIVATE", json.dumps(report))
+                    self.assertNotIn(notice, json.dumps(report))
+
     def test_recent_thinking_counts_only_metadata_after_last_request_marker(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "PRIVATE_SESSION.jsonl"

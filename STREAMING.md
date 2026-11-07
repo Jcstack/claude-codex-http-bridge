@@ -126,6 +126,18 @@ provider deadline, cancellation safety or hosted-tool idempotency.
 
 #### Cancellation and server retry advice, 2026-11-07
 
+Claude Code also has a separate partial-delivery boundary. Its
+[error reference](https://code.claude.com/docs/en/errors#the-response-above-may-be-incomplete)
+describes mid-response server, connection, sleep, idle, missing-event and
+malformed-stream notices. An interactive session can stop after preserving
+completed blocks; continuing from that state is a new user turn. The headless
+continuation controls above do not establish identical interactive behavior.
+The audit recognizes these variants without assigning an unreported status.
+The [StopFailure hook](https://code.claude.com/docs/en/hooks#stopfailure) can
+report the failure but has no decision control, so blocking that hook is not
+a supported automatic-resume mechanism. No output is marked complete and no
+live terminal input is injected to hide this condition.
+
 The credential-free [native cancellation fixture](tests/probe_native_retry_cancel.py)
 uses the locked headless client, an empty disposable home and two owned translators.
 Local Sol/Sonnet and Astra/Opus mappings passed cancellation during an active

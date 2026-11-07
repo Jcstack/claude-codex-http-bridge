@@ -22,13 +22,18 @@ import launcher
 def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_prefix: str = "",
                                upstream_key: str = "fixture-upstream", managed_policy: bool = False,
                                local_key: str = "fixture-local", model: str = "gpt-6.1-sol",
-                               request_retries: int = 0, second_credential: bool = False):
+                               request_retries: int = 0, second_credential: bool = False,
+                               additional_models: tuple[str, ...] = ()):
     if (type(upstream_port) is not int or not 1 <= upstream_port <= 65535 or not binary.is_file()
             or upstream_prefix not in ("", "/v1") or upstream_key not in ("fixture-upstream", "fixture-local", "a" * 64)
             or local_key not in ("fixture-local", "a" * 64) or type(managed_policy) is not bool
             or model not in ("gpt-6.1-sol", "gpt-6-astra")
             or type(request_retries) is not int or not 0 <= request_retries <= 3
-            or (request_retries != 0 and not managed_policy) or type(second_credential) is not bool):
+            or (request_retries != 0 and not managed_policy) or type(second_credential) is not bool
+            or type(additional_models) is not tuple
+            or any(type(name) is not str or name not in ("gpt-6.1-sol", "gpt-6-astra")
+                   for name in additional_models)
+            or len(set((model, *additional_models))) != 1 + len(additional_models)):
         raise ValueError("Invalid synthetic translator fixture")
     with tempfile.TemporaryDirectory(prefix="bridge-codex-stream-fixture-") as temporary:
         root = Path(temporary)
@@ -42,6 +47,8 @@ def temporary_codex_translator(binary: Path, upstream_port: int, *, upstream_pre
                   "    transient-error-cooldown-seconds: -1\n") if managed_policy else ""
         extra_key = '\n        - api-key: "fixture-secondary"' if second_credential else ''
         access_keys = [local_key, "fixture-secondary"] if second_credential else [local_key]
+        names = (model, *additional_models)
+        model_rows = "\n".join(f"        - name: {json.dumps(name)}\n          alias: {json.dumps(name)}" for name in names)
         config.write_text(f'''config-version: 8
 server: {{host: "127.0.0.1", port: {port}}}
 access: {{api-keys: {json.dumps(access_keys)}}}
@@ -53,8 +60,7 @@ api-keys:
     - name: fixture
       base-url: "http://127.0.0.1:{upstream_port}{upstream_prefix}"
       models:
-        - name: "{model}"
-          alias: "{model}"
+{model_rows}
       keys:
         - api-key: "{upstream_key}"{extra_key}
 ''', encoding="utf-8")
@@ -77,7 +83,7 @@ api-keys:
                     try:
                         with opener.open(request, timeout=1) as response:
                             value = json.load(response)
-                        if any(row.get("id") == model for row in value.get("data", []) if isinstance(row, dict)):
+                        if set(names).issubset({row.get("id") for row in value.get("data", []) if isinstance(row, dict)}):
                             break
                     except (OSError, ValueError, urllib.error.URLError):
                         pass

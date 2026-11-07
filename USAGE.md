@@ -109,6 +109,11 @@ For an isolated installation, pass `--root /private/path --bin-dir /private/path
 
 ## Use
 
+New Codex-backed launches use Claude Code's own auto-mode classifier while
+preserving permission rules and explicit operator settings. An existing
+classifier-charge notice can be acknowledged with Enter. This does not provide
+Anthropic's free server-side review. See [auto-mode configuration and checks](AUTO_MODE.md).
+
 ```bash
 cd /path/to/your/project
 claude-codex                         # newest catalog-listed Sol

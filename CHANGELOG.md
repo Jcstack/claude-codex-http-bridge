@@ -4,6 +4,11 @@ HarnessLift versions describe this wrapper and documentation, independently of t
 
 ## Unreleased
 
+- Default new Codex-backed launches to Claude Code's client-side auto classifier
+  using the documented route setting. Preserve operator overrides and permission
+  rules; do not claim Anthropic server safeguard results or free eligibility.
+- Classify native mid-response notices using fixed metadata categories without
+  inventing an HTTP status or returning error text.
 - Include observer-only stream endings in the read-only cross-layer timing
   report, even when no separate error log was written. Label the evidence
   source, omit explicit observer cancellations and preserve ambiguous matches.

@@ -187,6 +187,20 @@ class BridgeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "changed during session preparation"):
                 launcher.verify_prepared_model_settings(windows, Path(settings), bridge_models.catalog_snapshot(changed))
 
+    def test_codex_routes_keep_native_auto_classifier_and_explicit_operator_choice(self) -> None:
+        for route in ("subscription", "api"):
+            with self.subTest(route=route), patch.dict(os.environ,
+                    {"CLAUDE_CODE_AUTO_MODE_MODEL": "gpt-6.1-sol"}, clear=True):
+                environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6-astra", route)
+                self.assertEqual(environment["CLAUDE_CODE_AUTO_MODE_SERVER"], "0")
+                self.assertEqual(environment["CLAUDE_CODE_AUTO_MODE_MODEL"], "gpt-6.1-sol")
+                self.assertNotIn("CLAUDE_CODE_AUTO_MODE_SERVER", os.environ)
+            for explicit in ("0", "1"):
+                with self.subTest(route=route, explicit=explicit), patch.dict(os.environ,
+                        {"CLAUDE_CODE_AUTO_MODE_SERVER": explicit}, clear=True):
+                    environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol", route)
+                    self.assertEqual(environment["CLAUDE_CODE_AUTO_MODE_SERVER"], explicit)
+
     def test_gateway_tool_streaming_defaults_on_and_respects_opt_out(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             environment = launcher.claude_environment(12345, "mock-local-key", "gpt-6.1-sol")

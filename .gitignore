@@ -31,6 +31,7 @@
 !NATIVE_TOOLS.md
 !NATIVE_COMPACTION.md
 !ACCOUNTS.md
+!AUTO_MODE.md
 !QUOTA_RECOVERY.md
 !PLAN.md
 !CACHE_AUDIT.md
@@ -183,3 +184,4 @@
 !.github/workflows/retry-advice-cancellation.yml
 !.github/workflows/interactive-retry-cancel.yml
 !.github/workflows/request-phase-observation.yml
+!.github/workflows/auto-classifier-compatibility.yml
