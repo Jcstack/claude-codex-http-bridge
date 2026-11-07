@@ -175,8 +175,14 @@ only when one same-log local tag and a nearby timestamp give a unique match;
 ambiguous and missing matches stay explicit. It does not expose the tag, log
 line, request body, or private path. The local tag is not a cross-layer ID.
 
-For at most 12 recent managed failures, the report also compares a uniquely
-paired managed completion against origin Responses access records. The
+For at most 12 recent managed ending records, the report also compares a uniquely
+paired managed completion against origin Responses access records. Both
+error-log and observer-only noncompletion records are eligible. Each comparison
+identifies its fixed metadata source and retains validated observer outcome,
+reported failure category and read-error kind. Successful completions and
+explicit observer cancellations are excluded; an error-log row by itself does
+not establish cancellation state. The separately retained noncompletion list
+prevents later healthy controls from removing every observer-only detail. The
 candidate must finish within two seconds and have a duration within two
 seconds. Multiple candidates remain ambiguous; an unpaired managed failure is
 not compared. This is timing evidence only: even one candidate does not prove
@@ -184,7 +190,10 @@ that two layers saw the same request, that an HTTP 200 stream completed, or
 what caused the disconnection. The report includes omitted-record and
 oversized-line coverage and does not return tags, paths, URLs, or bodies.
 Metadata from both earlier and extended optional observer formats is accepted;
-the older format cannot provide the newer event-gap fields.
+the older format cannot provide the newer event-gap fields. An error-log row
+and an observer row can describe the same request, including across layers.
+These are bounded evidence rows, not a count of unique requests or failures;
+the report does not merge records merely because their timestamps match.
 
 A 24-hour snapshot ending near 02:46 China time on 2026-11-02 contained 56
 child logs, of which 12 had request model/effort metadata in that window. Those

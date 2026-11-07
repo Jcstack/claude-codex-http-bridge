@@ -212,6 +212,79 @@ class DiagnosticsTests(unittest.TestCase):
             for private in ('PRIVATE_SECRET', 'PRIVATE_HOST', '12345678', '87654321', generation, str(root)):
                 self.assertNotIn(private, json.dumps(report))
 
+    def test_cross_layer_comparison_includes_observer_only_failures_after_healthy_controls(self):
+        since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as temporary:
+            origin, managed = (Path(temporary) / name for name in ('origin.log', 'managed.log'))
+            origin.write_text('[2026-01-02T12:00:00Z] [12345678] [info] [gin.go:1] 200 | 7s | '
+                              'PRIVATE_HOST | POST "/v1/responses?key=PRIVATE_SECRET"\n')
+            failed = ('[2026-01-02T12:00:00Z] [87654321] codex stream observation: phase=stream '
+                      'outcome=terminal_event last_event=response.failed prior_event=response.output_item.added '
+                      'data_items=2 elapsed_ms=7000 since_read_ms=0 event_gap_ms=1000 max_read_gap_ms=1000 '
+                      'read_error=none failure_kind=reported_incomplete\n')
+            healthy = ''.join(f'[2026-01-02T12:01:{i:02d}Z] [aabbccdd] codex stream observation: phase=stream '
+                             'outcome=completion_event last_event=response.completed prior_event=response.created '
+                             'data_items=2 elapsed_ms=10 since_read_ms=0 event_gap_ms=10 max_read_gap_ms=10 '
+                             'read_error=none failure_kind=none\n' for i in range(13))
+            managed.write_text(failed + '[2026-01-02T12:00:00Z] [87654321] [info] [gin.go:1] 200 | 7s | '
+                               'PRIVATE_HOST | POST "/v1/messages"\n' + healthy)
+            summary = diagnostics.proxy_summary(managed, since)
+            self.assertEqual(summary['recent_stream_failure_http'], [])
+            self.assertEqual(summary['stream_failure_mentions'], {})
+            self.assertTrue(all(v['outcome'] == 'completion_event'
+                                for v in summary['stream_termination_observations']['recent']))
+            report = diagnostics.correlate_stream_endings(origin, [summary], since)
+            row, = report['recent']
+            self.assertEqual(row['metadata_source'], 'stream_observer')
+            self.assertEqual(row['managed_stream_outcome'], 'terminal_event')
+            self.assertEqual(row['managed_failure_kind'], 'reported_incomplete')
+            self.assertEqual(row['managed_read_error'], 'none')
+            self.assertEqual(row['managed_http_status'], 200)
+            self.assertEqual(row['origin_timing_match'], 'unique_candidate')
+            self.assertEqual(row['origin_candidate']['seconds'], 7)
+            for private in ('PRIVATE_SECRET', 'PRIVATE_HOST', '12345678', '87654321', 'aabbccdd', str(temporary)):
+                self.assertNotIn(private, json.dumps(report))
+
+    def test_cross_layer_observer_cancellation_and_completion_do_not_become_failures(self):
+        since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        record = {'at': '2026-01-02T12:00:00Z', 'same_log_match': 'unique', 'http_seconds': 7,
+                  'http_status': 200, 'read_error': 'none', 'failure_kind': 'none'}
+        rows = [{**record, 'outcome': 'read_error', 'read_error': 'cancelled'},
+                {**record, 'outcome': 'completion_event'}, {**record, 'outcome': 'other'}]
+        with patch.object(diagnostics, 'lines', side_effect=AssertionError('No origin scan is needed')):
+            report = diagnostics.correlate_stream_endings(Path('unused'),
+                [{'stream_termination_observations': {'recent_noncompletion': rows}}], since)
+        self.assertEqual(report['recent'], [])
+        self.assertEqual(report['omitted_at_limit'], 0)
+
+    def test_cross_layer_keeps_both_evidence_sources_without_claiming_unique_failures(self):
+        since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        record = {'at': '2026-01-02T12:00:00Z', 'same_log_match': 'unique', 'http_seconds': 7,
+                  'http_status': 200, 'outcome': 'eof', 'read_error': 'unexpected_eof',
+                  'failure_kind': 'none', 'private': 'PRIVATE_SECRET'}
+        with tempfile.TemporaryDirectory() as temporary:
+            origin = Path(temporary) / 'origin.log'
+            origin.write_text('[2026-01-02T12:00:00Z] [12345678] [info] [gin.go:1] 200 | 7s | '
+                              'PRIVATE_HOST | POST "/v1/responses"\n')
+            backend = {'recent_stream_failure_http': [record],
+                       'stream_termination_observations': {'recent_noncompletion': [record]}}
+            report = diagnostics.correlate_stream_endings(origin, [backend], since)
+            self.assertEqual([v['metadata_source'] for v in report['recent']], ['error_log', 'stream_observer'])
+            self.assertIsNone(report['recent'][0]['managed_stream_outcome'])
+            self.assertEqual(report['recent'][1]['managed_stream_outcome'], 'eof')
+            self.assertIn('not a unique failure count', report['limits'])
+            self.assertNotIn('PRIVATE', json.dumps(report))
+            unknown = {**record, 'failure_kind': 'PRIVATE_SECRET', 'read_error': 'PRIVATE_SECRET',
+                       'same_log_match': 'ambiguous'}
+            report = diagnostics.correlate_stream_endings(origin,
+                [{'stream_termination_observations': {'recent_noncompletion': [unknown]}}], since)
+            row, = report['recent']
+            self.assertEqual(row['origin_timing_match'], 'unavailable')
+            self.assertIsNone(row['managed_http_status'])
+            self.assertIsNone(row['managed_failure_kind'])
+            self.assertIsNone(row['managed_read_error'])
+            self.assertNotIn('PRIVATE', json.dumps(report))
+
     def test_stream_observer_categories_are_bounded_private_and_paired_only_within_log(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "proxy.log"

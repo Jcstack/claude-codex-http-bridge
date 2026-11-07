@@ -4,6 +4,9 @@ HarnessLift versions describe this wrapper and documentation, independently of t
 
 ## Unreleased
 
+- Include observer-only stream endings in the read-only cross-layer timing
+  report, even when no separate error log was written. Label the evidence
+  source, omit explicit observer cancellations and preserve ambiguous matches.
 - Extend credential-free POSIX cancellation acceptance to interrupted file
   tools in the same interactive client. Check retained successful results,
   one effect per target and independent work at two byte-identical client

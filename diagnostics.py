@@ -473,10 +473,16 @@ def correlate_stream_endings(origin: Path, backends: list[dict], since: datetime
     """Bound timing comparisons without asserting a cross-layer request identity."""
     failures = []
     for backend in backends:
-        for row in backend.get("recent_stream_failure_http", []):
-            at = timestamp(row.get("at"))
-            if at is not None and at >= since:
-                failures.append((at, row))
+        observations = backend.get("stream_termination_observations", {}).get("recent_noncompletion", [])
+        for source, rows in (("error_log", backend.get("recent_stream_failure_http", [])),
+                             ("stream_observer", observations)):
+            for row in rows:
+                if source == "stream_observer" and (row.get("outcome") not in (
+                        "terminal_event", "incomplete_event", "read_error", "eof") or row.get("read_error") == "cancelled"):
+                    continue
+                at = timestamp(row.get("at"))
+                if at is not None and at >= since:
+                    failures.append((at, row, source))
     failures.sort(key=lambda item: item[0])
     omitted = max(0, len(failures) - 12)
     failures = failures[-12:]
@@ -492,7 +498,7 @@ def correlate_stream_endings(origin: Path, backends: list[dict], since: datetime
             seconds = number(duration(match[3].strip()))
             if seconds is None:
                 continue
-            for index, (failure_at, row) in enumerate(failures):
+            for index, (failure_at, row, _source) in enumerate(failures):
                 managed_seconds = number(row.get("http_seconds"))
                 if (row.get("same_log_match") == "unique" and managed_seconds is not None and
                         abs((at - failure_at).total_seconds()) <= 2 and
@@ -501,18 +507,25 @@ def correlate_stream_endings(origin: Path, backends: list[dict], since: datetime
                         "time_delta_seconds": round((at - failure_at).total_seconds(), 3),
                         "duration_delta_seconds": round(seconds - managed_seconds, 3)})
     result = []
-    for (at, row), matches in zip(failures, candidates):
+    for (at, row, source), matches in zip(failures, candidates):
         managed_seconds = number(row.get("http_seconds"))
         comparable = row.get("same_log_match") == "unique" and managed_seconds is not None
         status = "unavailable" if not comparable else "unique_candidate" if len(matches) == 1 else "ambiguous" if matches else "unmatched"
         detail = matches[0] if status == "unique_candidate" else None
         managed_status = row.get("http_status")
         managed_status = managed_status if type(managed_status) is int and 100 <= managed_status <= 599 else None
-        result.append({"at": at.isoformat(), "managed_http_status": managed_status if comparable else None,
+        outcome, failure, read_error = row.get("outcome"), row.get("failure_kind"), row.get("read_error")
+        result.append({"at": at.isoformat(), "metadata_source": source,
+                       "managed_stream_outcome": outcome if source == "stream_observer" and outcome in (
+                           "terminal_event", "incomplete_event", "read_error", "eof") else None,
+                       "managed_failure_kind": failure if source == "stream_observer" and failure in STREAM_FAILURE_KINDS else None,
+                       "managed_read_error": read_error if source == "stream_observer" and read_error in (
+                           "none", "unexpected_eof", "timeout", "other") else None,
+                       "managed_http_status": managed_status if comparable else None,
                        "managed_http_seconds": managed_seconds if comparable else None,
                        "origin_timing_match": status, "origin_candidate": detail})
     return {"recent": result, "omitted_at_limit": omitted, "origin_scan_coverage": coverage,
-            "limits": "Only timestamp and duration are compared; a unique candidate is not a cross-layer identity, proof of SSE completion, or a root-cause diagnosis. Records may refer to the same failure. Oversized lines and in-flight requests may be absent."}
+            "limits": "Only timestamp and duration are compared; a unique candidate is not a cross-layer identity, proof of SSE completion, or a root-cause diagnosis. Error-log and observer records can describe the same request; these are retained evidence rows, not a unique failure count. Observer cancellations and successful completions are excluded, but an error-log row alone cannot establish cancellation state. Source retention limits, oversized lines and in-flight requests may omit evidence."}
 
 
 def session_summary(path: Path, since: datetime) -> dict:
