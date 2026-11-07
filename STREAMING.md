@@ -148,6 +148,8 @@ and no workspace effect occurs. These cases use fresh homes and no accounts.
 They do not resolve the existing-HOME/installed-path issue or Windows console
 behavior. The [separate POSIX gate](.github/workflows/interactive-retry-cancel.yml)
 checks both mappings, both keys and both cancellation boundaries.
+Its [run](https://github.com/Jcstack/harnesslift/actions/runs/42332780182) passed
+all eight combinations on both Linux and macOS with the selected source profile.
 
 An initial fixture wrongly required the literal UI text `Interrupted`; this
 client can silently restore the input instead. Acceptance now uses connection
@@ -183,7 +185,15 @@ semantics. A fixed outer translator with the old inner translator still loses
 the advice and permits a native retry: the credential owner has already removed
 the headers. Therefore this patch is **not in the selected runtime profile and
 has not been deployed**. Its [three-platform gate](.github/workflows/retry-advice-cancellation.yml)
-retains the old-inner negative control. Safe migration of the original credential
+retains the old-inner negative control. The strengthened
+[run](https://github.com/Jcstack/harnesslift/actions/runs/42331542417) passed on
+macOS, Linux and Windows, including accepted fake caller keys at both hops,
+the repeated-request baseline and native 429/503 wait/veto cases for both mappings.
+Windows cancellation here terminates the owned headless child, not a console key.
+The selected production profile also passed all eleven jobs in the
+[source-and-install run](https://github.com/Jcstack/harnesslift/actions/runs/42331050548).
+That build excludes this retry-advice candidate.
+Safe migration of the original credential
 owner remains necessary; merely building or upgrading an outer backend cannot
 close this gap. This candidate concerns pre-header HTTP refusals, not headers
 added after an HTTP 200 stream has been committed.
@@ -811,7 +821,10 @@ passed with that HOME, and the installed client passed the original focused
 fixture with an empty temporary HOME. A separate minimal pseudoterminal
 control also received SIGINT. These observations narrow the difference to the
 launch environment and path together, not a proven Claude or bridge root
-cause; interactive sessions and Windows console cancellation remain untested.
+cause. That investigation did not cover interactive cancellation. The newer
+[fresh-home terminal fixture](#cancellation-and-server-retry-advice-2026-11-07)
+checks interactive cancellation separately; existing user state and Windows
+console keys remain open boundaries.
 
 The credential-free client fixtures now use a temporary HOME and, on Windows,
 temporary profile and application-data paths. They also retain their separate
