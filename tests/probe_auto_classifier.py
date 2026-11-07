@@ -84,6 +84,16 @@ class Origin(BaseHTTPRequestHandler):
             self.server.tool_result_seen = True
             self.server.tool_result_error |= any(part.get("is_error") is True for part in results)
             self.server.denial_reason_seen |= DENIAL in json.dumps(results)
+            text = json.dumps(results).lower()
+            self.server.tool_error_hints.update(label for label, needles in (
+                ("unknown_tool", ("no such tool", "tool is not available", "unknown tool")),
+                ("missing", ("not found", "no such file", "enoent", "does not exist")),
+                ("permission", ("permission", "denied", "not allowed")),
+                ("validation", ("invalid", "required", "validation")),
+                ("shell", ("bash", "shell", "powershell")),
+                ("syntax", ("syntax", "parse", "unterminated")),
+                ("process", ("spawn", "exit code", "exit status")),
+            ) if any(needle in text for needle in needles))
         if model == REVIEW:
             text = ("<block>no</block>" if self.server.verdict == "allow" else
                     f"<category>Owned fixture policy</category><reason>{DENIAL}</reason><block>yes</block>")
@@ -179,6 +189,7 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Origin)
     server.models, server.verdict, server.responses = [], args.verdict, bool(args.proxy_binary)
     server.tool_result_seen = server.tool_result_error = server.denial_reason_seen = False
+    server.tool_error_hints = set()
     server.server_safeguards_requested = False
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
@@ -188,8 +199,8 @@ def main():
             work = root / "work";work.mkdir()
             config = root / "config";config.mkdir(mode=0o700)
             marker = work / "owned.txt"
-            script = f'from pathlib import Path; p=Path({str(marker)!r}); p.open("a").write("SYNTHETIC\\n")'
-            server.command = shlex.join([sys.executable, "-I", "-S", "-c", script])
+            script = f'from pathlib import Path; p=Path({marker.as_posix()!r}); p.open("a").write("SYNTHETIC\\n")'
+            server.command = shlex.join([Path(sys.executable).as_posix(), "-I", "-S", "-c", script])
             settings = root / "settings.json"
             value = {"modelPicker": {"options": [
                 {"model": MAIN, "label": "Fixture", "behavesAs": "claude-opus-5-5"},
@@ -232,7 +243,8 @@ def main():
             effects = marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
             print(json.dumps({"synthetic_only": True, "native_exit_code": run.returncode,
                 "classifier_requests": reviews, "tool_result_seen": server.tool_result_seen,
-                "tool_result_error": server.tool_result_error, "owned_effect_count": len(effects)}), flush=True)
+                "tool_result_error": server.tool_result_error, "tool_error_hints": sorted(server.tool_error_hints),
+                "owned_effect_count": len(effects)}), flush=True)
             verify(run.returncode == 0, "The native auto-mode client exited with an error")
             try:
                 result = json.loads(run.stdout)
