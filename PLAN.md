@@ -45,6 +45,11 @@ close the broader unattended-recovery acceptance item.
    decoder-setup phases. Its immediate upstream is the older origin; these
    observations do not expose the origin-to-provider phases or establish the
    historical disconnect's cause.
+   Separately evaluate a sanitized request link from the pinned origin's
+   response trace: verify actual mixed-generation/ingress propagation,
+   missing or duplicate headers and truncated-tag ambiguity before use.
+   Keep credential-selection metadata out of logs and do not treat the trace
+   as atomic account binding. The current comparison remains temporal.
 2. The native error-category correction is selected. Complete repeated-failure,
    exhaustion, cancellation and overall-budget acceptance for the harness's
    native retry policy. Keep this separate from
@@ -205,9 +210,10 @@ close the broader unattended-recovery acceptance item.
   blocked write stayed absent until the new user turn, each final write ran
   once and independent requests completed. All four cases also passed at the
   byte-identical installed executable path with an empty temporary HOME.
-  The [POSIX gate](.github/workflows/interactive-retry-cancel.yml) now repeats
-  the tool boundary at two client paths; its revised cross-platform result is
-  pending. Existing-HOME behavior, arbitrary plugins, Windows console keys and
+  The [expanded gate](https://github.com/Jcstack/harnesslift/actions/runs/42340719999)
+  passed all sixteen interactive combinations on each POSIX platform at the
+  tested paths, and four shared headless protocol controls on Windows.
+  Existing-HOME behavior, arbitrary plugins, Windows console keys and
   provider-hosted effects remain open. No active client or service was restarted.
 - [x] Classify recorded incomplete-stream errors using a fixed allowlist. A structured `request_timeout` was observed; its exact source within the origin or farther upstream remains unresolved.
 - [x] Reproduce loss of request scope under the translator's default cooling policy when the exact incomplete-stream sentinel is forwarded through a second translator: a later independent synthetic request receives 503 without reaching its fake origin. A separate candidate preserves scope for the exact sentinel and retains synthetic quota, auth, conflicting-status and unrelated-timeout controls. On a pinned real macOS client, partial and completed synthetic tool cases preserved one write and its continuation. The actual managed backend disables cooling and already admits a follow-up in tests using both the same settings and the actual generated configuration with an owned TLS ingress. The 503 reproduction therefore does not establish a fault in the current managed policy or explain the original disconnect.
@@ -225,14 +231,29 @@ close the broader unattended-recovery acceptance item.
 - [x] Review the current upstream v8.0.58 terminal-response and forced-image fixes against the pinned error path. Neither establishes a fix for the recent interruption; optional hosted tools still block the experimental replay boundary. Record the [source comparison](COMMUNITY_REVIEW.md#stream-investigation-and-upstream-v8058-2026-11-06) and keep the original credential owner in place.
 - [x] Add bounded, privacy-limited comparisons of managed failure completions with nearby origin Responses access records. Synthetic tests cover unique timing candidates, ambiguity, unmatched and unavailable rows, output bounds, private fields, and backward compatibility with the earlier observer format. An installed-dependency overlay and actual read-only command passed locally; the diagnostic file was atomically installed with a private rollback without restarting services. Timing alone does not establish a shared request identity or the missing event's cause.
 - [x] Include observer-only noncompletion records in the local timing comparison
-  candidate. A source review found that a framed `response.failed` could be
+  report. A source review found that a framed `response.failed` could be
   retained by the observer while the separate error-log comparison list stayed
   empty. Synthetic checks now cover that case after healthy controls, exclusion
   of successful completions and explicit observer cancellations, mixed evidence
   sources, ambiguity and privacy. The report labels evidence sources without
   treating rows as unique failures. All 436 offline tests (20 optional skips)
   and 56 checks with installed controller dependencies passed locally.
-  Three-platform acceptance and installation remain pending.
+  The [three-platform metadata gate](https://github.com/Jcstack/harnesslift/actions/runs/42341452562)
+  passed. The read-only file was atomically installed on the active Mac with a
+  private rollback; 56 installed-source checks and the actual diagnostics
+  command passed afterward. Origin/ingress identity, frontend key, selected
+  account, bundle and managed generation remained unchanged. No inference,
+  refresh, account switch or process restart was introduced by this update.
+  All eleven jobs of the implementation revision's
+  [source/install gate](https://github.com/Jcstack/harnesslift/actions/runs/42341411195)
+  subsequently passed. The earlier source run was superseded by this revision;
+  the expanded interactive gate above remains a separate acceptance result.
+  A later read-only review paired retained current-generation noncompletion
+  observations with complete local dispatch/header/decode phases and framed
+  upstream errors. No outer HTTP/decoder or reader error was recorded for those
+  samples. This narrows the observed hop without locating the cause inside the
+  older origin or provider, establishing a final client error or proving native
+  recovery of the same request. Private timing details remain local.
 - [x] Compare the running original binary and pinned source to identify the translator's matching incomplete-stream error marker. This strongly associates the wrapper with the message but does not establish why the terminal event went missing.
 - [x] Test SSE keepalive, cancellation, truncation, and errors before the first byte with a fake upstream, isolated translator, TLS ingress, and real client. Keepalive before the first byte commits HTTP 200 and moves subsequent errors into the stream; the running configuration was not changed.
 - [x] Use a temporary TLS ingress and one short synthetic subscription request to verify keepalive comments and a normal terminal event can reach the client from the current upstream. This does not establish long-stream reliability.

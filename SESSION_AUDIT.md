@@ -194,6 +194,27 @@ the older format cannot provide the newer event-gap fields. An error-log row
 and an observer row can describe the same request, including across layers.
 These are bounded evidence rows, not a count of unique requests or failures;
 the report does not merge records merely because their timestamps match.
+The observer-only comparison's
+[three-platform metadata gate](https://github.com/Jcstack/harnesslift/actions/runs/42341452562)
+passed. A 56-check installed-source overlay passed before the read-only module
+was replaced atomically with a private rollback; the same installed-source
+checks and actual diagnostics command passed afterward. The update preserved
+the original and ingress processes, selected account, client key and managed
+generation. It does not change inference or recovery behavior.
+The implementation revision's
+[source/install gate](https://github.com/Jcstack/harnesslift/actions/runs/42341411195)
+also passed all eleven jobs.
+
+A stricter local-hop link remains a separate investigation. The pinned
+[response-trace formatter](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/logging/cpa_trace.go)
+combines credential-selection metadata with a request UUID, while its
+[request logger](https://github.com/router-for-me/CLIProxyAPI/blob/9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5/internal/logging/gin_logger.go)
+generates a new ID for each logged AI API request. Forwarding an incoming
+request-ID header alone does not establish a shared identity under that
+middleware. Before using any sanitized request part, validate the actual origin and ingress, header
+propagation, absent/duplicate values and truncated log-tag ambiguity. Never
+log the full response trace or use its credential index as atomic account
+binding. The current implementation still compares timestamps and durations.
 
 A 24-hour snapshot ending near 02:46 China time on 2026-11-02 contained 56
 child logs, of which 12 had request model/effort metadata in that window. Those

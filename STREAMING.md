@@ -162,9 +162,12 @@ that would otherwise hide duplicate execution. Local Sol/Sonnet and Astra/Opus
 controls passed with both keys through a selected outer and earlier inner
 translator. All four controls also passed using the byte-identical client at
 the installed executable path, still with an empty temporary HOME. The POSIX
-workflow repeats these cases at the locked and copied executable paths;
-cross-platform acceptance is pending. These are synthetic hook and file-tool
-checks, not provider-hosted action cancellation or resolution of the earlier
+workflow repeats these cases at the locked and copied executable paths. Its
+[expanded run](https://github.com/Jcstack/harnesslift/actions/runs/42340719999)
+passed all sixteen combinations on each POSIX platform, including the earlier
+stream/backoff cases. A Windows job passed four shared headless parallel-tool
+protocol controls; it does not test Windows console keys. These are synthetic
+hook and file-tool checks, not provider-hosted action cancellation or resolution of the earlier
 existing-HOME/installed-path timeout. No running client, setting or retry
 budget is changed by these fixtures.
 
@@ -292,6 +295,17 @@ no phase refusal/error, noncompletion or parsing gap was observed in that bounde
 postcheck. It verifies the healthy route and instrumentation, not recovery from
 an induced real provider failure. The new explicit diagnostic window expires
 after 24 hours. The paid Project API and experimental gateway replay remain off.
+
+A later read-only review of retained current-generation noncompletion records
+found complete local dispatch/header/decode phases followed by framed upstream
+`response.failed` events reporting incomplete streams. The outer HTTP call and
+decoder reported no error, and the outer reader recorded `read_error=none`.
+These samples locate the observed error at the upstream event boundary; they
+do not establish what happened inside the older credential owner or provider.
+The scanned session records did not establish a corresponding final client
+error or recovery of the same request. Actual timing and request-link details
+remain in the private audit. The physical cause and unattended-recovery gate
+remain open.
 
 ### Forwarded incomplete-stream failures
 
